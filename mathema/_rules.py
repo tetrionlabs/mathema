@@ -12,8 +12,7 @@ value  what it changed
 =====  ==========================================================
 0      the fingerprint before the rules number existed
 1      canonical statement text: each string literal respelled from
-       its value, a negated relation in its parentheses, and a
-       domain set's string member read with its escapes decoded
+       its value, and a negated relation in its parentheses
 =====  ==========================================================
 """
 from __future__ import annotations

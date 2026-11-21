@@ -43,9 +43,9 @@ def _kinds(authored: str, row: dict, lineage: "dict | None" = None) -> list:
     return [(x["kind"], x.get("moved")) for x in claim_conflicts(measure, entry, verified)]
 
 
-#: a row written by a release that read `"\t"` in a domain set as a
-#: backslash and a t: the stored text is the text written, the
-#: recorded domain holds the two characters
+#: a row whose domain set holds `"\t"`, read as a backslash and a t:
+#: the stored text is the text written, the recorded domain holds the
+#: two characters
 _OLD_ESCAPES_ROW = {"statement": 'for s in {"\\t"}, f(s) >= 0',
                     "domain": {"s": {"set": ["\\t"]}}}
 
@@ -60,9 +60,8 @@ def test_an_edit_to_a_claim_whose_domain_has_an_escape_is_a_supersession(edited)
     assert _kinds(edited, _OLD_ESCAPES_ROW) == [("supersession", None)]
 
 
-def test_the_same_claim_under_the_old_escape_reading_is_a_release_move():
-    assert _kinds('for s in {"\\t"}, f(s) >= 0', _OLD_ESCAPES_ROW) \
-        == [("release-move", ("domain-escapes",))]
+def test_the_same_claim_with_an_escape_in_its_domain_is_unchanged():
+    assert _kinds('for s in {"\\t"}, f(s) >= 0', _OLD_ESCAPES_ROW) == []
 
 
 @pytest.mark.parametrize("written, edited", [

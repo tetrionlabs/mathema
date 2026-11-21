@@ -6,7 +6,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Upgrading from 0.6.6.1
 - Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 1 in this release: canonical statement text). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. `claims_fingerprint` itself, the claim identity, is unchanged.
-- The stored statement text of a string literal is written from its value, a negated relation keeps its parentheses, and a domain set's string member reads its escapes as an expression does (`{"\t"}` is a tab). A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
+- The stored statement text of a string literal is written from its value, and a negated relation keeps its parentheses. A domain set's string member is still read as the text between its quotes (`{"\t"}` is a backslash and a t); when that differs from the same text read as an expression literal, `mathema verify` says so in a note. A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
 - `lineage.statement_text` is no longer written.
 
 ### Fixes

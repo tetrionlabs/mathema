@@ -1916,9 +1916,6 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # per key, the claims whose record row stores a statement that does
     # not parse: each is adjudicated again and its row rewritten
     stale_rows: dict = {}
-    # per key, the claims recorded when a domain value's escapes were read
-    # as their characters undecoded: each is adjudicated again
-    escapes_moved: dict = {}
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -2097,7 +2094,6 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         quoting_moved[:] = [m for m in quoting_moved if m[0] != key]
         negation_moved[:] = [m for m in negation_moved if m[0] != key]
         stale_rows.pop(key, None)
-        escapes_moved.pop(key, None)
         unchecked_rows.pop(key, None)
         ambiguous_rows.pop(key, None)
 
@@ -2232,10 +2228,6 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                 for conflict in _conflicts:
                     if conflict.get("kind") == "release-move":
                         moves = conflict.get("moved") or ()
-                        if "domain-escapes" in moves:
-                            escapes_moved.setdefault(key, []).append(conflict["claim"])
-                            out.lines.append(domain_escapes_note(
-                                key, conflict["claim"], conflict.get("escapes")))
                         if "literal-quoting" in moves:
                             quoting_moved.append((key, conflict["claim"]))
                         if "not-parentheses" in moves:
@@ -2247,8 +2239,6 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         ambiguous_rows.setdefault(key, {})[conflict["claim"]] = {
                             "statement": conflict.get("verified"),
                             "verdict": conflict.get("verdict")}
-                        if "domain-escapes" in (conflict.get("moved") or ()):
-                            escapes_moved.setdefault(key, []).append(conflict["claim"])
                         out.lines.append(ambiguous_text_note(key, conflict))
                         continue
                     if conflict.get("kind") == "canonical-text-defect":
@@ -2285,6 +2275,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                                  _conflicts, (declared_info or {}).get("source"))
                 retired_notes = now["retired_notes"]
                 out.lines.extend(retired_notes)
+                out.lines.extend(domain_escape_notes(key, now["claims"]))
                 retired_noted = {ln.split("'")[1] for ln in retired_notes}
                 entry_grammar = now["grammar"]
                 current_claims = now["claims"]
@@ -2432,7 +2423,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         and recorded_fp == current_fp and not defaults_moved
                         and version_moved is None and body_moved is None
                         and not pinf_moved and not definitions_moved
-                        and not stale_rows.get(key) and not escapes_moved.get(key)
+                        and not stale_rows.get(key)
                         and (premise_now == (recorded_premises or {})
                              if premise_now or recorded_premises else True))
             deps_now = function_dependencies(fn, facts_now) if is_fresh else None
@@ -2573,9 +2564,6 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else "forced (--all)" if all and is_fresh
                    else "targeted re-verify" if only and is_fresh
                    else "no baseline record" if not recorded_form
-                   else "domain escapes now decoded" if escapes_moved.get(key)
-                   and same_form(facts_now.form, recorded_form)
-                   and recorded_fp == current_fp
                    else "stored text unreadable" if stale_rows.get(key)
                    and same_form(facts_now.form, recorded_form)
                    and recorded_fp == current_fp
@@ -2993,24 +2981,67 @@ def _value_in_words(value: str) -> str:
     return ", ".join(parts) if parts else "the empty string"
 
 
-def domain_escapes_note(key: str, claim_name: str,
-                        escapes: "list | None") -> str:
+def _expression_reading(text: str) -> "str | None":
     """Intent:
-        The note for a claim of `key` whose record an earlier release
-        wrote reading a domain value's backslash escapes as their
-        characters undecoded. `escapes` holds `(written, value now)`
-        pairs, each shown with the characters the value now holds
-        named; with none, the note names no value.
+        The value the text between a domain value's quotes, `text`, has
+        as a Python string literal (its backslash escapes decoded), or
+        None when no quoting of it reads as one.
     """
-    read_now = ", ".join(f"{written} now reads as {_value_in_words(value)}"
-                         for written, value in escapes or ())
-    shown = f" ({read_now})" if read_now else ""
+    import ast
+    for quote in ('"', "'"):
+        try:
+            value = ast.literal_eval(f"{quote}{text}{quote}")
+        except (ValueError, SyntaxError):
+            continue
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def domain_escape_notes(key: str, claims: list) -> list:
+    """Intent:
+        One note per string member of a domain set in `claims` (claim
+        dicts of `key`) that holds a backslash: the member is read as
+        the text between its quotes, written, and the note says how
+        that differs from the same text read as an expression literal.
+        A member that reads the same both ways gets no note.
+    """
+    from .spec import _declared_conjecture
+    from .sync import _set_strings
+    out = []
+    for c in claims:
+        statement = c.get("statement") or c.get("law") or ""
+        if "\\" not in statement:
+            continue
+        try:
+            members = _set_strings(_declared_conjecture(c).domain)
+        except Exception:
+            continue
+        for value in sorted({v for vs in members.values() for v in vs
+                             if "\\" in v}):
+            expression = _expression_reading(value)
+            if expression == value:
+                continue
+            out.append(domain_escape_note(key, c.get("name") or statement,
+                                          value, expression))
+    return out
+
+
+def domain_escape_note(key: str, claim_name: str, written: str,
+                       expression: "str | None") -> str:
+    """Intent:
+        The note for a domain set member of claim `claim_name` whose
+        text `written` holds a backslash: it is read as written, and as
+        an expression literal the same text reads as `expression` (None
+        when it does not read as one).
+    """
+    other = (f"as an expression literal the same text reads as "
+             f"{_value_in_words(expression)}" if expression is not None else
+             "the same text does not read as an expression literal")
     # :draft
-    return (f"note {key}: claim {claim_name!r}: a backslash escape in a "
-            f"domain value is now read as the character it names, as in an "
-            f"expression{shown}; to mean the backslash itself, write it "
-            f"doubled (\"\\\\t\" is a backslash and a t); the claim is "
-            f"checked again on the values it now names")
+    return (f"note {key}: claim {claim_name!r}: the domain value "
+            f"\"{written}\" is read as written, {_value_in_words(written)}; "
+            f"{other}")
 
 
 def quoting_moved_note(count: int) -> str:

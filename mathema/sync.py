@@ -224,11 +224,9 @@ def _legacy_renderings() -> dict:
         `{move name: context manager}` for each earlier rendering of
         stored claim text this release can reproduce.
     """
-    from ._scan import (legacy_domain_escapes, legacy_not_parentheses,
-                        legacy_quoting)
+    from ._scan import legacy_not_parentheses, legacy_quoting
     return {"literal-quoting": legacy_quoting,
-            "not-parentheses": legacy_not_parentheses,
-            "domain-escapes": legacy_domain_escapes}
+            "not-parentheses": legacy_not_parentheses}
 
 
 def _set_strings(domain: dict) -> dict:
@@ -250,22 +248,6 @@ def _set_strings(domain: dict) -> dict:
     return out
 
 
-def _recorded_set_strings(row: dict) -> "dict | None":
-    """Intent:
-        `_set_strings` of a verified row's recorded `domain`, or None
-        when the row records no domain or one that does not read.
-    """
-    from .grammar import domain_bound_from_json
-    domain = row.get("domain")
-    if not isinstance(domain, dict):
-        return None
-    try:
-        return _set_strings({n: domain_bound_from_json(b)
-                             for n, b in domain.items()})
-    except Exception:
-        return None
-
-
 def _renders_as(cj, statement: str, names: tuple) -> "tuple | None":
     """Intent:
         The smallest set of the earlier renderings `names` (none at
@@ -285,61 +267,6 @@ def _renders_as(cj, statement: str, names: tuple) -> "tuple | None":
                 if canonical_claim_text(cj) == statement:
                     return chosen
     return None
-
-
-def _domain_escapes_move(c: dict, row: dict, fn=None) -> "tuple | None":
-    """Intent:
-        `(pairs, others)`: the domain values whose reading changed, as
-        `(written, value now)` pairs, and the other earlier renderings
-        (by move name) the row's statement was written under, when the
-        verified `row` records the authored claim
-        `c` as releases up to 0.6.6.1 read it: `c` has a domain set
-        string member whose backslash escape those releases read as its
-        characters undecoded, the row's statement is `c`'s text under
-        that reading (with any other earlier rendering of the text), and
-        the row's recorded `domain` does not hold the values read now
-        (it holds the old values, or is absent or does not read). None
-        otherwise, so any other difference between `c` and the row is
-        left to the supersession check. `written` is the member as the
-        author wrote it. The caller applies this only to a row of a
-        record written under an earlier rules number.
-    """
-    from ._annotation_text import complex_parameters
-    from ._scan import legacy_domain_escapes
-    from .domain import _string_member
-    from .grammar import complex_in_view
-    from .spec import _declared_conjecture
-    statement = c.get("statement") or c.get("law") or ""
-    stored = row.get("statement") or ""
-    if "\\" not in statement or not stored:
-        return None
-    try:
-        with complex_in_view(complex_parameters(fn) if fn is not None else ()):
-            now = _set_strings(_declared_conjecture(c).domain)
-            with legacy_domain_escapes():
-                old = _completed(_declared_conjecture(c), fn)
-                before = _set_strings(old.domain)
-                if now == before:
-                    return None
-                others = _renders_as(old, stored, ("literal-quoting",
-                                                   "not-parentheses"))
-                if others is None:
-                    return None
-    except Exception:
-        return None
-    changed = [n for n in before if before[n] != now.get(n)]
-    recorded = _recorded_set_strings(row)
-    if recorded is not None and all(recorded.get(n) == now.get(n) for n in changed):
-        return None
-    pairs = []
-    for name in sorted(before):
-        for value in sorted(set(before[name]) - set(now.get(name) or [])):
-            written = f'"{value}"'
-            try:
-                pairs.append((written, _string_member(written)))
-            except ValueError:
-                continue
-    return (pairs, tuple(others)) if pairs else None
 
 
 def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
@@ -386,7 +313,7 @@ def _other_reading(c: dict, row: dict, fn=None) -> "str | None":
 
 
 def _ambiguous(name: str, surface: str, c: dict, row: dict, reads_as: str,
-               moved: tuple, escapes: "list | None" = None) -> dict:
+               moved: tuple) -> dict:
     """Intent:
         The `ambiguous-text` conflict for claim `name`: the verified
         `row`'s stored statement is the text an earlier release wrote
@@ -398,7 +325,7 @@ def _ambiguous(name: str, surface: str, c: dict, row: dict, reads_as: str,
     return {"kind": "ambiguous-text", "claim": name, "surface": surface,
             "authored": _display_claim(c), "verified": row.get("statement"),
             "reads_as": reads_as, "verdict": row.get("verdict"),
-            "moved": moved, "escapes": escapes}
+            "moved": moved}
 
 
 def _checked_differently(c: dict, row: dict) -> bool:
@@ -467,10 +394,10 @@ def claim_conflicts(fn, file_entry: dict,
           compared; the claim is not adjudicated and its row is left as
           it was.
         - kind "release-move": the verified row was written by an
-          earlier release and records the authored claim in the text,
-          or with the domain reading, that release wrote; the claim is
-          adjudicated as written, with no supersession. A move of
-          literal quoting, negation parentheses or domain escapes is
+          earlier release and records the authored claim in the text
+          that release wrote; the claim is adjudicated as written, with
+          no supersession. A move of literal quoting or negation
+          parentheses is
           recognised only in a record written under an earlier rules
           number (`spec.written_under_earlier_rules`).
         - kind "ambiguous-text": the verified row's stored text is
@@ -526,25 +453,6 @@ def claim_conflicts(fn, file_entry: dict,
                 # a claim skipped as another grammar's established
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
-                continue
-            escapes = _domain_escapes_move(c, v, fn) if earlier else None
-            if escapes and not _checked_differently(c, v):
-                # the row records the values an earlier release read for
-                # this claim's domain: adjudicated on the values it names
-                seen.add((name, "supersession"))
-                other = (_other_reading(c, v, fn)
-                         if "literal-quoting" in escapes[1] else None)
-                if other is not None:
-                    out.append(_ambiguous(name, surface, c, v, other,
-                                          ("domain-escapes",) + escapes[1],
-                                          escapes[0]))
-                    continue
-                out.append({"kind": "release-move", "claim": name,
-                            "moved": ("domain-escapes",) + escapes[1],
-                            "escapes": escapes[0],
-                            "surface": surface,
-                            "authored": _display_claim(c),
-                            "verified": v.get("statement")})
                 continue
             moved = _legacy_move(c, v, fn) if earlier else None
             if moved and not _checked_differently(c, v):
