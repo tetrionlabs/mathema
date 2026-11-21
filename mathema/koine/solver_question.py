@@ -171,10 +171,11 @@ def _texts_in(value, into: list) -> None:
 class _Reading:
     """Several documents read as formulas over one value.
 
-    The documents are read twice. The first reading makes a place for
-    every key any document names; the second builds the formulas, so
-    that "no key other than these" denies every other key a document
-    names at that place, whichever document names it."""
+    "No key other than these" denies every other key any document
+    names at that place, whichever document names it, and the keys are
+    all known only once every document is read. So each such term is
+    read as a truth variable of its own, and `shape` states what the
+    variable is equal to over the keys known by then."""
 
     def __init__(self, z3, documents: list, values: "list | tuple" = ()) -> None:
         self.z3 = z3
@@ -186,10 +187,13 @@ class _Reading:
             _texts_in(value, texts)
         self.texts = _TEXT_LOWERING(z3, _EVERY_CODE_POINT, texts)
         self.root = _Place(z3, "value")
-        self.truths: list = []
-        for _ in range(2):
-            self.truths = [self._truth(expression, parameter)
-                           for parameter, expression in bodies]
+        #: each "no key other than" read: its variable, place and names
+        self._closed: list = []
+        #: what each term object was read as, kept with the term, so
+        #: that a term standing in several places is read once
+        self._seen: dict = {}
+        self.truths = [self._truth(expression, parameter)
+                       for parameter, expression in bodies]
 
     def shape(self) -> list:
         """What every variable must satisfy to stand for a value: a
@@ -200,11 +204,23 @@ class _Reading:
             out.append(z3.And(place.kind >= 0, place.kind < len(_KINDS)))
             out.append(z3.InRe(place.text, self.texts.everything))
             out.append(z3.Implies(place.is_("kind::int"), place.whole))
+        for variable, place, listed in self._closed:
+            others = [z3.Not(is_set) for name, (is_set, _) in sorted(place.keys.items())
+                      if name not in listed]
+            out.append(variable == z3.And(z3.Not(place.other_key), *others))
         return out
 
     # ---- one rule for each term ---------------------------------------
 
     def _read(self, node, parameter: str):
+        seen = self._seen.get(id(node))
+        if seen is not None and seen[0] is node and seen[1] == parameter:
+            return seen[2]
+        read = self._read_once(node, parameter)
+        self._seen[id(node)] = (node, parameter, read)
+        return read
+
+    def _read_once(self, node, parameter: str):
         z3 = self.z3
         if isinstance(node, Bool):
             return _Truth(z3.BoolVal(node.value), z3.BoolVal(True))
@@ -238,12 +254,12 @@ class _Reading:
             m = self._operand(args[0], parameter)
             defined = z3.And(m.defined, z3.Not(m.unset), m.place.is_("kind::dict"))
             if head == T.HAS_NO_KEY_OTHER_THAN:
-                listed = {x.value for x in args[1].items}
+                listed = frozenset(x.value for x in args[1].items)
                 for name in sorted(listed):
                     m.place.key(name)
-                others = [z3.Not(is_set) for name, (is_set, _) in sorted(m.place.keys.items())
-                          if name not in listed]
-                return _Truth(z3.And(z3.Not(m.place.other_key), *others), defined)
+                variable = z3.Bool(f"{m.place.path} no key other than {len(self._closed)}")
+                self._closed.append((variable, m.place, listed))
+                return _Truth(variable, defined)
             is_set, inner = m.place.key(args[1].value)
             if head == T.HAS_KEY:
                 return _Truth(is_set, defined)
