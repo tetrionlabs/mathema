@@ -2,6 +2,16 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## Unreleased
+
+### Fixes
+- A `raises(f(x), E)` claim is proven only when nothing Python runs on the way to the `raise` can raise something else first: every statement, branch test, default of a lambda built there, argument, cause and the exception's own constructor. Bounds on numbers round outward, so a value next to the largest float is not read as fitting.
+- A `raises(...)` claim over a finite set that lists a missing value (`{-1, nan}`, `{-1, None}`) is not proven by derive; the set is swept point by point, the missing values included.
+- Derive reads a `raises(...)` claim only at a call that passes the function's parameters by name, in order (`f(x, y)`); a claim at any other call (`f(-x)`, `f(1)`, `f(y, x)`) is decided by running it.
+- Derive reads nothing of a generator, coroutine or async generator function, and reads a decorated function only when the name is bound to the function itself or to a wrapper whose call is read (`functools.lru_cache`, `functools.cache`, `staticmethod`, mathema's own guards, an instance whose `__call__` hands its arguments to the wrapped function with the default attribute lookup). Any other wrapper is named in the reason.
+- A missing-value policy is proven from a guard only when the path to the guard's raise is read, the guard's test is a real missing-value test, and calling the function runs the body the guard is in.
+- `"{²}".format(x)` in a raise message no longer stops `check_conjectures`.
+
 ## 0.6.6.1
 
 ### Upgrading from 0.6.6

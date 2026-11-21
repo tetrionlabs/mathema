@@ -387,6 +387,37 @@ def _exception_type(name: str, scope: "dict | None" = None):
     return found if isinstance(found, type) and issubclass(found, BaseException) else None
 
 
+def guard_is_read(guard) -> bool:
+    """Intent:
+        Whether a guard proves what it says: any guard that does not raise, and
+        a raising one whose path was read as raising its class.
+    """
+    return guard is not None and (guard[0] != "raises"
+                                  or (len(guard) > 3 and guard[3] is not None))
+
+
+def _guard_raises_the_claimed(guard, expected: "str | None", fn) -> bool:
+    """Intent:
+        Whether a guard's behaviour meets a stated `raises(...)`: the guard's
+        path was read as raising one class (`guard_is_read`), and when the
+        statement names a class, the class the guard raises is the claimed
+        class or a subclass of it, compared as classes.
+    """
+    if guard[0] != "raises":
+        return True
+    cls = guard[3] if len(guard) > 3 else None
+    if cls is None:
+        return False
+    if expected is None:
+        return True
+    from .conjecture import _resolve_exception_type
+    try:
+        claimed = _resolve_exception_type(expected, fn)
+    except Exception:
+        claimed = None
+    return claimed is not None and issubclass(cls, claimed)
+
+
 def _raised_matches(raised: "str | None", expected: "str | None") -> bool:
     """Whether an exception name is the one a `raises(...)` names, or a
     subclass of it, as the long form `raises(f(x), E)` reads it."""
@@ -990,7 +1021,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         members = [stated.member] if stated.member else _members_of(fn, p, stated.kind)
         found_guards = [_guard_for(derived or {}, fn, p, stated.kind, m) for m in members]
         if found_guards and all(g and g[0] == stated.behaviour
-                                and _raised_matches(g[1], stated.exception)
+                                and _guard_raises_the_claimed(g, stated.exception, fn)
                                 for g in found_guards) \
                 and _guard_raised_it(fn, found_guards[0], calls):
             guard = found_guards[0]
@@ -1203,7 +1234,118 @@ def _any_hole_check(node, params) -> "str | None":
     return None
 
 
-def guard_policies(facts) -> dict:
+def _hole_kind(fn, param: str, kind: str, member: "str | None"):
+    """Intent:
+        The kind of the value a parameter holds at the hole a policy
+        names: None for an absence, a float for `nan`, any object for
+        anything else.
+    """
+    from ._raise_reading import ANY, ValueKind
+    if kind == "absent":
+        return ValueKind(frozenset({type(None)}))
+    members = [member] if member else (_members_of(fn, param, kind) if fn else [])
+    if members and set(members) <= {"nan"}:
+        return ValueKind(frozenset({float}))
+    return ANY
+
+
+def _true_at_hole(test, param: str, kind: str, member: "str | None", fn=None) -> bool:  # :draft
+    """Intent:
+        Whether a guard's test is true when `param` holds the hole the
+        policy names: `param is None` (or `== None`) at an absence,
+        `param != param`, `isnan(param)` at `nan`, `isna(param)` or
+        `isnull(param)` at either, or an `or` with such a part. A call
+        counts only when its callee resolves, where `fn` is defined, to
+        `math.isnan` or `numpy.isnan`, or to `pandas.isna` or
+        `pandas.isnull`, whatever name it is called by.
+    """
+    import ast
+    at_nan = kind == "missing" and member in (None, "nan")
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or):
+        return any(_true_at_hole(v, param, kind, member, fn) for v in test.values)
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 \
+            and isinstance(test.left, ast.Name) and test.left.id == param:
+        op, right = test.ops[0], test.comparators[0]
+        if isinstance(op, (ast.Is, ast.Eq)) and isinstance(right, ast.Constant) \
+                and right.value is None:
+            return kind == "absent"
+        if isinstance(op, ast.NotEq) and isinstance(right, ast.Name) and right.id == param:
+            return at_nan
+        return False
+    if isinstance(test, ast.Call) and len(test.args) == 1 and not test.keywords \
+            and isinstance(test.args[0], ast.Name) and test.args[0].id == param:
+        if fn is None:
+            return False
+        import math
+        import sys
+        from ._raise_reading import _Namespace
+        called = _Namespace(fn).resolve(test.func)
+        numpy, pandas = sys.modules.get("numpy"), sys.modules.get("pandas")
+        if called is math.isnan or (numpy is not None
+                                    and called is getattr(numpy, "isnan", None)):
+            return at_nan
+        if pandas is not None and any(called is getattr(pandas, name, None)
+                                      for name in ("isna", "isnull")):
+            return kind == "absent" or at_nan
+    return False
+
+
+def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
+                 member: "str | None"):
+    """Intent:
+        The `ReadRaise` for a guard `node` whose body raises at
+        `raise_stmt`, reached with `param` at the hole the policy names
+        and the other parameters any value, or None when the path from
+        the function's entry is not read as raising exactly one class
+        there: the guard must be a statement of the function's own body
+        whose test is true at the hole, every statement before it, its
+        test and every statement before the raise must be unable to
+        fail (`read_raise_path`), and an earlier guard that may be taken
+        must itself raise a subclass of the class this one raises. None
+        too when calling `fn` does not run that body: a wrapper whose call
+        is not read, or a generator or coroutine function
+        (`suspended_call_refusal`).
+    """
+    from .symbolic._base import innermost, strip_docstring
+    from ._raise_reading import ANY, ReadRaise, read_raise_path
+    import ast
+    if fn is None or not _true_at_hole(node.test, param, kind, member, innermost(fn)):
+        return None
+    from .symbolic._prove import suspended_call_refusal
+    if suspended_call_refusal(fn) is not None:
+        return None
+    body_fn = innermost(fn)
+    body = strip_docstring(tree.body)
+    if not any(stmt is node for stmt in body):
+        return None
+    kinds = {q: ANY for q in facts.params}
+    kinds[param] = _hole_kind(fn, param, kind, member)
+    steps: list = []
+    earlier: list = []
+    for stmt in body:
+        if stmt is node:
+            break
+        if isinstance(stmt, ast.If) and not stmt.orelse and len(stmt.body) == 1 \
+                and isinstance(stmt.body[0], ast.Raise):
+            taken = read_raise_path(body_fn, steps + [("test", stmt.test)], stmt.body[0], kinds)
+            if not isinstance(taken, ReadRaise):
+                return None
+            earlier.append(taken.cls)
+            steps.append(("test", stmt.test))
+            continue
+        steps.append(("stmt", stmt))
+    steps.append(("test", node.test))
+    for stmt in node.body:
+        if stmt is raise_stmt:
+            break
+        steps.append(("stmt", stmt))
+    read = read_raise_path(body_fn, steps, raise_stmt, kinds)
+    if not isinstance(read, ReadRaise) or not all(issubclass(c, read.cls) for c in earlier):
+        return None
+    return read
+
+
+def guard_policies(facts, fn=None) -> dict:
     """Intent:
         The policy each guard in the body states, `{(param, kind, member):
         (behaviour, exception, line)}`, member None for the whole class:
@@ -1219,6 +1361,12 @@ def guard_policies(facts) -> dict:
         other return drops. A raising check on each entry of a sequence
         parameter (`for v in xs: if isnan(v): raise`, `if any(isnan(v)
         for v in xs): raise`) states the policy for the holes in it.
+        A raising guard's entry is `("raises", name, line, cls)`: `cls`
+        the class raised when the path from the entry of `fn` (the live
+        function `facts` describes) to the `raise` is read as raising
+        exactly that class (`_guard_raise`), else None, which marks the
+        raise deliberate without proving it; with no `fn`, no raise is
+        read.
     """
     import ast
     tree = getattr(facts, "tree", None)
@@ -1348,6 +1496,15 @@ def guard_policies(facts) -> dict:
         for p, kind, member in keys:
             back = returned(node.body, p)
             if raise_stmt is not None:
+                # the class is kept only when the path from the
+                # function's entry to the raise is read as raising
+                # exactly that class; an unread guard still says the
+                # raise is deliberate, and proves nothing
+                read = _guard_raise(fn, facts, tree, node, raise_stmt, p, kind, member)
+                if read is not None:
+                    out.setdefault((p, kind, member),
+                                   ("raises", read.cls.__name__, node.lineno, read.cls))
+                    continue
                 exc = raise_stmt.exc
                 name = None
                 if isinstance(exc, ast.Call):
@@ -1356,7 +1513,7 @@ def guard_policies(facts) -> dict:
                     name = exc.id
                 elif isinstance(exc, ast.Attribute):
                     name = exc.attr
-                out.setdefault((p, kind, member), ("raises", name, node.lineno))
+                out.setdefault((p, kind, member), ("raises", name, node.lineno, None))
             elif back is not None:
                 if back == "itself":
                     # what came in goes back out
@@ -1459,7 +1616,7 @@ def default_rows(fn, facts, domain: dict, covered: set, name_of,
     from .types import missing_policy_from_signature
     current = active_batch()
     signature = missing_policy_from_signature(fn)
-    guards = guard_policies(facts)
+    guards = guard_policies(facts, fn)
     composed = composed_policies(fn, facts)
     rows = []
     for p in facts.params:
@@ -1708,6 +1865,11 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
     accepted = policy_text(replace(policy, behaviour=behaviour, exception=exception))
     if guard is not None and guard[0] == behaviour \
             and _guard_raised_it(fn, guard, calls):
+        if not guard_is_read(guard):
+            return row("holds", behaviour, exception, "derived",
+                       # :draft
+                       f"from the guard on line {guard[2]}, whose path to its raise "
+                       f"is not read; {evidence}")
         return row("proven", behaviour, exception, "derived",
                    f"from the guard on line {guard[2]}; {evidence}", route="examine")
     if origin == "type":
@@ -2748,6 +2910,8 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     witness = witness or _witness(call)
                     continue
                 said.append(f"{m} {did}, from the guard on line {guard[2]}")
+                if not guard_is_read(guard) and weakest == "proven":
+                    weakest = "holds"
                 continue
             if library_here:
                 if all(_follows(pol, c) for pol in library_here for c in calls):

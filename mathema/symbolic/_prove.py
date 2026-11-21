@@ -3329,6 +3329,9 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     false wherever the code raises. `~=` is decided as `abs(lhs - rhs)
     <= ε` (see `_try_prove_within_epsilon`), or, under a tolerance kind,
     as the bound the kind states (`_try_prove_within_kind`)."""
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        return ProofResult("unliftable", sketch=suspended)
     from .._tolerance import ToleranceKind, bare
     if isinstance(tolerance, ToleranceKind):
         if relation != "~=":
@@ -4744,15 +4747,62 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
 
 
+def suspended_call_refusal(fn) -> "str | None":
+    """Intent:
+        Why derive reads nothing of `fn`: it is a wrapper whose call is
+        not read (`wrapper_refusal`), or calling it returns a generator
+        or coroutine object in place of running its body
+        (`call_suspends`). None when the call runs the body derive
+        reads.
+    """
+    from ._base import call_suspends, innermost, wrapper_refusal
+    wrapped = wrapper_refusal(fn)
+    if wrapped is not None:
+        return wrapped
+    kind = call_suspends(innermost(fn))
+    if kind is None:
+        return None
+    # :draft
+    return (f"calling the function returns {kind} object, which runs none of the "
+            f"body until it is iterated or awaited, so the body is not what the "
+            f"call does")
+
+
+def _listed_missing(domain: dict) -> list:
+    """Intent:
+        `x = nan` for each missing value a parameter's finite set lists
+        (a sentinel member, or the absence the set admits), in parameter
+        order; empty when no finite set lists one. A missing value a
+        type clause admits beside an interval (`[-5, -1] : float|nan`)
+        is the type's, governed by the missing-value policies, and is
+        not listed.
+    """
+    from ..domain import ABSENT, Domain, _as_domain, _is_enumerated, _set_sentinels
+    out = []
+    for param, bound in domain.items():
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            continue
+        if not _is_enumerated(dom):
+            continue
+        found = [str(s) for s in _set_sentinels(dom)]
+        if isinstance(dom, Domain) and dom.absent and ABSENT not in _set_sentinels(dom):
+            found.append(str(ABSENT))
+        out += [f"{param} = {s}" for s in found]
+    return out
+
+
 def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
                      domain: dict | None = None, max_callee_depth: int = 3) -> ProofResult:
     """A raises(...) claim on the derive route, only ever reachable via
     domain-conditioned branch pruning: a raises claim with no declared
     domain specific enough to determine which branch runs stays
     unliftable, the same as any other derive claim would with an
-    unresolvable branch. `call_src` must be a bare `f(...)` call (no
-    multi-function claims here, same restriction check_conjectures()
-    already applies before this is ever called). `max_callee_depth` is
+    unresolvable branch. `call_src` must be `f(p1, p2, ...)`, the
+    function's parameters by name in order with no keywords: the domain
+    is bound to the parameters, so any other argument is not the call
+    the claim states. `max_callee_depth` is
     forwarded to lift_conditioned(), see lift()'s own docstring."""
     try:
         tree = ast.parse(call_src, mode="eval")
@@ -4761,6 +4811,25 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
+    call = tree.body
+    if call.keywords or [a.id if isinstance(a, ast.Name) else None  # :draft
+                         for a in call.args] != list(facts.params):
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"derive reads raises(...) only at f({', '.join(facts.params)}), each "
+            f"parameter passed by its own name in order, and the call written is "
+            f"{call_src}"))
+
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        return ProofResult("unliftable", sketch=suspended)
+
+    listed = _listed_missing(domain or {})
+    if listed:
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"the domain lists the missing value{'s' if len(listed) > 1 else ''} "
+            f"{', '.join(listed)}, and derive reads only the real points of a domain"))
 
     if facts.tree is not None and not any(isinstance(n, ast.Raise) for n in ast.walk(facts.tree)):
         return ProofResult("unliftable", sketch="no explicit raise statement "
@@ -4783,11 +4852,38 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if conditioned.kind == "value":
         return ProofResult("disproven", sketch="the function returns a value "
                            "under this domain rather than raising")
-    if exc_name is None or conditioned.exc_type == exc_name:
-        return ProofResult("proven", sketch=f"raises {conditioned.exc_type or '(unknown type)'} "
-                           "under this domain")
-    if conditioned.exc_type is None:
+    cls = getattr(conditioned, "exc_class", None)
+    why = getattr(conditioned, "exc_unread", None)
+    if exc_name is None:
+        if cls is not None and issubclass(cls, (Exception, SystemExit)):
+            return ProofResult("proven", sketch=f"raises {cls.__name__} under this domain")  # :draft
+        if cls is None and getattr(conditioned, "exc_halts", False):
+            # :draft
+            return ProofResult("proven", sketch=f"raises under this domain: the path ends "
+                               f"in an exception whichever is raised first ({why})")
+        if cls is not None:
+            # :draft
+            return ProofResult("undecided", sketch=f"raises {cls.__name__} under this "
+                               f"domain, which is not an ordinary exception")
+        # :draft
+        return ProofResult("undecided", sketch=f"reaches a raise under this domain, but "
+                           f"the path to it is not shown to finish: {why}")
+    if cls is None:
+        # :draft
         return ProofResult("undecided", sketch="raises under this domain, but the "
-                           "exception type couldn't be determined")
-    return ProofResult("disproven", sketch=f"raises {conditioned.exc_type}, "
+                           "exception type couldn't be determined"
+                           + (f": {why}" if why else ""))
+    from ..conjecture import _resolve_exception_type
+    try:
+        claimed = _resolve_exception_type(exc_name, fn)
+    except Exception:
+        claimed = None
+    if claimed is None:
+        # :draft
+        return ProofResult("undecided", sketch=f"raises {cls.__name__} under this domain, "
+                           f"but `{exc_name}` does not resolve to an exception class")
+    if issubclass(cls, claimed):
+        return ProofResult("proven", sketch=f"raises {cls.__name__} under this domain")  # :draft
+    # :draft
+    return ProofResult("disproven", sketch=f"raises {cls.__name__}, "
                        f"not the claimed {exc_name}")

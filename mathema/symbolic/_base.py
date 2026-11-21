@@ -1355,7 +1355,7 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
 
     Returns `(kind, value, failure)`: on success, `kind` is `"value"`
     (`value` the sympy expr or tuple of exprs) or `"raises"` (`value` the
-    exception class name); on failure, `kind` is None and `failure` is
+    `raise` statement reached); on failure, `kind` is None and `failure` is
     `{"line", "statement", "message", "category"}`, `category` straight
     from the NotSymbolic that caused it (or a fixed "unsupported-
     statement"/"missing-return" for this function's own structural
@@ -1398,7 +1398,7 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
                                     "message": str(e), "category": e.category}
             return "value", result, None
         elif allow_raise and isinstance(stmt, ast.Raise):
-            return "raises", _exc_name(stmt), None
+            return "raises", stmt, None
         else:
             kind = type(stmt).__name__
             allowed = "a single-name assignment or a final return" + \
@@ -1410,6 +1410,112 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
     return None, None, {"line": body[-1].lineno if body else None, "statement": None,
                         "message": "function body has no return statement",
                         "category": "missing-return"}
+
+
+def call_suspends(fn) -> "str | None":
+    """Intent:
+        What calling `fn` returns in place of running its body, read
+        from its code flags: "a generator", "a coroutine" or "an async
+        generator" (each an object the body runs in only when it is
+        iterated or awaited); None for a function whose call runs its
+        body.
+    """
+    code = getattr(fn, "__code__", None)
+    flags = getattr(code, "co_flags", 0)
+    if not isinstance(flags, int):
+        return None
+    if flags & inspect.CO_ASYNC_GENERATOR:
+        return "an async generator"  # :draft
+    if flags & (inspect.CO_COROUTINE | inspect.CO_ITERABLE_COROUTINE):
+        return "a coroutine"
+    if flags & inspect.CO_GENERATOR:
+        return "a generator"
+    return None
+
+
+def _wrapper_is_read(fn) -> bool:  # :draft
+    """Intent:
+        Whether `fn` is a wrapper whose call is read as calling the function it
+        wraps and returning or raising what it does: the `functools.lru_cache`
+        and `functools.cache` wrapper, a `staticmethod`, an instance whose
+        `__call__` hands its arguments to the wrapped function unchanged
+        (`hands_over_to_wrapped`), and a wrapper defined in mathema itself (its
+        call adapters and its domain and dimension guards, which core reads on
+        their own).
+    """
+    import functools
+    import os
+    import types
+    if type(fn) is getattr(functools, "_lru_cache_wrapper", None) \
+            or type(fn) is staticmethod:
+        return True
+    package = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+    if type(fn) is not types.FunctionType:
+        from .._instance_callable import hands_over_to_wrapped
+        return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema" \
+            or hands_over_to_wrapped(fn)
+    return os.path.abspath(fn.__code__.co_filename).startswith(package)
+
+
+def _wrapper_name(fn) -> str:
+    """Intent:
+        The wrapper's own name and place: its code's qualified name, its
+        module's name and first line for a Python function, its type's
+        qualified name and module otherwise.
+    """
+    import types
+    if type(fn) is types.FunctionType:
+        code = fn.__code__
+        name = getattr(code, "co_qualname", code.co_name)
+        module = fn.__globals__.get("__name__") if isinstance(fn.__globals__, dict) else None
+        where = f"module {module} line" if isinstance(module, str) else "line"
+        return f"the function `{name}` ({where} {code.co_firstlineno})"  # :draft
+    cls = type(fn)
+    return f"an instance of `{cls.__qualname__}` (module {cls.__module__})"  # :draft
+
+
+def wrapper_refusal(fn) -> "str | None":
+    """Intent:
+        Why derive reads no body for `fn` when it is a wrapper a
+        decorator bound in place of the function its `def` compiled (it
+        links that function as `__wrapped__`, as `functools.wraps`
+        does), naming the wrapper; None when `fn` is the function
+        itself, or every wrapper down to it is one whose call is read
+        (`_wrapper_is_read`).
+    """
+    seen = 0
+    while seen < 16:
+        try:
+            inner = getattr(fn, "__wrapped__", None)
+        except Exception:
+            inner = None
+        if inner is None:
+            return None
+        if not _wrapper_is_read(fn):
+            # :draft
+            return (f"the object called is {_wrapper_name(fn)}, which links the "
+                    f"function as `__wrapped__`, and what it does around the call is "
+                    f"not read")
+        fn = inner
+        seen += 1
+    return "the function is wrapped more than 16 times over"  # :draft
+
+
+def innermost(fn):
+    """Intent:
+        The function under every wrapper `fn` links as `__wrapped__`.
+    """
+    seen = 0
+    while seen < 16:
+        try:
+            inner = getattr(fn, "__wrapped__", None)
+        except Exception:
+            inner = None
+        if inner is None:
+            return fn
+        fn = inner
+        seen += 1
+    return fn
 
 
 def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
@@ -1448,6 +1554,8 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
     callee-inlining chain; an external caller never sets it (a fresh
     registry is built automatically)."""
     if facts.tree is None or facts.loops or facts.branch_count or facts.recursion:
+        return None
+    if call_suspends(innermost(fn)) is not None or wrapper_refusal(fn) is not None:
         return None
     if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
@@ -1488,11 +1596,4 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
                   latex=sympy.latex(display), opaque=opaque)
 
 
-
-def _exc_name(stmt: ast.Raise) -> str | None:
-    exc = stmt.exc
-    if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
-        return exc.func.id
-    if isinstance(exc, ast.Name):
-        return exc.id
-    return None
+from .._raise_reading import ReadRaise, UnreadRaise, read_raise_path  # noqa: E402,F401

@@ -5600,7 +5600,7 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
             from . import analyze as _analyze
             facts = _analyze(fn)
         if stated:
-            derived = _policy.guard_policies(facts)
+            derived = _policy.guard_policies(facts, fn)
             clash = _policy.contradicting_policies(
                 [_policy.policy_text(_policy.parse_policy(
                     (f"{c.assuming}, " if c.assuming else "") + f"{c.lhs} {c.rhs}".strip()))
@@ -5631,7 +5631,7 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
                                    "mathema.surface": cj.source}))
         if gates:
             facts = facts if facts is not None else _effective_facts(fn, None)
-            guards = _policy.guard_policies(facts)
+            guards = _policy.guard_policies(facts, fn)
             stated_rows = [p for p in out if (p.meta or {}).get("mathema.policy")]
             for cj in gates:
                 row = _policy.safety_gate(cj, fn, facts, domain or {}, stated_rows,
@@ -11011,6 +11011,14 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     exact_law = False
     cj_domain, family = ctx.cj_domain, ctx.family
+    from .symbolic._prove import suspended_call_refusal
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {suspended}".lstrip("; "),
+            meta={"mathema.derive_status": "unsupported"})
+        return None
     # A registered family's own "derive" route is tried before
     # the ordinary derive_ineligible check below; it doesn't
     # go through try_prove()'s lhs/rhs machinery at all (a

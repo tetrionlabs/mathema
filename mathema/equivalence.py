@@ -545,7 +545,8 @@ def _coinciding_raise_proof(case: _Case,
         same = "both sides raise the same exception on the same region"
     else:
         where = "; ".join(
-            f"{side} raises {', '.join(sorted(by_side))} where "
+            # :draft
+            f"{side} raises {', '.join(sorted(e or 'an exception' for e in by_side))} where "
             f"{_region_text(_union(by_side.values()), name)}"
             for side, by_side in (("f", regions["f"]),
                                   (case.rhs_name, regions[case.rhs_name])))
@@ -687,8 +688,12 @@ def _coinciding_raise_regions(case: _Case) -> "dict | None":
                                    case.facts.params[0])
         if g_regions is None:
             return None
+        if case.compare_refusals and (None in f_regions or None in g_regions):
+            # a raise not read as raising one class is not shown to be
+            # the same exception as the other side's
+            return None
         for side in (f_regions, g_regions):
-            kinds = sorted(side)
+            kinds = sorted(side, key=str)
             for i, a in enumerate(kinds):
                 for b in kinds[i + 1:]:
                     if sympy.Intersection(side[a],
