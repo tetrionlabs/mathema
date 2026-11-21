@@ -5,6 +5,9 @@
 Usage:
     python scripts/harvest_claim_corpus.py            # print a summary
     python scripts/harvest_claim_corpus.py --write    # rewrite the data file
+    python scripts/harvest_claim_corpus.py --with-providers
+                                                      # read with installed
+                                                      # capability providers
 
 Intent:
     Collect claim statements from the places the repository keeps them
@@ -26,6 +29,7 @@ Notes:
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import re
 import sys
@@ -204,8 +208,40 @@ def read_claim(text: str) -> dict:
     return out
 
 
-def harvest() -> dict:
-    """Return the corpus: {text: {"sources": [...], ...reading}}."""
+@contextlib.contextmanager
+def providers_off():
+    """Intent:
+        Within the block, no installed capability provider (a symbology
+        package, say) is found, the way `tests/conftest.py` runs every
+        test, so a reading here is the reading the tests make.
+    """
+    from mathema import _providers
+    real = _providers.entry_points
+    _providers.entry_points = lambda **_: []
+    _providers._discovered.cache_clear()
+    _providers._load.cache_clear()
+    try:
+        yield
+    finally:
+        _providers.entry_points = real
+        _providers._discovered.cache_clear()
+        _providers._load.cache_clear()
+
+
+def read_claims(texts, with_providers: bool = False) -> dict:
+    """Intent:
+        `{text: read_claim(text)}` for each text, read with capability
+        providers off unless `with_providers`.
+    """
+    if with_providers:
+        return {text: read_claim(text) for text in texts}
+    with providers_off():
+        return {text: read_claim(text) for text in texts}
+
+
+def harvest(with_providers: bool = False) -> dict:
+    """Return the corpus: {text: {"sources": [...], ...reading}}, each
+    text read with capability providers off unless `with_providers`."""
     found: dict[str, dict] = {}
     for rel, kind, cands in _sources():
         for text, slot in cands:
@@ -221,9 +257,10 @@ def harvest() -> dict:
         entry = found.setdefault(text, {"slot": True, "sources": set()})
         entry["slot"] = True
         entry["sources"].add("extra:scripts/harvest_claim_corpus.py")
+    readings = read_claims(sorted(found), with_providers=with_providers)
     corpus = {}
     for text in sorted(found):
-        reading = read_claim(text)
+        reading = readings[text]
         if not reading["parses"] and not found[text]["slot"]:
             continue
         reading["sources"] = sorted(found[text]["sources"])[:3]
@@ -233,7 +270,7 @@ def harvest() -> dict:
 
 def main(argv: list[str]) -> int:
     sys.path.insert(0, str(ROOT))
-    corpus = harvest()
+    corpus = harvest(with_providers="--with-providers" in argv)
     parsed = sum(1 for v in corpus.values() if v["parses"])
     print(f"{len(corpus)} texts, {parsed} parse, "
           f"{len(corpus) - parsed} refused")

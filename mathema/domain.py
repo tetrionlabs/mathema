@@ -30,7 +30,9 @@ import re
 from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
-from ._scan import _split_commas, mask_strings, unmask_strings
+from ._scan import (_split_commas, invalid_escape, mask_strings,
+                    string_literal, unmask_strings, uses_legacy_domain_escapes,
+                    uses_legacy_quoting)
 
 # superscript rendering for a vector/matrix space exponent, so `R^n`
 # reads `ℝⁿ` in unicode the way `x^2` reads `x²` elsewhere. Only
@@ -300,12 +302,58 @@ def _set_value(s: str, *, in_element: bool = False, on_field: bool = False):
     if sentinel is not None:
         return sentinel
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
-        return s[1:-1]
+        if uses_legacy_domain_escapes():
+            return s[1:-1]
+        return _string_member(s)
     if s in ("True", "False"):
         return s == "True"
     if _INTEGER_MEMBER.match(s):
         return int(s)
     return _bound(s)
+
+
+class InvalidSetMember(ValueError):
+    """A quoted member of a domain set whose escape names no character."""
+
+
+def _string_member(literal: str) -> str:
+    """Intent:
+        A quoted domain set member's value, its backslash escapes decoded
+        exactly as a Python string literal decodes them (`"\\t"` is a
+        tab, `"\\\\"` one backslash), the same reading an expression
+        literal gets.
+
+    Raises:
+        InvalidSetMember: an escape in the member names no character.
+    """
+    import ast
+    bad = invalid_escape(literal)
+    if bad is None:
+        try:
+            value = ast.literal_eval(literal)
+        except (ValueError, SyntaxError) as e:
+            bad = str(e)
+        else:
+            if isinstance(value, str):
+                return value
+    raise InvalidSetMember(
+        f"the set member {literal} holds the escape {bad}, which names no "
+        f"character; a backslash itself is written doubled (\\\\)")
+
+
+def _member_escape_problem(text: str) -> "str | None":
+    """Intent:
+        The message for the first quoted member in a domain's text whose
+        escape names no character, or None when there is none.
+    """
+    if uses_legacy_domain_escapes():
+        return None
+    for literal in mask_strings(text)[1]:
+        try:
+            _string_member(literal)
+        except InvalidSetMember as e:
+            return str(e)
+    return None
 
 
 def _exact_bound(s: str):
@@ -1921,18 +1969,45 @@ def _ordered_sentinels(absent: bool, holes) -> list:
 def _render_set_member(v, *, ascii_mode: bool, words: bool = False) -> str:
     """One discrete-set member in the spelling the input grammar reads
     back: a sentinel as its word (the class as `∅` in unicode), a string
-    always double-quoted, everything else as its own literal.
+    quoted, everything else as its own literal.
     `_set_value` accepts either quote style on the way in and keeps
-    neither, so one spelling comes back out.
+    neither, decoding escapes as an expression literal does, so a
+    string member is written as `_scan.string_literal` writes any
+    string value: double quotes unless the value holds one.
 
-    A member whose own text contains a double quote is outside what a
-    set binding can express: rendered inside double quotes, such a value
-    cannot be read back."""
+    Under `_scan.legacy_domain_escapes` a member was read as the text
+    between its quotes, no escape decoded, and is written back that
+    way: in double quotes when that reads back as the same text, in
+    single quotes when only that does (`{'a"'}`), else double quotes."""
     if isinstance(v, _Sentinel):
         return _sentinel_word(v, ascii_mode=ascii_mode, words=words)
     if isinstance(v, str):
+        if not uses_legacy_domain_escapes():
+            return string_literal(v)
+        if not uses_legacy_quoting() and not _reads_back(v, '"') \
+                and _reads_back(v, "'"):
+            return f"'{v}'"
         return f'"{v}"'
     return str(v)
+
+
+def _reads_back(v: str, quote: str) -> bool:
+    """Intent:
+        Whether `v` written between two `quote` characters is one
+        quoted literal whose closing quote is the last one, so
+        `_set_value` reads it back as `v`. A backslash escapes the
+        character after it, as `_scan._string_end` reads it.
+    """
+    text = f"{quote}{v}{quote}"
+    i = 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return i == len(text) - 1
+        i += 1
+    return False
 
 
 def _render_piece(piece, *, ascii_mode: bool, as_int: bool = False) -> str:
@@ -2567,6 +2642,9 @@ def _parse_binding(part: str):
         piece = (_parse_piece(pt, in_element=in_element or element_path,
                               on_field=on_field) if pt else None)
         if piece is None:
+            escape = _member_escape_problem(pt)
+            if escape is not None:
+                return f"{part!r}: {escape}, for {name!r}"
             return (f"{part!r}: {pt!r} isn't a recognized interval, discrete "
                     f"set, or named set (R/Z/N) for {name!r}")
         problem = _interval_problem(piece)

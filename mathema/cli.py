@@ -1867,15 +1867,49 @@ def cmd_docsync(args) -> int:
                      "  (add with --write-docstrings)"))
     for k in report.docstrings_written:
         print(f"wrote missing claim names into {k}'s Claims: block")
+    for r in report.stale_records:
+        print(f"note {r['key']}: the stored text of claim {r['claim']!r} "
+              f"could not be read; the next verify checks the claim again "
+              f"and replaces it")
+    for d in report.defects:
+        print(f"FAIL {d['message']}")
+    for a in report.ambiguous:
+        from .verify import ambiguous_text_note
+        print(ambiguous_text_note(a["key"], a, command="docsync"))
+    for u in report.unreadable:
+        from .conjecture import _diagnostic
+        which = f"claim {u['claim']!r}" if u["claim"] else "a claim"
+        print(f"UNREADABLE {u['where']} {u['key']}: {which} does not read "
+              f"({u['error']}); this function was not synced")
+        print()
+        print(_diagnostic(
+            "a claim does not read", u["claim"], u["key"],
+            f"in {u['where'] or 'its docstring or claims file'}",
+            f"The claim does not read ({u['error']}), so this function was "
+            f"not synced; correct the claim there and run mathema docsync "
+            f"again.", u.get("location")))
     if report.index_path:
         print(f"index -> {report.index_path}")
+    if report.index_error:
+        index = os.path.normpath(os.path.join(args.root, ".mathema", "index.yaml"))
+        print(f"Error: the index was not written\n\n"
+              f"  on {index}\n\n"
+              f"index not written: {report.index_error}. Every function "
+              f"named was synced; make {index} writable and "
+              f"run mathema docsync again to write the index.",
+              file=sys.stderr)
     if args.report or args.write:
         import types
         for t in args.target:
             shim = types.SimpleNamespace(target=t, root=args.root,
                                          write=args.write)
             _docsync_checklist(shim)
-    return 1 if (report.conflicts and not args.yes) else 0
+    if report.unreadable:
+        return 2
+    if report.defects:
+        return 1
+    return 1 if ((report.conflicts and not args.yes)
+                 or report.index_error) else 0
 
 
 def _accept_docstring_claim(root: str, conflict: dict) -> None:
@@ -3437,7 +3471,8 @@ def main(argv: list[str] | None = None) -> int:
     pv.add_argument("--root", default=None,
                     help="project root holding .mathema/verified and claimspec.yaml")
     pv.add_argument("--all", action="store_true",
-                    help="check everything again, ignoring form-hash freshness")
+                    help="check every function again and rewrite its record, "
+                         "even one that is fresh")
     pv.add_argument("--status", nargs="?", const=True, default=None,
                     metavar="TARGET",
                     help="report fresh/stale per @track_claims-tagged "
