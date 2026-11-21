@@ -119,3 +119,14 @@ def test_without_a_solver_the_answer_is_unknown(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_z3)
     found = record_language.find_member([{"op": "any"}], [])
     assert found.status == "unknown" and "z3" in found.reason
+
+
+def test_a_null_witness_is_told_from_no_witness():
+    pytest.importorskip("z3")
+    null, nothing = {"op": "choice", "values": [None]}, {"op": "empty"}
+    assert SUPPORT.includes(null, nothing) == ("falsified", [None])
+    assert SUPPORT.disjoint(null, null) == ("falsified", [None])
+    assert SUPPORT.equal(null, nothing) == ("falsified", [None])
+    assert SUPPORT.includes(nothing, null) == ("proven", None)
+    verdict, witness = SUPPORT.includes({"op": "choice", "values": ["a"]}, nothing)
+    assert (verdict, witness) == ("falsified", ["a"])
