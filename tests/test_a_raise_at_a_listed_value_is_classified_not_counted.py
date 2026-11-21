@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """A listed missing value at which every run raised is not judged by the
-proof: the raise is classified by the claim's missing-value rows, and
+proof: the listed value is judged by its policy row, and
 the proof of the real points stands with no count of held points. A
 claim that cannot be run at a point at all is proven over the real
 points and leaves the listed value to its policy row."""

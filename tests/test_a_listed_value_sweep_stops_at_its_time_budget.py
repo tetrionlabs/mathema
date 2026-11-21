@@ -9,7 +9,7 @@ import time
 
 from mathema.conjecture import check_conjectures, claim
 
-_SLOW_SECONDS = 0.002
+_SLOW_SECONDS = 0.01
 
 
 def slow_off_the_trial(a, x):
@@ -28,7 +28,7 @@ def zero_of_two(a, x):
 
 def test_a_sweep_slower_than_its_estimate_stops_at_the_time_budget(monkeypatch):
     import mathema._brute_force as B
-    monkeypatch.setattr(B, "_SWEEP_SECONDS", 0.05)
+    monkeypatch.setattr(B, "_SWEEP_SECONDS", 0.3)
     members = ", ".join(str(i) for i in range(200))
     text = f"for a in {{{members}}}, x in {{1, None}}, f(a, x) == 0"
     started = time.perf_counter()

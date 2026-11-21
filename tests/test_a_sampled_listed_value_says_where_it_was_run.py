@@ -27,9 +27,9 @@ def _row(fn, text):
 def test_a_raise_at_every_sampled_point_is_counted_in_the_note():
     row = _row(raises_when_absent, "for x in {1, None}, y in [0, 1], f(x, y) == 0")
     assert "the listed value x = None was run at" in row.note, row.note
-    assert "sampled points of y and raised ValueError at each" in row.note, row.note
+    assert "drawn points of y and raised ValueError at each" in row.note, row.note
 
 
 def test_no_value_at_every_sampled_point_is_counted_in_the_note():
     row = _row(nan_when_absent, "for x in {1, None}, y in [0, 1], f(x, y) == 0")
-    assert "sampled points of y and gave no value at each" in row.note, row.note
+    assert "drawn points of y and gave no value at each" in row.note, row.note

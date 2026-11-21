@@ -9039,16 +9039,18 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
         so the function is called at each, against the other
         parameters' values (`_listed_value_points`). A point where the
         relation fails falsifies the claim; a point where the function
-        raises or gives no value is not judged here, its outcome is
-        classified by the claim's missing-value rows. Returns a
+        raises or gives no value is not judged here, the listed value is
+        judged by its policy row. Returns a
         falsified `Probe` naming the first failing point, listed
         sentinels in the order absence, the class, then members; else a
         `Probe` carrying `meta["mathema.missing"]["tried"]`: `holds`
-        with a note saying what was run when a listed value held at
-        sampled points of the other parameters rather than at every
-        combination of them; `proven` otherwise; `unknown` with a note
-        when the claim cannot be evaluated at a point. None when the
-        claim lists none.
+        on the route `derive:listed_value_sampled`, `n` the distinct
+        listed-value points run, with a note saying what was run, when a
+        listed value held at the domain's corners and drawn points of
+        the other parameters rather than at every combination of them;
+        `proven` otherwise, and when the claim cannot be evaluated at a
+        point, its note then saying the listed value is judged by its
+        policy row. None when the claim lists none.
     """
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
                          _member_sort_key, _set_sentinels, realise_sentinel)
@@ -9086,6 +9088,7 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
     failures: list = []
     sampled: list = []
     notes: list = []
+    distinct = 0
     for p, values in listed.items():
         if p not in names:
             continue
@@ -9094,7 +9097,7 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
         of_others = f" of {', '.join(others)}" if others else ""  # :draft
         for sentinel, value in values:
             tried.setdefault(p, []).append(repr(value))
-            points, combinations, over = _listed_value_points(
+            points, combinations, over, corners = _listed_value_points(
                 deps, names, p, value, others, axes)
             swept = combinations is None and axes is not None
             started = time.perf_counter()
@@ -9121,7 +9124,9 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                     classified.append(point)
             if failed:
                 continue
+            distinct += run
             shown = _fmt_point({p: value}, [p])
+            ran = _corners_and_draws(run, corners)
             if stopped:
                 sampled.append(
                     # :draft
@@ -9135,27 +9140,28 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                 if kinds:
                     notes.append(
                         # :draft
-                        f"the listed value {shown} was run at {run} sampled "
-                        f"points{of_others} and {kinds}")
+                        f"the listed value {shown} was run at {ran}"
+                        f"{of_others} and {kinds}")
             elif combinations is not None:
                 sampled.append(
                     # :draft
                     f"the {combinations} combinations{of_others} are over the "
                     f"sweep's {over} budget, so the listed value {shown} was "
-                    f"run at {run} sampled points of them and held at {held}, "
-                    f"which is evidence, not a proof")
+                    f"run at {ran} of them and held at {held}, which is "
+                    f"evidence, not a proof")
             else:
                 sampled.append(
                     # :draft
-                    f"the listed value {shown} was run at {run} sampled "
-                    f"points{of_others} and held at {held}, which is "
-                    f"evidence, not a proof")
+                    f"the listed value {shown} was run at {ran}{of_others} "
+                    f"and held at {held}, which is evidence, not a proof")
     from .probing import executed_missing, with_executed
     meta = with_executed({"mathema.missing": {"tried": tried}},
                          executed_missing(deps)) or {}
     if not failures:
         if sampled:
             return Probe(ctx.cj.name, statement, "holds", meta=meta,
+                         n=distinct,
+                         route="derive:listed_value_sampled",  # :draft
                          # :draft
                          note="the real points were derived; "
                               + "; ".join(sampled + notes))
@@ -9197,7 +9203,7 @@ def _listed_value_axes(others: list, cj_domain: dict, listed: dict) -> "list | N
 def _listed_value_points(deps, names: list, p: str, value, others: list,
                          axes) -> tuple:
     """Intent:
-        `(points, combinations, over)`: the points a listed value `value` of
+        `(points, combinations, over, corners)`: the points a listed value `value` of
         `p` is run at, each one the domain and the claim's assumptions
         admit, its coordinates in `names` order. Every combination of
         `axes` when the other parameters are all finite and the
@@ -9208,7 +9214,8 @@ def _listed_value_points(deps, names: list, p: str, value, others: list,
         `deps["sample"]` with the sampler's fixed seed; `combinations`
         is the number of combinations of finite `axes` that were over
         the budget, else None, and `over` names the budget, `point` or
-        `time`.
+        `time`. Points are distinct; `corners` is how many of the first
+        points are the domain's corners.
     """
     import itertools
     import math
@@ -9239,14 +9246,40 @@ def _listed_value_points(deps, names: list, p: str, value, others: list,
                     pass
             per_point = (time.perf_counter() - started) / max(1, len(trial))
             if per_point * len(points) <= _brute_force._SWEEP_SECONDS:
-                return points, None, None
+                return points, None, None, 0
     rng = random.Random(_RNG_SEED)
-    candidates = [ordered({**c, p: value}) for c in deps["corners"][:8]]
-    candidates += [ordered({**{n: deps["sample"](n, rng) for n in others},
-                            p: value})
-                   for _ in range(_N_BASE)]
-    return ([c for c in candidates if deps["admits"](c)], combinations,
-            over if combinations is not None else None)
+    seen: set = set()
+
+    def distinct(candidates: list) -> list:
+        kept = []
+        for c in candidates:
+            key = tuple(repr(v) for v in c.values())
+            if key not in seen and deps["admits"](c):
+                seen.add(key)
+                kept.append(c)
+        return kept
+    corners = distinct([ordered({**c, p: value}) for c in deps["corners"][:8]])
+    drawn = distinct([ordered({**{n: deps["sample"](n, rng) for n in others},
+                               p: value})
+                      for _ in range(_N_BASE)])
+    return (corners + drawn, combinations,
+            over if combinations is not None else None, len(corners))
+
+
+def _corners_and_draws(run: int, corners: int) -> str:
+    """Intent:
+        How many of the first `run` points of a listed value's plan
+        were the domain's corners (the plan's first `corners` points)
+        and how many were drawn: `4 corners and 130 drawn points`.
+    """
+    at_corners = min(run, corners)
+    drawn = run - at_corners
+    parts = []
+    if at_corners:
+        parts.append(f"{at_corners} corner" + ("s" if at_corners != 1 else ""))  # :draft
+    if drawn or not parts:
+        parts.append(f"{drawn} drawn point" + ("s" if drawn != 1 else ""))  # :draft
+    return " and ".join(parts)
 
 
 def _listed_value_outcomes(fn, facts, points: list) -> str:
@@ -9276,17 +9309,17 @@ def _with_listed_sentinels(proven: "Probe", listed: "Probe | None") -> "Probe":
     """Intent:
         A proof over the reals with its listed sentinels' outcome
         (`_listed_sentinels_fail`) applied: the falsified row when a
-        listed point fails; else the proof carrying the outcome's meta,
-        lowered to the outcome's `holds` or `unknown` with its note when
-        the listed values were not shown at every point.
+        listed point fails; else the proof carrying the outcome's meta
+        and note, lowered to the outcome's `holds`, its route and its
+        `n` when the listed values were run at a sample of points.
     """
     if listed is None:
         return proven
     if listed.verdict == "falsified":
         return listed
     proven.meta = {**(proven.meta or {}), **(listed.meta or {})}
-    if listed.verdict in ("holds", "unknown"):
-        proven.verdict = listed.verdict
+    if listed.verdict == "holds":
+        proven.verdict, proven.route, proven.n = "holds", listed.route, listed.n
     if listed.note:
         proven.note = f"{proven.note or ''}; {listed.note}"  # :draft
     return proven
