@@ -388,17 +388,21 @@ def _exception_type(name: str, scope: "dict | None" = None):
 
 
 def guard_is_read(guard) -> bool:
-    """Whether a guard proves what it says: any guard that does not
-    raise, and a raising one whose path was read as raising its class."""
+    """Intent:
+        Whether a guard proves what it says: any guard that does not raise, and
+        a raising one whose path was read as raising its class.
+    """
     return guard is not None and (guard[0] != "raises"
                                   or (len(guard) > 3 and guard[3] is not None))
 
 
 def _guard_raises_the_claimed(guard, expected: "str | None", fn) -> bool:
-    """Whether a guard's behaviour meets a stated `raises(...)`: the
-    guard's path was read as raising one class (`guard_is_read`), and
-    when the statement names a class, the class the guard raises is the
-    claimed class or a subclass of it, compared as classes."""
+    """Intent:
+        Whether a guard's behaviour meets a stated `raises(...)`: the guard's
+        path was read as raising one class (`guard_is_read`), and when the
+        statement names a class, the class the guard raises is the claimed
+        class or a subclass of it, compared as classes.
+    """
     if guard[0] != "raises":
         return True
     cls = guard[3] if len(guard) > 3 else None

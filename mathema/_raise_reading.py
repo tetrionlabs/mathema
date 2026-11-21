@@ -66,6 +66,11 @@ _STR = ValueKind(frozenset({str}))
 
 
 def _union(a: ValueKind, b: ValueKind) -> ValueKind:
+    """Intent:
+        The kind of a value that is one of two kinds: either type set, the
+        larger magnitude bound and the smaller lower bound; any object when
+        either may be any object.
+    """
     if a.types is None or b.types is None:
         return ANY
     return ValueKind(a.types | b.types, max(a.magnitude, b.magnitude),
@@ -73,17 +78,21 @@ def _union(a: ValueKind, b: ValueKind) -> ValueKind:
 
 
 def _up(bound: float) -> float:
-    """The next float above a non-negative bound computed in float
-    arithmetic, which rounds to nearest: at least the exact result of the
-    operation that gave it. Zero and infinity are exact and stay."""
+    """Intent:
+        The next float above a non-negative bound computed in float arithmetic,
+        which rounds to nearest: at least the exact result of the operation
+        that gave it. Zero and infinity are exact and stay.
+    """
     return math.nextafter(bound, math.inf) if 0.0 < bound < math.inf else bound
 
 
 def _magnitude(value) -> float:
-    """An upper bound on `abs(value)` as a float: the float conversion
-    rounds an int to nearest, so a conversion below the int is moved up
-    one float; `math.inf` when the bound is past the largest float or the
-    value is no number."""
+    """Intent:
+        An upper bound on `abs(value)` as a float: the float conversion rounds
+        an int to nearest, so a conversion below the int is moved up one float;
+        `math.inf` when the bound is past the largest float or the value is no
+        number.
+    """
     try:
         exact = abs(value)
         found = float(exact)
@@ -95,9 +104,11 @@ def _magnitude(value) -> float:
 
 
 def _least(value) -> float:
-    """A lower bound on `abs(value)` as a float: a conversion above the
-    int is moved down one float, and an int past the largest float is at
-    least that float; 0 for anything that is no number."""
+    """Intent:
+        A lower bound on `abs(value)` as a float: a conversion above the int is
+        moved down one float, and an int past the largest float is at least
+        that float; 0 for anything that is no number.
+    """
     try:
         exact = abs(value)
     except (TypeError, ValueError):
@@ -116,8 +127,10 @@ def _least(value) -> float:
 
 
 def kind_of_value(value) -> ValueKind:
-    """The kind of one known value: its exact type, and its magnitude
-    when it is a number."""
+    """Intent:
+        The kind of one known value: its exact type, and its magnitude when it
+        is a number.
+    """
     if type(value) in _NUMBERS:
         return ValueKind(frozenset({type(value)}), _magnitude(value), _least(value))
     return ValueKind(frozenset({type(value)}))
@@ -127,6 +140,11 @@ _EMPTY = ValueKind(frozenset(), 0.0, math.inf)
 
 
 def _interval_kind(lo, hi) -> ValueKind:
+    """Intent:
+        The kind of a number drawn from the interval between `lo` and `hi`: an
+        int, float or bool of at most the larger end's magnitude, and at least
+        the smaller end's when the interval does not contain zero.
+    """
     least = 0.0
     if type(lo) in _NUMBERS and type(hi) in _NUMBERS and (lo > 0 or hi < 0):
         least = min(_least(lo), _least(hi))
@@ -231,8 +249,10 @@ class ReadRaise:
 
 
 def _stored_globals(code) -> frozenset:
-    """The names the code object, or a function or class nested in it,
-    assigns or deletes as module globals (through `global`)."""
+    """Intent:
+        The names the code object, or a function or class nested in it, assigns
+        or deletes as module globals (through `global`).
+    """
     import dis
     found: set = set()
     pending = [code]
@@ -270,9 +290,11 @@ class _Namespace:
     _MISSING = object()
 
     def lookup(self, name: str):
-        """The object `name` reads: a local the path bound to a known
-        object, else a global or builtin outside the function's locals,
-        else `_MISSING`."""
+        """Intent:
+            The object `name` reads: a local the path bound to a known object,
+            else a global or builtin outside the function's locals, else
+            `_MISSING`.
+        """
         if name in self.objects:
             return self.objects[name]
         if not self.ok or name in self.locals or name in self.rebound:
@@ -282,10 +304,12 @@ class _Namespace:
         return self.builtins.get(name, self._MISSING)
 
     def resolve(self, node: ast.AST):
-        """The object a bare name or a dotted attribute of a module
-        resolves to, or `_MISSING`. An attribute is read only off a
-        plain module object that holds it in its own namespace, where
-        reading it runs no code."""
+        """Intent:
+            The object a bare name or a dotted attribute of a module resolves
+            to, or `_MISSING`. An attribute is read only off a plain module
+            object that holds it in its own namespace, where reading it runs no
+            code.
+        """
         if isinstance(node, ast.Name):
             return self.lookup(node.id)
         if isinstance(node, ast.Attribute):
@@ -295,29 +319,38 @@ class _Namespace:
         return self._MISSING
 
     def is_builtin(self, node: ast.AST, name: str) -> bool:
-        """Whether `node` is the bare name `name` and resolves to the
-        builtin of that name itself."""
+        """Intent:
+            Whether `node` is the bare name `name` and resolves to the builtin
+            of that name itself.
+        """
         return isinstance(node, ast.Name) and node.id == name \
             and self.lookup(name) is getattr(builtins, name)
 
 
 def _is_numeric(kind: ValueKind) -> bool:
+    """Intent:
+        Whether every value of the kind is an int, float or bool.
+    """
     return kind.types is not None and bool(kind.types) and kind.types <= _NUMBERS
 
 
 def _converts_to_float(kind: ValueKind) -> bool:
-    """Whether an int among the kind's values always converts to float."""
+    """Intent:
+        Whether an int among the kind's values always converts to float.
+    """
     return int not in (kind.types or frozenset()) or kind.magnitude <= _FLOAT_MAX
 
 
 def _text_level(kind: ValueKind) -> int:
-    """How surely `str`, `repr` or `format(v, "")` of a value builds its
-    text: TOTAL for a float, bool, str or None, and for an int of finite
-    magnitude bound, which has at most 309 digits (Python refuses to
-    convert an int of more digits than `sys.get_int_max_str_digits()`,
-    which is 4300 by default and never set below 640 except to 0 for no
-    limit); HALTS for an unbounded int, whose refusal is a ValueError;
-    UNKNOWN for any other object, whose own method runs."""
+    """Intent:
+        How surely `str`, `repr` or `format(v, "")` of a value builds its text:
+        TOTAL for a float, bool, str or None, and for an int of finite
+        magnitude bound, which has at most 309 digits (Python refuses to
+        convert an int of more digits than `sys.get_int_max_str_digits()`,
+        which is 4300 by default and never set below 640 except to 0 for no
+        limit); HALTS for an unbounded int, whose refusal is a ValueError;
+        UNKNOWN for any other object, whose own method runs.
+    """
     if not kind.types:
         return UNKNOWN
     if kind.types <= _TEXT:
@@ -333,11 +366,13 @@ _NUMBER_SPEC = __import__("re").compile(r"\.[0-9]{1,2}[eEfFgG%]")
 
 
 def _spec_level(kind: ValueKind, spec: str) -> int:
-    """How surely `format(v, spec)` builds its text for a constant
-    `spec`: the empty spec as `str` (`_text_level`); a spec matching
-    `_NUMBER_SPEC` TOTAL for an int, float or bool (an int formatted
-    this way is converted to float first, so only one of magnitude at
-    most the largest float); UNKNOWN for any other spec or value."""
+    """Intent:
+        How surely `format(v, spec)` builds its text for a constant `spec`: the
+        empty spec as `str` (`_text_level`); a spec matching `_NUMBER_SPEC`
+        TOTAL for an int, float or bool (an int formatted this way is converted
+        to float first, so only one of magnitude at most the largest float);
+        UNKNOWN for any other spec or value.
+    """
     if spec == "":
         return _text_level(kind)
     if _NUMBER_SPEC.fullmatch(spec) and _is_numeric(kind) and _converts_to_float(kind):
@@ -346,9 +381,11 @@ def _spec_level(kind: ValueKind, spec: str) -> int:
 
 
 def _percent_fields(text: str) -> "int | None":
-    """The number of values a `%`-format string takes when its only
-    conversions are `%s`, `%r` and `%a` with no flags, width or
-    precision (and `%%`), else None."""
+    """Intent:
+        The number of values a `%`-format string takes when its only
+        conversions are `%s`, `%r` and `%a` with no flags, width or precision
+        (and `%%`), else None.
+    """
     count, at = 0, 0
     while True:
         at = text.find("%", at)
@@ -364,10 +401,12 @@ def _percent_fields(text: str) -> "int | None":
 
 
 def _brace_fields(text: str) -> "list | None":
-    """The positional indexes a `str.format` string reads, in order,
-    when every field is `{}` or `{N}` (not both) with no format
-    specification and a conversion of none, `!s`, `!r` or `!a`; None
-    for any other string or one the parser refuses."""
+    """Intent:
+        The positional indexes a `str.format` string reads, in order, when
+        every field is `{}` or `{N}` (not both) with no format specification
+        and a conversion of none, `!s`, `!r` or `!a`; None for any other string
+        or one the parser refuses.
+    """
     import string
     try:
         parsed = list(string.Formatter().parse(text))
@@ -392,11 +431,17 @@ def _brace_fields(text: str) -> "list | None":
 
 
 def _truth_level(kind: ValueKind) -> int:
+    """Intent:
+        TOTAL when taking the truth of a value of the kind cannot fail (a
+        builtin scalar or None), UNKNOWN otherwise.
+    """
     return TOTAL if kind.types is not None and kind.types <= _SCALARS else UNKNOWN
 
 
 def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
-    """The level and kind of `a <op> b` for two numbers."""
+    """Intent:
+        The level and kind of `a <op> b` for two numbers.
+    """
     ta, tb = a.types or frozenset(), b.types or frozenset()
     either_float = float in ta or float in tb
     both_int = bool(ta - {float}) and bool(tb - {float})
@@ -440,6 +485,13 @@ _MATH_TESTS = ("isnan", "isinf", "isfinite")
 
 
 def _call_level(node: ast.Call, kinds: dict, ns: _Namespace):
+    """Intent:
+        `(level, kind)` for a call of one positional argument: `str`, `repr`,
+        `ascii` and `abs` that resolve to the builtins, and
+        `math.isnan`/`isinf`/`isfinite`, `numpy.isnan` and
+        `pandas.isna`/`isnull` on a value of a type they take; UNKNOWN for any
+        other call.
+    """
     if node.keywords or len(node.args) != 1 or isinstance(node.args[0], ast.Starred):
         return UNKNOWN, ANY
     level, kind = read_expression(node.args[0], kinds, ns)
@@ -472,6 +524,12 @@ def _call_level(node: ast.Call, kinds: dict, ns: _Namespace):
 
 
 def _compare_level(node: ast.Compare, kinds: dict, ns: _Namespace):
+    """Intent:
+        `(level, kind)` for a comparison chain: identity tests, equality and
+        membership of builtin scalars, and ordering of two numbers or two
+        strings are total; ordering of other scalars may raise TypeError;
+        anything else is UNKNOWN.
+    """
     operands = [node.left, *node.comparators]
     read = [read_expression(o, kinds, ns) for o in operands]
     level = min(r[0] for r in read)
@@ -501,10 +559,12 @@ def _compare_level(node: ast.Compare, kinds: dict, ns: _Namespace):
 
 
 def _percent_level(node: ast.BinOp, kinds: dict, ns: "_Namespace"):
-    """`"..." % values` for a constant string `_percent_fields` reads:
-    TOTAL when the values are a tuple display of exactly that many
-    values, or one value of a type other than tuple and dict for one
-    field, and the text of each is total (`_text_level`)."""
+    """Intent:
+        `"..." % values` for a constant string `_percent_fields` reads: TOTAL
+        when the values are a tuple display of exactly that many values, or one
+        value of a type other than tuple and dict for one field, and the text
+        of each is total (`_text_level`).
+    """
     count = _percent_fields(node.left.value)
     if count is None:
         return UNKNOWN, _STR
@@ -520,9 +580,11 @@ def _percent_level(node: ast.BinOp, kinds: dict, ns: "_Namespace"):
 
 
 def _format_call_level(node: ast.Call, kinds: dict, ns: "_Namespace"):
-    """`"...".format(values)` for a constant string `_brace_fields`
-    reads, given positional values only: TOTAL when every index it
-    reads is among the values and the text of every value is total."""
+    """Intent:
+        `"...".format(values)` for a constant string `_brace_fields` reads,
+        given positional values only: TOTAL when every index it reads is among
+        the values and the text of every value is total.
+    """
     fields = _brace_fields(node.func.value.value)
     if fields is None or node.keywords or any(isinstance(a, ast.Starred) for a in node.args) \
             or any(i >= len(node.args) for i in fields):
@@ -679,6 +741,10 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
 
 
 def _source(node: ast.AST) -> str:
+    """Intent:
+        The source text of `node`, or its node type's name when it cannot be
+        unparsed.
+    """
     try:
         return ast.unparse(node)
     except Exception:
@@ -686,6 +752,9 @@ def _source(node: ast.AST) -> str:
 
 
 def _where(node: ast.AST) -> str:
+    """Intent:
+        ` on line N` for a node that carries a line, empty otherwise.
+    """
     line = getattr(node, "lineno", None)
     return f" on line {line}" if line is not None else ""
 
@@ -727,15 +796,19 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
 
 
 def _is_builtin_import(found) -> bool:
-    """Whether `found` is the builtin `__import__` itself."""
+    """Intent:
+        Whether `found` is the builtin `__import__` itself.
+    """
     return type(found) is types.BuiltinFunctionType and getattr(found, "__self__", None) \
         is builtins and getattr(found, "__name__", None) == "__import__"
 
 
 def _loaded(name: str):
-    """The module `sys.modules` holds under `name` when it is a plain
-    module object, every enclosing package is one too and each is held
-    in its package's own namespace; None otherwise."""
+    """Intent:
+        The module `sys.modules` holds under `name` when it is a plain module
+        object, every enclosing package is one too and each is held in its
+        package's own namespace; None otherwise.
+    """
     parts = name.split(".")
     parent = None
     for at in range(1, len(parts) + 1):
@@ -810,6 +883,10 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
     level = TOTAL
 
     def note(found: int, reason: str) -> None:
+        """Intent:
+            Record a step's level: the first step below TOTAL gives the reason,
+            and the path's level is the lowest seen.
+        """
         nonlocal first, level
         if found < TOTAL and first is None:
             first = reason

@@ -1434,13 +1434,15 @@ def call_suspends(fn) -> "str | None":
 
 
 def _wrapper_is_read(fn) -> bool:
-    """Whether `fn` is a wrapper whose call is read as calling the
-    function it wraps and returning or raising what it does: the
-    `functools.lru_cache` and `functools.cache` wrapper, a
-    `staticmethod`, an instance whose `__call__` hands its arguments to
-    the wrapped function unchanged (`hands_over_to_wrapped`), and a
-    wrapper defined in mathema itself (its call adapters and its domain
-    and dimension guards, which core reads on their own)."""
+    """Intent:
+        Whether `fn` is a wrapper whose call is read as calling the function it
+        wraps and returning or raising what it does: the `functools.lru_cache`
+        and `functools.cache` wrapper, a `staticmethod`, an instance whose
+        `__call__` hands its arguments to the wrapped function unchanged
+        (`hands_over_to_wrapped`), and a wrapper defined in mathema itself (its
+        call adapters and its domain and dimension guards, which core reads on
+        their own).
+    """
     import functools
     import os
     import types
@@ -1456,9 +1458,11 @@ def _wrapper_is_read(fn) -> bool:
 
 
 def _wrapper_name(fn) -> str:
-    """The wrapper's own name and place: its code's qualified name, its
-    module's name and first line for a Python function, its type's
-    qualified name and module otherwise."""
+    """Intent:
+        The wrapper's own name and place: its code's qualified name, its
+        module's name and first line for a Python function, its type's
+        qualified name and module otherwise.
+    """
     import types
     if type(fn) is types.FunctionType:
         code = fn.__code__
@@ -1497,7 +1501,9 @@ def wrapper_refusal(fn) -> "str | None":
 
 
 def innermost(fn):
-    """The function under every wrapper `fn` links as `__wrapped__`."""
+    """Intent:
+        The function under every wrapper `fn` links as `__wrapped__`.
+    """
     seen = 0
     while seen < 16:
         try:
