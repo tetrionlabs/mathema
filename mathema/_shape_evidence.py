@@ -241,10 +241,38 @@ def _parsed_def(target) -> "tuple[Any, int]":
         if len(lambdas) == 1:
             return lambdas[0], max(start, 1) - 1
         chosen = _lambda_by_position(target, lambdas, max(start, 1) - 1,
-                                     _indent(target))
+                                     _indent(target)) \
+            or _lambda_by_code(target, lambdas)
         if chosen is not None:
             return chosen, max(start, 1) - 1
     return None, 0
+
+
+def _lambda_by_code(target, lambdas: list):
+    """Intent:
+        The one of `lambdas` whose source compiles to the same code as
+        `target`'s (its instructions, constants and names), the first
+        when several compile alike, since those read alike too; None
+        when none does.
+    """
+    code = getattr(target, "__code__", None)
+    if code is None:
+        return None
+
+    def signature(c):
+        return (c.co_code, tuple(k for k in c.co_consts if not hasattr(k, "co_code")),
+                c.co_names, c.co_varnames)
+
+    want = signature(code)
+    for node in lambdas:
+        try:
+            made = compile(ast.Expression(body=node), "<lambda>", "eval")
+        except (SyntaxError, ValueError, TypeError):
+            continue
+        inner = next((k for k in made.co_consts if hasattr(k, "co_code")), None)
+        if inner is not None and signature(inner) == want:
+            return node
+    return None
 
 
 def _lambda_by_position(target, lambdas: list, offset: int, indent: int):
@@ -948,12 +976,9 @@ def wrong_shape_use(fn, values: dict, exc: BaseException,
         tb = tb.tb_next
     if last is None or last.tb_frame.f_code is not code:
         return None
-    try:
-        positions = list(code.co_positions())[last.tb_lasti // 2]
-    except (IndexError, AttributeError):
-        return None
+    positions = _raising_positions(last)
     fdef, offset = _function_def(fn)
-    if fdef is None or positions[0] is None:
+    if fdef is None or positions is None:
         return None
     from .analysis import param_uses
     rebound = param_uses(fdef, list(values)).assigned
@@ -962,25 +987,77 @@ def wrong_shape_use(fn, values: dict, exc: BaseException,
     drawn = set(values) if drawn is None else set(drawn)
     frame = last.tb_frame
     runtime = {**frame.f_globals, **dict(frame.f_locals)}
-    for node in ast.walk(_with_copies_read_through(fdef, list(values))):
-        if not _at(node, positions, offset, fn):
+    read = _with_copies_read_through(fdef, list(values))
+    if positions[2] is None:
+        nodes = [n for n in ast.walk(read) if isinstance(n, _OPERATIONS)
+                 and getattr(n, "lineno", None) is not None
+                 and n.lineno + offset == line]
+    else:
+        nodes = [n for n in ast.walk(read) if _at(n, positions, offset, fn)]
+    found = [_named_operand(fn, n, values, drawn, runtime, rebound, message,
+                            held_explains) for n in nodes]
+    if len(nodes) > 1 and positions[2] is None:
+        named = [f[0] for f in found if f is not None]
+        return (named[0], line) if named else None
+    for result in found:
+        if result is not None:
+            return (result[0], line) if result[1] else None
+    return None
+
+
+#: the nodes an operation that raises can be, read on a line without
+#: column positions
+_OPERATIONS = (ast.Subscript, ast.Attribute, ast.BinOp, ast.UnaryOp,
+               ast.Compare, ast.Call, ast.Dict, ast.Set)
+
+
+def _raising_positions(tb) -> "tuple | None":
+    """Intent:
+        `(line, end_line, col, end_col)` of the instruction a traceback
+        entry stopped at: the code's own source range where the
+        interpreter records one (Python 3.11 on), else the entry's line
+        with no columns (`(line, None, None, None)`), and None when not
+        even the line is known.
+    """
+    code = tb.tb_frame.f_code
+    try:
+        positions = list(code.co_positions())[tb.tb_lasti // 2]
+    except (IndexError, AttributeError):
+        positions = None
+    if positions is not None and None not in positions:
+        return positions
+    line = tb.tb_lineno
+    return None if line is None else (line, None, None, None)
+
+
+def _named_operand(fn, node, values: dict, drawn: set, runtime: dict,
+                   rebound, message: str, held_explains: bool):
+    """Intent:
+        For one operation node that may have raised: `(param, True)`
+        when a drawn parameter it applies to is named by the message,
+        `(param, False)` when another operand's type (a literal, a held
+        value, a local) named in the message explains it as well, None
+        when no drawn parameter it applies to is named.
+    """
+    operands = _operand_nodes(node)
+    names = [n for o in operands
+             if (n := _drawn_operand(o, values, drawn, runtime)) is not None]
+    held = {t.__name__ for o in operands
+            if _drawn_operand(o, values, drawn, runtime) is None
+            and (t := _held_type(fn, o, values, runtime)) is not None}
+    # "cannot use 'list' as a dict key" names the container, not an operand
+    import re
+    plain = re.sub(r"as an? \w+ key", "", message)
+    for name in names:
+        if name in rebound:
             continue
-        operands = _operand_nodes(node)
-        names = [n for o in operands
-                 if (n := _drawn_operand(o, values, drawn, runtime)) is not None]
-        held = {t.__name__ for o in operands
-                if _drawn_operand(o, values, drawn, runtime) is None
-                and (t := _held_type(fn, o, values, runtime)) is not None}
-        for name in names:
-            if name in rebound:
-                continue
-            type_name = type(runtime[name]).__name__
-            if not _names_type(message, type_name):
-                continue
-            if held_explains and any(h != type_name and _names_type(message, h)
-                                     for h in held):
-                return None
-            return name, line
+        type_name = type(runtime[name]).__name__
+        if not _names_type(message, type_name):
+            continue
+        if held_explains and any(h != type_name and _names_type(plain, h)
+                                 for h in held):
+            return name, False
+        return name, True
     return None
 
 
@@ -1110,51 +1187,48 @@ def raised_on_drawn(fn, exc: BaseException, params) -> "tuple[str, int] | None":
     held = dict(outer.tb_frame.f_locals)
     drawn = {p: held[p] for p in params if p in held}
     last = frames[-1]
-    try:
-        positions = list(last.tb_frame.f_code.co_positions())[last.tb_lasti // 2]
-    except (IndexError, AttributeError):
-        return None
-    node = _node_at(last.tb_frame.f_code, positions)
-    if node is None:
+    positions = _raising_positions(last)
+    if positions is None:
         return None
     runtime = {**last.tb_frame.f_globals, **dict(last.tb_frame.f_locals)}
     message = str(exc)
-    for operand in _operand_nodes(node):
-        if not (isinstance(operand, ast.Name) and operand.id in runtime):
-            continue
-        for p, value in drawn.items():
-            if runtime[operand.id] is value \
-                    and _names_type(message, type(value).__name__):
-                return p, int(positions[0])
+    for node in _nodes_at(last.tb_frame.f_code, positions):
+        for operand in _operand_nodes(node):
+            if not (isinstance(operand, ast.Name) and operand.id in runtime):
+                continue
+            for p, value in drawn.items():
+                if runtime[operand.id] is value \
+                        and _names_type(message, type(value).__name__):
+                    return p, int(positions[0])
     return None
 
 
-def _node_at(code, positions):
+def _nodes_at(code, positions) -> list:
     """Intent:
-        The syntax node of `code`'s file that spans exactly the source
-        range `positions` names, or None when the file cannot be read.
+        The syntax nodes of `code`'s file that span exactly the source
+        range `positions` names, or, with no columns, every operation
+        on its line; empty when the file cannot be read.
     """
     import linecache
     line, end_line, col, end_col = positions
-    if None in positions:
-        return None
     path = code.co_filename
     text = "".join(linecache.getlines(path))
     if not text:
-        return None
+        return []
     tree = _PARSED.get(path)
     if tree is None or tree[0] != text:
         try:
             tree = (text, ast.parse(text))
         except SyntaxError:
-            return None
+            return []
         _PARSED[path] = tree
-    for node in ast.walk(tree[1]):
-        if getattr(node, "lineno", None) == line \
-                and getattr(node, "end_lineno", None) == end_line \
-                and node.col_offset == col and node.end_col_offset == end_col:
-            return node
-    return None
+    if col is None:
+        return [n for n in ast.walk(tree[1]) if isinstance(n, _OPERATIONS)
+                and getattr(n, "lineno", None) == line]
+    return [n for n in ast.walk(tree[1])
+            if getattr(n, "lineno", None) == line
+            and getattr(n, "end_lineno", None) == end_line
+            and n.col_offset == col and n.end_col_offset == end_col]
 
 
 #: each source file's text and parsed tree, by path

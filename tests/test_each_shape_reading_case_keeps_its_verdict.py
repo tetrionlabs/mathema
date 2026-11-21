@@ -1369,8 +1369,22 @@ CASES = [
 ]
 
 
+# Python 3.10 records no column of the operation that raised, so where
+# one line holds several operations a raise on a drawn value is a draw
+# defect there rather than a finding; and a static `__call__` is not read
+# as callable. Each entry says less than 3.11 does, never more.
+BEFORE_3_11 = {
+    ('settle', 's_len_and_gt', 'f(x) >= 0'): 'unknown',
+    ('settle', 'r_list_default', 'f(axes) >= 1'): 'unknown',
+    ('r3a', 'cmp_and_idx', 'f(x) == f(x)'): 'unknown',
+    ('r3a', 'static_inst', 'f(x) == f(x)'): 'skipped:misspecified',
+}
+
+
 @pytest.mark.parametrize("module, function, text, verdict", CASES)
 def test_each_case_keeps_its_verdict(modules, module, function, text, verdict):
+    if sys.version_info < (3, 11):
+        verdict = BEFORE_3_11.get((module, function, text), verdict)
     fn = eval(function, vars(modules[module]))
     (p,) = check_conjectures(fn, [claim(text, route="probe")])
     assert p.verdict == verdict, (p.verdict, p.note, p.counterexample)

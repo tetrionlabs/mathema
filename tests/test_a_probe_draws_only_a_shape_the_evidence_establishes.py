@@ -704,6 +704,7 @@ def test_lambdas_that_cannot_be_told_apart_say_so(mod, monkeypatch):
 
     import mathema._shape_evidence as se
     monkeypatch.setattr(se, "_lambda_by_position", lambda *a: None)
+    monkeypatch.setattr(se, "_lambda_by_code", lambda *a: None)
     monkeypatch.setattr(se, "_DEFS", weakref.WeakKeyDictionary())
     shape = se.ParameterShape("x", None)
     text = se.not_established_text(mod.pick, shape)
