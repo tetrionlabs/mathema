@@ -497,11 +497,11 @@ def test_a_stated_shape_is_not_restated_on_the_record(mod):
 
 @pytest.mark.usefixtures("without_language_package")
 @pytest.mark.parametrize("name, var", [("shout", "s"), ("greet", "name")])
-def test_a_body_that_uses_text_is_never_given_a_number(mod, name, var):
+def test_a_body_that_uses_text_raises_on_a_float_as_a_draw_defect(mod, name, var):
     p = _row(getattr(mod, name), f"f({var}) == f({var})")
-    assert p.verdict == "skipped", (p.verdict, p.note, p.counterexample)
-    assert p.meta.get("mathema.probe_gap") == "string-domain-missing"
-    assert "raised" not in (p.counterexample or "")
+    assert p.verdict == "unknown", (p.verdict, p.note, p.counterexample)
+    assert p.meta["mathema.draw_defect"]["param"] == var
+    assert f"a string use of {var} was seen" in p.note
 
 
 def test_an_annotation_the_body_contradicts_is_drawn_and_the_raise_stands(mod):

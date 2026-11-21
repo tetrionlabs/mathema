@@ -778,6 +778,16 @@ def definition_place(fn) -> "tuple[str, str]":
     return _place(fn, line), _source_line(fn, line)
 
 
+def string_seen_text(param: str) -> str:
+    """Intent:
+        The note's clause for a parameter with a string use the probe
+        has no strings to draw for.
+    """
+    return (f"a string use of {param} was seen, and no string is drawn "
+            f"without a domain; to draw strings, bind it (for {param} in "
+            f"L[...])")
+
+
 def assumed_float_text(params: list) -> str:
     """Intent:
         The note's clause saying a parameter whose shape nothing

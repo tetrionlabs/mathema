@@ -8321,6 +8321,9 @@ class _ClaimContext:
     # the parameters whose shape nothing establishes, drawn as floats on
     # mathema's assumption
     assumed_float: list = field(default_factory=list)
+    # the parameters with a string use the probe has no strings to draw
+    # for: drawn as an unannotated parameter is
+    string_seen: list = field(default_factory=list)
     # whether f has returned on a draw of this claim's probe
     f_returned: bool = False
     # the parameters the claim holds at a literal, a kept default or a
@@ -12555,6 +12558,17 @@ def _shape_gate(ctx: "_ClaimContext", fn, facts, kinds: dict,
             if p not in ctx.assumed_float:
                 ctx.assumed_float.append(p)
             continue
+        if shape.established and shape.evidence is not None \
+                and shape.evidence.shape == "string" and not shape.stated \
+                and out.get(p) != "string":
+            # no string can be drawn without a domain: the use is noted,
+            # and the parameter is drawn as an unannotated one is
+            ctx.drawn_shapes[p] = assumed_shape(p)
+            ctx.string_seen.append(p)
+            if out.get(p) in ("scalar", "unknown", None) \
+                    and p not in ctx.assumed_float:
+                ctx.assumed_float.append(p)
+            continue
         text = (not_established_text(fn, shape) if not shape.established
                 else element_shape_missing(fn, shape))
         if text is not None:
@@ -12651,18 +12665,20 @@ def _probe_stage(ctx: "_ClaimContext", fn, facts, kinds: dict,
     token = _NULL_IS_A_HOLE.set(_null_is_a_hole(facts))
     ctx.drawn_shapes = {}
     ctx.assumed_float = []
+    ctx.string_seen = []
     ctx.f_returned = False
     try:
         row = _probe_stage_in_slots(ctx, fn, facts, kinds, sampling)
     finally:
         _NULL_IS_A_HOLE.reset(token)
-    if ctx.assumed_float:
-        from ._shape_evidence import assumed_float_text
+    if ctx.assumed_float or ctx.string_seen:
+        from ._shape_evidence import assumed_float_text, string_seen_text
         row.meta = {**(row.meta or {}), "mathema.assumed_shape": {
             p: "float" for p in ctx.assumed_float}}
-        if (row.meta or {}).get("mathema.draw_defect") is None:
-            row.note = "; ".join([assumed_float_text(ctx.assumed_float),
-                                  row.note or ""]).rstrip("; ")
+        said = ([assumed_float_text(ctx.assumed_float)] if ctx.assumed_float
+                and (row.meta or {}).get("mathema.draw_defect") is None else [])
+        said += [string_seen_text(p) for p in ctx.string_seen]
+        row.note = "; ".join([*said, row.note or ""]).rstrip("; ")
     if ctx.drawn_shapes and row.verdict in ("holds", "falsified", "proven"):
         row.meta = {**(row.meta or {}), "mathema.drawn_shapes": {
             p: shape.as_record() for p, shape in ctx.drawn_shapes.items()}}
