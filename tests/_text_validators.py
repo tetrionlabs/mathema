@@ -82,7 +82,7 @@ class Defined:
         return isinstance(value, str) and bool(self._accepts(value))
 
     def to_json(self):
-        return {"name": self.name, "definition": self._definition}
+        return {"name": self.name, "term": self._definition}
 
 
 def _reads(callee):
@@ -98,7 +98,7 @@ def _spelled_as(language, arguments, negated):
     pattern = _COMPILED[json.loads(arguments[0])]
     (mode,) = [m for p, m in PATTERNS if p == pattern.pattern]
     node = PATTERNS[(pattern.pattern, mode)]
-    base = language.to_json()["definition"]["language"]
+    base = language.to_json()["term"]["language"]
     call = getattr(pattern, mode)
     return Defined(f"{language.name}, spelled as ({arguments[0]})",
                    lambda s: language.contains(s) and (call(s) is not None) != negated,
@@ -152,7 +152,7 @@ def on_smt(found):
 
 
 def definition(name):
-    return next(lang for lang in LANGUAGES if lang.name == name).to_json()["definition"]
+    return next(lang for lang in LANGUAGES if lang.name == name).to_json()["term"]
 
 
 def enumerated(alphabet, longest):
