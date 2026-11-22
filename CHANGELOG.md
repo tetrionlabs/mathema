@@ -6,7 +6,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Highlights
 - A function read as a pattern validator is decided on the solver route for more claim forms: `assuming f is defined, f(s) == s` for a validator that refuses every text outside its language; a match on `s or ''` over a language of texts; a `let`-bound variable with another name than the parameter; literal text added around the variable, decided over all text when the texts called on leave the variable's language; an exception class of the function's own package with a builtin exception as its only base and nothing of its own; and a message reading a module-level text constant.
-- `mathema.regular` has draft calls, not part of the public interface yet: `validate`, `member` and `matcher` on a definition (with a bound and a budget, reporting the work spent), `node_member`, `node_matcher`, `atoms`, `shortest_member`, `MATCH_BUDGET` and `Lowering`.
+- `mathema.regular` has the calls of a term algebra: `validate`, `contains` and `matcher` (on a definition, with a bound and a budget, reporting the work spent, or on a bare node), `atoms`, `shortest_member` and `find_member`.
 
 ### Upgrading from 0.6.6.1
 - A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release.
