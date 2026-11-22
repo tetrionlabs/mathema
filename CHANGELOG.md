@@ -18,6 +18,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
+- A claim whose call passes a literal `None` (`for x in {1}, f(None, 0.5) == 0`) is decided by running that call, never proven by derive, which reads every argument as a real number.
 
 ## 0.6.6.1
 

@@ -122,6 +122,29 @@ def _inferred_literal_domain(text: str, sig_params: list) -> dict:
     return inferred
 
 
+def _non_real_literal_args(text: str) -> list:
+    """Intent:
+        The source of every argument of an `f(...)` call in `text`, by
+        position or keyword, that is the literal `None` or `...`. Derive
+        reads each argument as a real symbol, so a call passing one of
+        these is a call derive does not model.
+    """
+    try:
+        tree = ast.parse(text or "0", mode="eval")
+    except SyntaxError:
+        return []
+    found: list = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        for arg in [*node.args, *(k.value for k in node.keywords)]:
+            if isinstance(arg, ast.Constant) and (
+                    arg.value is None or arg.value is Ellipsis):
+                found.append(ast.unparse(arg))
+    return found
+
+
 def _names_in_text(text: str) -> set:
     """The bare names a claim expression reads (its variables, not the
     functions it calls)."""
@@ -11834,6 +11857,18 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             cj.name, statement, "unknown", route="derive",
             note=(f"{note}; the claim binds the value of {names}, which "
                   f"the body reads as a sequence").lstrip("; "),
+            meta={"mathema.derive_status": "undecided"})
+        return None
+    non_real = sorted(set(_non_real_literal_args(cj.lhs)
+                          + _non_real_literal_args(cj.rhs or "")))
+    if non_real:
+        # a call passing None is one concrete call that
+        # derive's real symbols do not model, so running it decides
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=(f"{note}; the claim calls f with {', '.join(non_real)}, "  # :draft
+                  f"which derive does not read as a real number, so the "
+                  f"call is run").lstrip("; "),
             meta={"mathema.derive_status": "undecided"})
         return None
     family_derive = family.routes().get("derive") if family is not None else None
