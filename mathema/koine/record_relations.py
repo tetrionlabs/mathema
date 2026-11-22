@@ -57,12 +57,36 @@ def _questions(word: str, left: tuple, right: tuple) -> list:
     return [forward, (([b_least], [a_most]), ([b_most], [a_least]))]
 
 
+def inconsistency(documents: tuple, *, timeout_ms: int = 5000) -> "str | None":
+    """Intent:
+        Why the `(at_most, at_least)` membership documents of a
+        definition describe no language, or None when they do: a value
+        of its at_most outside its at_least (the at_most holds only
+        members and the at_least every member, so the one is inside the
+        other), named; or no answer to that question, with the reason.
+        An exact definition, one document twice, always describes its
+        language.
+    """
+    at_most, at_least = documents
+    if at_most is at_least:
+        return None
+    found = solver_question.find_member([at_most], [at_least], timeout_ms=timeout_ms)
+    if found.status == "none":
+        return None
+    if found.status == "member":
+        return (f"the definition's at_most holds {found.member!r}, which its at_least does "
+                f"not, so it describes no language")
+    return (f"whether the definition's at_most lies inside its at_least has no answer "
+            f"({found.reason})")
+
+
 def decide(word: str, left, right, *, timeout_ms: int = 5000) -> Decision:
     """Intent:
         Decide `left <word> right` for two record-language definitions.
         `proven` or `falsified` as the module states, a breaking value
         carried as the witness; `unknown` with the reason when a
-        definition has no membership document, when the bounds leave
+        definition has no membership document, when a definition
+        describes no language (`inconsistency`), when the bounds leave
         the relation open, or when the question has no answer.
 
     Raises:
@@ -76,6 +100,10 @@ def decide(word: str, left, right, *, timeout_ms: int = 5000) -> Decision:
                      record_membership.membership_documents(right))
     except record_membership.Declined as e:
         return Decision("unknown", str(e))
+    for pair in documents:
+        why = inconsistency(pair, timeout_ms=timeout_ms)
+        if why is not None:
+            return Decision("unknown", why)
     universal = _UNIVERSAL[word]
     holds, breaks = (("proven", "falsified") if word == universal
                      else ("falsified", "proven"))
@@ -97,4 +125,4 @@ def decide(word: str, left, right, *, timeout_ms: int = 5000) -> Decision:
     return Decision("unknown", why)
 
 
-__all__ = ["Decision", "InvalidTerm", "WORDS", "decide"]
+__all__ = ["Decision", "InvalidTerm", "WORDS", "decide", "inconsistency"]

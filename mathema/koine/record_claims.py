@@ -22,7 +22,7 @@ breaking member is asked of `at_most`, which holds only members.
 from __future__ import annotations
 
 from . import record_membership, record_terms as T, solver_question
-from .record_relations import Decision
+from .record_relations import Decision, inconsistency
 from .syntax import List, Name, Str, Term
 
 NOT, AND = "operator::logic::not", "operator::logic::and"
@@ -63,7 +63,8 @@ def decide_every_member(definition, statement, *, timeout_ms: int = 5000) -> Dec
         the statement is false; `proven` when no member breaks it and
         the statement has a value at every member; `unknown` with the
         reason otherwise, as when the statement has no value at some
-        member, a definition holds a list node, or the bounds of a
+        member, a definition holds a list node, the definition describes
+        no language (`record_relations.inconsistency`), or the bounds of a
         definition that is not exact leave it open.
 
     Raises:
@@ -73,8 +74,12 @@ def decide_every_member(definition, statement, *, timeout_ms: int = 5000) -> Dec
         at_most, at_least = _bounds(definition)
         narrow = breaking_document(at_most, statement)
         wide = breaking_document(at_least, statement)
+        documents = record_membership.membership_documents(definition)
     except record_membership.Declined as e:
         return Decision("unknown", str(e))
+    why = inconsistency(documents, timeout_ms=timeout_ms)
+    if why is not None:
+        return Decision("unknown", why)
     problems = T.validate(wide)
     if problems:
         return Decision("unknown", f"the statement is not valid: {'; '.join(problems)}")
