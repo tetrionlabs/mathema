@@ -6,7 +6,7 @@ a text is never changed by the canonical form, and a node that is not
 of the schema is refused as one."""
 import pytest
 
-from mathema import record_language as rl
+from tests import _record_language_oracle as rl
 from mathema.regular import InvalidTerm
 
 

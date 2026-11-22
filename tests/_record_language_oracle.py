@@ -51,8 +51,8 @@ from __future__ import annotations
 import hashlib
 import json
 
-from . import regular
-from .regular import Found, InvalidTerm
+from mathema import regular
+from mathema.regular import Found, InvalidTerm
 
 KIND = "record_language"
 VERSION = 1

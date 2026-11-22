@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Functions the claims about `mathema.record_language` are stated over.
+"""Functions the claims about the record-language oracle are stated over.
 
 Each takes whole numbers a claim can quantify: indices into `TERMS`, a
 fixed catalogue of record-language nodes (every node kind, nested
@@ -11,37 +11,36 @@ keys, a list, a number that is not whole), and into `DOCUMENTS`,
 definitions exact and not. Each returns the truth of one statement
 about the module, so a claim reads `f(t, v) == True`.
 
-`record_language.py` imports only `regular.py`, so the two are loaded
-here from their files as a package of their own: the claims can then be
-checked by any installed mathema, a released one included, against the
-files in this tree. `generated_term` and `generated_value` draw further
-terms and values from a seed, for the same statements over more than
-the catalogue."""
+The oracle is `tests/_record_language_oracle.py`, loaded here from its
+file, so the claims are checked against the module in this tree and the
+`mathema.regular` the run imports. `generated_term` and
+`generated_value` draw further terms and values from a seed, for the
+same statements over more than the catalogue."""
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import json
 import random
 import sys
-import types
 from pathlib import Path
 
-_PACKAGE = Path(__file__).resolve().parent.parent / "mathema"
+_ORACLE = Path(__file__).resolve().parent.parent / "_record_language_oracle.py"
 
 
-def _load(name: str):
-    """The module in the file `mathema/<name>.py` of this tree, loaded
-    once inside a bare package `candidate_terms`, so its import of a
-    sibling module reads the file beside it."""
-    if "candidate_terms" not in sys.modules:
-        package = types.ModuleType("candidate_terms")
-        package.__path__ = [str(_PACKAGE)]
-        sys.modules["candidate_terms"] = package
-    return importlib.import_module(f"candidate_terms.{name}")
+def _load():
+    """The oracle module in `tests/_record_language_oracle.py`, loaded
+    once from its file."""
+    name = "record_language_oracle"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, _ORACLE)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
 
 
 def _rl():
-    return _load("record_language")
+    return _load()
 
 
 # ---- the catalogues ----------------------------------------------------
