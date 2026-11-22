@@ -23,6 +23,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A negated claim (`not is_state_safe(f)`, `not is_deterministic(f)`) is proven from its positive's disproof only when that disproof's witness was executed; a disproof read from the source alone leaves the negation unknown, with the reason.
 - `is_empty_safe(xs)` runs every empty input the parameter admits (the empty tuple beside the empty list for a plain or abstract sequence), and a raise on a non-empty input no longer falsifies it.
 - `excluded_outside_domain(x)` is proven by construction only for a wrapper `enforce_domain` or `enforce_dimensions` built; a function that merely carries their attribute is decided by calls outside the domain.
+- A division by zero on the claim's own side that only the float evaluation makes (`exp(f(x)) / exp(f(x))` at x = -1e6, where exp underflows to 0.0) is no counterexample: read exactly the side has a value there, so the point is left undecided; a division by zero the claim states exactly still falsifies.
 
 ## 0.6.6.1
 

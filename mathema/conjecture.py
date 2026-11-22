@@ -8179,6 +8179,104 @@ def _bound_funcs_of(cj) -> dict:
         return {}
 
 
+def _claim_side_has_exact_value(code_l, code_r, env: dict,
+                                callees: dict) -> "bool | None":
+    """Intent:
+        Whether the claim's sides have a value at the point `env` when
+        read exactly: every number of the point and every result of a
+        callee in `callees` read as the exact rational it holds, and the
+        claim's own functions (`exp`, `log`, ...) as sympy's. True when
+        each side is a finite number there; False when a side divides by
+        zero or is not finite in that reading; None when it cannot be
+        read so (a value or function with no exact reading).
+    """
+    import sympy
+
+    from ._math_vocab import _MATH_ATTRS, _SYMPY_FUNCS
+
+    class _NoReading(Exception):
+        pass
+
+    def exact(value):
+        if isinstance(value, bool):
+            raise _NoReading
+        if isinstance(value, int):
+            return sympy.Integer(value)
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise _NoReading
+            return sympy.Rational(value)
+        raise _NoReading
+
+    def read_callee(callee):
+        def call_exactly(*args):
+            floats = [float(a) if isinstance(a, sympy.Basic) else a
+                      for a in args]
+            return exact(callee(*floats))
+        return call_exactly
+
+    scope: dict = {}
+    for name, value in env.items():
+        if name == "__builtins__":
+            continue
+        if name in callees:
+            continue
+        if name in _SYMPY_FUNCS:
+            scope[name] = _SYMPY_FUNCS[name]
+        elif name in _MATH_ATTRS:
+            scope[name] = _MATH_ATTRS[name]
+        elif callable(value) or (isinstance(value, float)
+                                 and not math.isfinite(value)):
+            # a word the claim may not read; read, it has no exact value
+            continue
+        else:
+            try:
+                scope[name] = exact(value)
+            except _NoReading:
+                return None
+    for name, fn_ in _SYMPY_FUNCS.items():
+        scope.setdefault(name, fn_)
+    from ._linalg_eval import _OPERATORS, ARITH
+    # the claim's own arithmetic (`a / b` compiles to this word) on the
+    # exact values
+    scope[ARITH] = lambda op, a, b: _OPERATORS[op](a, b)
+    for name, callee in callees.items():
+        scope[name] = read_callee(callee)
+    try:
+        sides = [eval(code, {"__builtins__": {}}, scope)
+                 for code in (code_l, code_r) if code is not None]
+    except ZeroDivisionError:
+        return False
+    except Exception:
+        return None
+    for side in sides:
+        if isinstance(side, (int, float)) and not isinstance(side, bool):
+            side = sympy.sympify(side)
+        if not isinstance(side, sympy.Basic) or not side.is_number:
+            return None
+        if side.has(sympy.zoo, sympy.nan, sympy.oo, -sympy.oo):
+            return False
+        if side.is_finite is not True:
+            return None
+    return True
+
+
+def _claim_side_valued_exactly(code_l, code_r, env: dict,
+                               callees: dict) -> bool:
+    """Intent:
+        `_claim_side_has_exact_value` under the fast wall-clock cap:
+        True only when the claim's sides are shown to have a finite
+        value at `env` read exactly.
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        return _with_timeout(
+            lambda: _claim_side_has_exact_value(code_l, code_r, env, callees),
+            FAST_TIMEOUT_SECONDS) is True
+    except TimeoutError:
+        return False
+
+
 def _exactly_decided(cj, code_l, code_r, env, callees, ok, *,
                      within: "float | None" = None, input_scaled: float = 0.0,
                      side: "int | None" = None):
@@ -14610,6 +14708,22 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     cx = (f"{_point_text(args)}: the claim is false here, "
                           f"its own side read exactly as written")
                     break
+            if not call_raised[0] and isinstance(e, ZeroDivisionError) \
+                    and _claim_side_valued_exactly(
+                        code_l, code_r, env, {"f": fn_call, **bound_funcs}):
+                # the division by zero is the float evaluation's alone
+                # (an underflow to 0.0): read exactly, the claim's side
+                # has a value here, so the point is no counterexample
+                # and is left undecided
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                if undecided_at is None:
+                    undecided_at = (f"{_point_text(args)}: the claim's own "  # :draft
+                                    f"side divided by a float that rounded "
+                                    f"to zero, while read exactly it has a "
+                                    f"value")
+                undecided += 1
+                continue
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this
