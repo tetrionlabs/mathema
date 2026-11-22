@@ -165,13 +165,13 @@ def enumerated(alphabet, longest):
 def in_language(name, text):
     """Whether core's derivative matcher puts `text` in the language
     `name` defines (no solver)."""
-    return regular.member(definition(name)["language"], text)
+    return regular.contains(definition(name)["language"], text)
 
 
 def accepted_by(pattern, mode, text):
     """Whether core's derivative matcher puts `text` in the language the
     call `pattern.<mode>` accepts, as `PATTERNS` defines it."""
-    return regular.member(PATTERNS[(pattern.pattern, mode)], text)
+    return regular.contains(PATTERNS[(pattern.pattern, mode)], text)
 
 
 # the validators: each a plain module-level function of one text
