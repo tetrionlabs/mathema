@@ -76,10 +76,16 @@ def test_every_claim_reads_back_from_its_stored_text_as_the_same_claim():
         if [link[1] for link in written.links or []] != \
                 [link[1] for link in back.links or []]:
             why.append("chain")
-        sides_written, sides_back = _sides(written), _sides(back)
-        if len(sides_written) != len(sides_back) or not all(
-                _same_expression(a, b) for a, b in zip(sides_written, sides_back)):
-            why.append("sides")
+        if written.relation == "domains":
+            # a relation between domains: its sides are domain texts,
+            # not expressions
+            if (written.lhs, written.rhs) != (back.lhs, back.rhs):
+                why.append("sides")
+        else:
+            sides_written, sides_back = _sides(written), _sides(back)
+            if len(sides_written) != len(sides_back) or not all(
+                    _same_expression(a, b) for a, b in zip(sides_written, sides_back)):
+                why.append("sides")
         if why:
             wrong.append((text, why))
     assert not wrong, wrong[:20]
