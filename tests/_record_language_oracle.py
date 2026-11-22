@@ -51,8 +51,8 @@ from __future__ import annotations
 import hashlib
 import json
 
-from . import regular
-from .regular import Found, InvalidTerm
+from mathema import regular
+from mathema.regular import Found, InvalidTerm
 
 KIND = "record_language"
 VERSION = 1
@@ -87,8 +87,35 @@ def _scalar_key(value) -> "tuple | None":
 
 def _serial(value) -> str:
     """The one serialisation of a canonical value: JSON with sorted
-    keys, no white space, ASCII only."""
-    return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    keys, no white space, ASCII only.
+
+    Raises:
+        InvalidTerm: the value holds a whole number too long for Python
+            to write in decimal.
+    """
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    except ValueError as e:
+        raise InvalidTerm(f"a value this term cannot write: {e}") from None
+
+
+def _no_surrogate(text: str, what: str) -> str:
+    """`text`, when it holds no high surrogate followed by a low one.
+    ASCII JSON writes such a pair as the same two escapes as the one
+    character beyond the basic plane they encode, and reads those
+    escapes back as that character, so a term holding the pair would not
+    keep its meaning through its own canonical text. A surrogate on its
+    own is written and read back as itself.
+
+    Raises:
+        InvalidTerm: the text holds such a pair.
+    """
+    for i in range(len(text) - 1):
+        if "\ud800" <= text[i] <= "\udbff" and "\udc00" <= text[i + 1] <= "\udfff":
+            raise InvalidTerm(f"{what} {text!r} holds the surrogate pair U+{ord(text[i]):04X} "
+                              f"U+{ord(text[i + 1]):04X}, which JSON text reads back as one "
+                              "character")
+    return text
 
 
 # ---- the canonical form and the hash ----------------------------------
@@ -130,7 +157,8 @@ def canonical(node) -> dict:
             name twice, a `rest` other than `empty`, or a list whose
             `min` or `max` is not a whole number of zero or more.
     """
-    if not isinstance(node, dict) or node.get("op") not in _NODE_KEYS:
+    if not isinstance(node, dict) or not isinstance(node.get("op"), str) \
+            or node["op"] not in _NODE_KEYS:
         raise InvalidTerm(f"not a record-language node: {node!r}")
     op = node["op"]
     if set(node) != {"op", *_NODE_KEYS[op]}:
@@ -146,8 +174,11 @@ def canonical(node) -> dict:
             if key is None:
                 raise InvalidTerm(f"{value!r} is not a value a choice may list (null, a "
                                   f"boolean, a whole number, a text)")
+            if key[0] == "text":
+                _no_surrogate(key[1], "the choice value")
             keys.append(key)
-        values = [json.loads(text) for text in sorted({_serial(key[1]) for key in keys})]
+        by_text = {_serial(key[1]): key[1] for key in keys}
+        values = [by_text[text] for text in sorted(by_text)]
         return {"op": "choice", "values": values} if values else dict(_EMPTY)
     if op == "text":
         language = _regular_canonical(node["language"])
@@ -166,7 +197,8 @@ def canonical(node) -> dict:
     absorbing, unit = (_ANY, _EMPTY) if op == "union" else (_EMPTY, _ANY)
     if absorbing in args:
         return dict(absorbing)
-    kept = [json.loads(text) for text in sorted({_serial(a) for a in args if a != unit})]
+    by_text = {_serial(a): a for a in args if a != unit}
+    kept = [by_text[text] for text in sorted(by_text)]
     if not kept:
         return dict(unit)
     return kept[0] if len(kept) == 1 else {"op": op, "args": kept}
@@ -201,7 +233,7 @@ def _canonical_record(node: dict) -> dict:
         if not isinstance(field, list) or len(field) != 3 or not isinstance(field[0], str) \
                 or not isinstance(field[2], bool):
             raise InvalidTerm(f"{field!r} is not a field [name, node, required]")
-        fields.append([field[0], canonical(field[1]), field[2]])
+        fields.append([_no_surrogate(field[0], "the field name"), canonical(field[1]), field[2]])
     names: list[str] = [name for name, _, _ in fields]
     if len(set(names)) != len(names):
         raise InvalidTerm(f"a record names a field once, not {sorted(names)}")
@@ -484,6 +516,9 @@ class _Value:
 
     def __init__(self, z3, path: str) -> None:
         self.z3, self.path = z3, path
+        # a path is "value" then, per step, a field name by its repr or
+        # an item by its index in brackets, so two places never share
+        # a variable and no name holds a NUL
         self.kind = z3.Int(f"{path} kind")
         self.boolean = z3.Bool(f"{path} boolean")
         self.number = z3.Int(f"{path} number")
@@ -503,8 +538,8 @@ class _Value:
 
     def key(self, name: str) -> tuple:
         if name not in self.keys:
-            self.keys[name] = (self.z3.Bool(f"{self.path}.{name} set"),
-                               _Value(self.z3, f"{self.path}.{name}"))
+            self.keys[name] = (self.z3.Bool(f"{self.path}.{name!r} set"),
+                               _Value(self.z3, f"{self.path}.{name!r}"))
         return self.keys[name]
 
 

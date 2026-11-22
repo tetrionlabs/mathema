@@ -8,7 +8,7 @@ is inside a wider one, and the child with one flag widened
 is not, by a value `member` places.
 
 The vectors are literals in `tests/data/record_language_vectors.json`.
-The laws are the statements of `claims/record_language.claims.yaml`,
+The laws are the statements of `tests/claims/record_language_oracle.claims.yaml`,
 each run here over its stated domain: every point where there are at
 most `SWEEP` of them, else `SWEEP` points spread evenly across it. The
 claims file is where a law is run over all of its domain."""
@@ -21,20 +21,21 @@ import re
 import pytest
 import yaml
 
-from mathema import record_language
+from tests import _record_language_oracle as record_language
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VECTORS = json.loads((ROOT / "tests" / "data" / "record_language_vectors.json")
                      .read_text(encoding="utf-8"))["vectors"]
 VALID = [v for v in VECTORS if not v.get("invalid")]
 INVALID = [v for v in VECTORS if v.get("invalid")]
-CLAIMS = yaml.safe_load((ROOT / "claims" / "record_language.claims.yaml").read_text(encoding="utf-8"))
+CLAIMS = yaml.safe_load((ROOT / "tests" / "claims" / "record_language_oracle.claims.yaml").read_text(encoding="utf-8"))
 SWEEP = 1000
 
 
 def _support():
     spec = importlib.util.spec_from_file_location(
-        "record_language_support", ROOT / "claims" / "record_language_support.py")
+        "record_language_oracle_support",
+        ROOT / "tests" / "claims" / "record_language_oracle_support.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -56,7 +57,7 @@ SOLVER = ("a_found_member_is_a_member", "none_found_means_no_catalogue_value",
 
 def test_the_vector_file_holds_what_it_is_expected_to():
     assert (len(VALID), len(INVALID)) == (79, 36)
-    assert len(CLAIMS) == 69
+    assert len(CLAIMS) == 70
 
 
 @pytest.mark.parametrize("vector", VALID, ids=[v["name"] for v in VALID])
@@ -119,3 +120,14 @@ def test_without_a_solver_the_answer_is_unknown(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_z3)
     found = record_language.find_member([{"op": "any"}], [])
     assert found.status == "unknown" and "z3" in found.reason
+
+
+def test_a_null_witness_is_told_from_no_witness():
+    pytest.importorskip("z3")
+    null, nothing = {"op": "choice", "values": [None]}, {"op": "empty"}
+    assert SUPPORT.includes(null, nothing) == ("falsified", [None])
+    assert SUPPORT.disjoint(null, null) == ("falsified", [None])
+    assert SUPPORT.equal(null, nothing) == ("falsified", [None])
+    assert SUPPORT.includes(nothing, null) == ("proven", None)
+    verdict, witness = SUPPORT.includes({"op": "choice", "values": ["a"]}, nothing)
+    assert (verdict, witness) == ("falsified", ["a"])

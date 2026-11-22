@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Functions the claims about `mathema.record_language` are stated over.
+"""Functions the claims about the record-language oracle are stated over.
 
 Each takes whole numbers a claim can quantify: indices into `TERMS`, a
 fixed catalogue of record-language nodes (every node kind, nested
@@ -11,37 +11,37 @@ keys, a list, a number that is not whole), and into `DOCUMENTS`,
 definitions exact and not. Each returns the truth of one statement
 about the module, so a claim reads `f(t, v) == True`.
 
-`record_language.py` imports only `regular.py`, so the two are loaded
-here from their files as a package of their own: the claims can then be
-checked by any installed mathema, a released one included, against the
-files in this tree. `generated_term` and `generated_value` draw further
-terms and values from a seed, for the same statements over more than
-the catalogue."""
+The oracle is `tests/_record_language_oracle.py`, loaded here from its
+file, so the claims are checked against the module in this tree and the
+`mathema.regular` the run imports. `generated_term` and
+`generated_value` draw further terms and values from a seed, for the
+same statements over more than the catalogue."""
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import random
 import sys
-import types
 from pathlib import Path
 
-_PACKAGE = Path(__file__).resolve().parent.parent / "mathema"
+_ORACLE = Path(__file__).resolve().parent.parent / "_record_language_oracle.py"
 
 
-def _load(name: str):
-    """The module in the file `mathema/<name>.py` of this tree, loaded
-    once inside a bare package `candidate_terms`, so its import of a
-    sibling module reads the file beside it."""
-    if "candidate_terms" not in sys.modules:
-        package = types.ModuleType("candidate_terms")
-        package.__path__ = [str(_PACKAGE)]
-        sys.modules["candidate_terms"] = package
-    return importlib.import_module(f"candidate_terms.{name}")
+def _load():
+    """The oracle module in `tests/_record_language_oracle.py`, loaded
+    once from its file."""
+    name = "record_language_oracle"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, _ORACLE)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
 
 
 def _rl():
-    return _load("record_language")
+    return _load()
 
 
 # ---- the catalogues ----------------------------------------------------
@@ -105,6 +105,9 @@ PARENT = record(("edit", FLAG, True), ("publish", FLAG, True), ("root", text(SHA
 WIDENED = record(("edit", FLAG, True), ("publish", FLAG, True), ("root", text(DEEP), True),
                  ("shell", _CHILD_SHELL, False))
 
+#: an astral character written as the two surrogates that encode it in UTF-16
+_PAIR = chr(0xD83D) + chr(0xDE00)
+
 TERMS = [
     EMPTY, ANY, choice(None), choice(True), FLAG, choice(1), choice(1, True, "1"),
     choice("a", "b"), choice(), text(_lit("a")), text(DOLLAR), text(SHALLOW), text(DEEP),
@@ -118,6 +121,13 @@ TERMS = [
     complement(FLAG), complement(record(("x", FLAG, True))), complement(complement(text(DOLLAR))),
     union(record(("x", OFF, True)), complement(record(("x", FLAG, True)))),
     CHILD, PARENT, WIDENED,
+    # field names a path-like reading of names would confuse, and a
+    # character outside the basic plane
+    record(("a.b", choice(1), True), ("a", record(("b", choice(2), True)), True)),
+    record(("x[0]", choice(4), True),
+           ("x", {"op": "list", "item": choice(3), "min": 1, "max": 1}, True)),
+    record(("\x00", FLAG, True), ("", choice(1), False)),
+    choice("\U0001F600", "a"),
 ]
 
 VALUES = [
@@ -131,6 +141,8 @@ VALUES = [
     {"edit": True, "publish": False, "root": "/wt/elsewhere", "shell": {"git": "commit"}},
     {"edit": True, "publish": False, "root": "/etc"},
     {"edit": True, "publish": False},
+    {"a.b": 1, "a": {"b": 2}}, {"a.b": 2, "a": {"b": 1}}, {"x[0]": 4, "x": [3]},
+    {"\x00": True}, {"\x00": False, "": 1}, "\U0001F600", _PAIR,
 ]
 
 
@@ -181,6 +193,8 @@ INVALID = [
     _exact({"op": "record", "fields": {"x": FLAG}, "rest": EMPTY}),
     _exact({"op": "union", "args": FLAG}), _exact({"op": "union", "args": [FLAG, 1]}),
     _exact({"op": "complement", "args": [FLAG]}),
+    _exact(choice(_PAIR)), _exact(record((_PAIR, FLAG, True))),
+    _exact({"op": "choice", "values": [10 ** 5000]}), _exact({"op": ["choice"], "values": [1]}),
 ]
 
 
@@ -409,7 +423,7 @@ def a_record_is_monotone_in_a_field(t: int, u: int, v: int) -> bool:
 def a_text_node_holds_the_texts_of_its_language(v: int) -> bool:
     """Whether value `v` is in each text node of the catalogue exactly
     when it is a text the regular term's own matcher holds."""
-    rl, regular, value = _rl(), _load("regular"), VALUES[int(v)]
+    rl, regular, value = _rl(), importlib.import_module("mathema.regular"), VALUES[int(v)]
     return all(rl.member(text(n), value) == (isinstance(value, str) and regular.node_member(n, value))
                for n in (_lit("a"), DOLLAR, SHALLOW, DEEP))
 
@@ -495,24 +509,27 @@ def constructors_mean_what_the_nodes_mean(d: int, e: int, v: int) -> bool:
 # ---- find_member and the relations derived from it ----------------------
 
 def includes(a: dict, b: dict, timeout_ms: int = 5000):
-    """`proven` when no value is in node `a` and outside node `b`,
-    `falsified` with such a value, or `unknown` with the reason."""
+    """`("proven", None)` when no value is in node `a` and outside node
+    `b`, `("falsified", [value])` with such a value, or `("unknown",
+    reason)`. The witness is a list of one value, so a witness that is
+    null reads `[None]` and no witness reads `None`."""
     found = _rl().find_member([a], [b], timeout_ms=timeout_ms)
-    return {"none": ("proven", None), "member": ("falsified", found.member)}.get(
+    return {"none": ("proven", None), "member": ("falsified", [found.member])}.get(
         found.status, ("unknown", found.reason))
 
 
 def disjoint(a: dict, b: dict, timeout_ms: int = 5000):
-    """`proven` when no value is in both nodes, `falsified` with a
-    common member, or `unknown`."""
+    """`("proven", None)` when no value is in both nodes, `("falsified",
+    [value])` with a common member, or `("unknown", reason)`."""
     found = _rl().find_member([a, b], [], timeout_ms=timeout_ms)
-    return {"none": ("proven", None), "member": ("falsified", found.member)}.get(
+    return {"none": ("proven", None), "member": ("falsified", [found.member])}.get(
         found.status, ("unknown", found.reason))
 
 
 def equal(a: dict, b: dict, timeout_ms: int = 5000):
-    """`proven` when each node includes the other, `falsified` with a
-    value in one and not the other, or `unknown`."""
+    """`("proven", None)` when each node includes the other,
+    `("falsified", [value])` with a value in one and not the other, or
+    `("unknown", reason)`."""
     one, other = includes(a, b, timeout_ms), includes(b, a, timeout_ms)
     if "falsified" in (one[0], other[0]):
         return one if one[0] == "falsified" else other
@@ -577,7 +594,7 @@ def the_child_is_inside_its_parent() -> bool:
     rl = _rl()
     verdict, witness = includes(WIDENED, CHILD)
     return (includes(CHILD, PARENT)[0] == "proven" and verdict == "falsified"
-            and rl.member(WIDENED, witness) and not rl.member(CHILD, witness)
+            and rl.member(WIDENED, witness[0]) and not rl.member(CHILD, witness[0])
             and includes(PARENT, CHILD)[0] == "falsified")
 
 
@@ -939,10 +956,11 @@ def a_length_is_exact_at_its_bounds(t: int, n: int) -> bool:
     if includes(lists(a, n, n), lists(a, n, n + 1))[0] != "proven":
         return False
     verdict, witness = includes(lists(a, 0, n + 1), lists(a, 0, n))
-    if verdict != "falsified" or len(witness) != n + 1:
+    if verdict != "falsified" or len(witness[0]) != n + 1:
         return False
     verdict, witness = includes(lists(a), lists(a, 0, 5))
-    return verdict == "falsified" and len(witness) == 6 and all(rl.member(a, x) for x in witness)
+    return verdict == "falsified" and len(witness[0]) == 6 \
+        and all(rl.member(a, x) for x in witness[0])
 
 
 _NOT_TRUE = complement(choice(True))
@@ -1204,3 +1222,25 @@ def generated_terms_keep_the_laws(seed: int) -> bool:
     if found.status == "none":
         return not any(rl.member(a, v) and not rl.member(b, v) for v in values)
     return False
+
+
+def many_list_terms_at_one_place_are_decided(n: int) -> bool:
+    """Whether a question of `n` list terms at one place is decided
+    within `find_member`'s cap. Each term is a list of lists of lists
+    of one of `n + 1` whole numbers, the `i`-th of `i` to `i + n`, so
+    all share the number `n`; the list of lists of empty lists is left
+    out. The question has a member, and it is asked with the default
+    cap of 5000 ms: True when the answer is that member, in every term
+    by `member`, and not `unknown`. A lowering that holds one item
+    variable for every list term at a place, at each of the three
+    depths, passes the cap as `n` grows."""
+    rl, n = _rl(), int(n)
+
+    def nested(node: dict) -> dict:
+        for _ in range(3):
+            node = lists(node)
+        return node
+
+    terms = [nested(choice(*range(i, i + n + 1))) for i in range(n)]
+    found = rl.find_member(terms, [nested({"op": "empty"})])
+    return found.status == "member" and all(rl.member(t, found.member) for t in terms)
