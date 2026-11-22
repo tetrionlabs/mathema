@@ -14,8 +14,8 @@ Each function takes indices into the catalogues of
 combinations of them, some with no value at some points. Each returns
 the truth of one statement. The record-language oracle
 (`tests/_record_language_oracle.py`) is what the
-answers are compared with: its `member` for a value, its `find_member`
-for a question."""
+answers are compared with: its `member` for a value, its
+`find_by_enumeration` for a question."""
 from __future__ import annotations
 
 import importlib.util
@@ -160,14 +160,34 @@ def a_found_value_is_placed_by_both_meanings(t: int, u: int) -> bool:
             and rl.member(TERMS[int(t)], x) and not rl.member(TERMS[int(u)], x))
 
 
+def _enumerated(inside, outside=()):
+    """The enumerator's answer for nodes `inside` and `outside`."""
+    return _rl().find_by_enumeration(inside, outside)
+
+
+def _agrees(found, counted, inside, outside, bound: "str | None" = None) -> bool:
+    """Whether the route's answer `found` agrees with the enumerator's
+    `counted` for one question: a member the route gives is placed by
+    the oracle's `member` as asked; the route says none only when the
+    enumerator finds none; and, when the enumerator's universe is
+    complete, the two give one status. The route never gives no answer
+    on the catalogue."""
+    rl = _rl()
+    if found.status == "member":
+        placed = all(rl.member(n, found.member, bound=bound) for n in inside)             and not any(rl.member(n, found.member, bound=bound) for n in outside)
+        return placed and not (counted.complete and counted.status == "none")
+    if found.status == "none":
+        return counted.status == "none"
+    return False
+
+
 def the_question_agrees_with_the_reference(t: int, u: int) -> bool:
     """Whether the question over the documents of terms `t` and `u`
-    has the status `record_language.find_member` gives over the two
-    terms, and that status is an answer: a member or none."""
+    agrees with the oracle's enumerator over the two terms, both ways
+    where its universe is complete and one way otherwise (`_agrees`)."""
+    a, b = TERMS[int(t)], TERMS[int(u)]
     found = _sq().find_member([_document(t)], [_document(u)])
-    reference = _rl().find_member([TERMS[int(t)]], [TERMS[int(u)]])
-    return found.status == reference.status and found.status in ("member", "none")
-
+    return _agrees(found, _enumerated([a], [b]), [a], [b])
 
 def none_means_no_catalogue_value(t: int, u: int) -> bool:
     """Whether, when the question finds no value inside the document
@@ -182,11 +202,10 @@ def none_means_no_catalogue_value(t: int, u: int) -> bool:
 
 def several_documents_are_asked_at_once(t: int, u: int, w: int) -> bool:
     """Whether the question with two documents inside and one outside
-    has the status the reference gives the same three terms."""
+    agrees with the enumerator over the same three terms (`_agrees`)."""
+    inside, outside = [TERMS[int(t)], TERMS[int(u)]], [TERMS[int(w)]]
     found = _sq().find_member([_document(t), _document(u)], [_document(w)])
-    reference = _rl().find_member([TERMS[int(t)], TERMS[int(u)]], [TERMS[int(w)]])
-    return found.status == reference.status
-
+    return _agrees(found, _enumerated(inside, outside), inside, outside)
 
 def a_membership_document_has_a_value_everywhere(t: int) -> bool:
     """Whether no JSON value is found at which the membership document
@@ -239,36 +258,42 @@ def the_child_is_inside_its_parent() -> bool:
             and rr.decide("not subset", child, parent).verdict == "falsified")
 
 
-def _reference_verdict(word: str, a: dict, b: dict) -> str:
+def _breaking(word: str, a: dict, b: dict):
+    """The enumerator's search for a value that breaks the universal
+    relation behind `word` between nodes `a` and `b`, as one
+    question or two."""
     if word in ("subset", "not subset"):
-        verdict = REF.includes(a, b)[0]
-    elif word == "disjoint":
-        verdict = REF.disjoint(a, b)[0]
-    else:
-        verdict = REF.equal(a, b)[0]
-    if word in ("not subset", "!=") and verdict != "unknown":
-        return "falsified" if verdict == "proven" else "proven"
-    return verdict
-
+        return [_enumerated([a], [b])]
+    if word == "disjoint":
+        return [_enumerated([a, b])]
+    return [_enumerated([a], [b]), _enumerated([b], [a])]
 
 def a_relation_agrees_with_the_reference(t: int, u: int, w: int) -> bool:
     """Whether relation word `w` between the exact definitions of terms
-    `t` and `u` has the verdict the reference's inclusion, disjointness
-    and equality give, and a witness it carries is placed by
-    `record_language.member` as the verdict says."""
+    `t` and `u` agrees with the enumerator: a verdict resting on a
+    witness carries one the oracle's `member` places as breaking the
+    relation; a verdict resting on none is given only when the
+    enumerator finds no breaking value; a breaking value the enumerator
+    finds makes the verdict rest on a witness; and where every universe
+    is complete, the verdict rests on a witness exactly when the
+    enumerator finds one."""
     rl, word = _rl(), WORDS[int(w)]
     a, b = TERMS[int(t)], TERMS[int(u)]
     decided = _rr().decide(word, REF._exact(a), REF._exact(b))
-    if decided.verdict != _reference_verdict(word, a, b):
+    counted = _breaking(word, a, b)
+    some_break = any(c.status == "member" for c in counted)
+    complete = all(c.complete for c in counted)
+    broken = "falsified" if word in ("subset", "disjoint", "=") else "proven"
+    if decided.verdict not in ("proven", "falsified"):
         return False
     if decided.witness is None:
-        return decided.verdict == ("proven" if word in ("subset", "disjoint", "=")
-                                   else "falsified")
+        return decided.verdict != broken and not some_break
     x = decided.witness["value"]
+    if decided.verdict != broken or (complete and not some_break):
+        return False
     if word == "disjoint":
         return rl.member(a, x) and rl.member(b, x)
     return rl.member(a, x) != rl.member(b, x)
-
 
 def a_relation_of_two_bounds_is_decided_on_the_right_side(d: int, e: int, w: int) -> bool:
     """Whether, for definitions `d` and `e` that may each be a pair of
@@ -312,10 +337,9 @@ def a_relation_of_two_bounds_is_decided_on_the_right_side(d: int, e: int, w: int
 
 def generated_questions_agree_with_the_reference(seed: int) -> bool:
     """Whether, for two terms and forty values drawn from `seed`: the
-    formula of each membership document has `record_language.member`'s
-    truth at each value; the question over the two documents has the
-    status the reference gives the two terms; and a value found is
-    placed by `record_language.member` as asked."""
+    formula of each membership document has the oracle's `member`
+    truth at each value; and the question over the two documents agrees
+    with the enumerator over the two terms (`_agrees`)."""
     rl, sq, rm = _rl(), _sq(), _rm()
     a, b = REF.generated_term(int(seed)), REF.generated_term(int(seed) + 1000)
     doc_a, doc_b = rm.membership_document(a), rm.membership_document(b)
@@ -323,14 +347,7 @@ def generated_questions_agree_with_the_reference(seed: int) -> bool:
         value = REF.generated_value(int(seed) * 40 + i)
         if sq.derived_truth_at(doc_a, value) is not rl.member(a, value):
             return False
-    found = sq.find_member([doc_a], [doc_b])
-    reference = rl.find_member([a], [b])
-    if found.status != reference.status:
-        return False
-    if found.status == "member":
-        return rl.member(a, found.member) and not rl.member(b, found.member)
-    return found.status == "none"
-
+    return _agrees(sq.find_member([doc_a], [doc_b]), _enumerated([a], [b]), [a], [b])
 
 def _outside_the_reading() -> list:
     """Documents the question has no reading of."""
@@ -381,17 +398,17 @@ def _vector_documents(i: int):
 
 def a_vector_has_its_documents_or_is_declined_by_name(i: int) -> bool:
     """Whether vector `i` has its two membership documents, both valid;
-    or holds a list node and is declined; or is no definition of this
-    kind and version and is refused."""
+    or holds a list node in canonical form and is declined; or is no
+    definition of this kind and version and is refused."""
     from mathema.regular import InvalidTerm
     rm, rt, document = _rm(), _rt(), VECTORS[int(i)]["document"]
     try:
         at_most, at_least = rm.membership_documents(document)
     except rm.Declined:
-        return _holds_a_list(document)
+        return _holds_a_list(list(_rl().bounds(document)))
     except InvalidTerm:
         return not _rl().is_definition(document)
-    return (_rl().is_definition(document) and not _holds_a_list(document)
+    return (_rl().is_definition(document) and not _holds_a_list(list(_rl().bounds(document)))
             and rt.validate(at_most) == [] and rt.validate(at_least) == [])
 
 
@@ -416,9 +433,8 @@ def a_vector_means_member(i: int, v: int) -> bool:
 
 def a_question_over_two_vectors_agrees_with_the_reference(i: int, j: int) -> bool:
     """Whether the question "in vector `i`'s at_most, outside vector
-    `j`'s at_least" has the status `record_language.find_member` gives
-    the same two nodes, and a value found is placed by
-    `record_language.member` as asked."""
+    `j`'s at_least" agrees with the enumerator over the same two
+    canonical nodes (`_agrees`)."""
     rl = _rl()
     a, b = _vector_documents(i), _vector_documents(j)
     if a is None or b is None:
@@ -426,12 +442,7 @@ def a_question_over_two_vectors_agrees_with_the_reference(i: int, j: int) -> boo
     left, right = VECTORS[int(i)]["document"], VECTORS[int(j)]["document"]
     inside, outside = rl.bounds(left)[0], rl.bounds(right)[1]
     found = _sq().find_member([a[0]], [b[1]])
-    if found.status != rl.find_member([inside], [outside]).status:
-        return False
-    if found.status == "member":
-        return rl.member(left, found.member, bound="at_most") \
-            and not rl.member(right, found.member, bound="at_least")
-    return found.status == "none"
+    return _agrees(found, _enumerated([inside], [outside]), [inside], [outside])
 
 
 # ---- a statement about every member of a record language -------------------
@@ -454,29 +465,29 @@ def _breaks_the_keys(value, names) -> bool:
 
 def every_key_of_every_member_is_named_agrees_with_the_reference(t: int, n: int) -> bool:
     """Whether "every key of every member of term `t` is one of name
-    set `n`" is decided as the reference decides "term `t` is included
-    in the closed record of those names, each optional and holding any
-    value": proven exactly when that inclusion is proven; falsified
-    only by a map the reference places in the term that holds a key
-    outside the names, and always when the catalogue holds such a map;
-    and otherwise undecided with the reason that the statement has no
-    value at a member that is no map."""
+    set `n`" agrees with the enumerator's search for a member of the
+    term outside the closed record of those names, each optional and
+    holding any value: proven only when it finds none, and, where its
+    universe is complete, exactly then; falsified only by a map the
+    oracle's `member` places in the term that holds a key outside the
+    names, and always when the catalogue holds such a map; and
+    otherwise undecided with the reason that the statement has no value
+    at a member that is no map."""
     rl, rc = _rl(), _rc()
     term, names = TERMS[int(t)], NAMESETS[int(n)]
     closed = REF.record(*[(name, REF.ANY, False) for name in names])
-    reference = REF.includes(term, closed)[0]
+    counted = _enumerated([term], [closed])
     decided = rc.decide_every_member(REF._exact(term), rc.every_key_is_one_of(names))
-    if (decided.verdict == "proven") != (reference == "proven"):
-        return False
     if decided.verdict == "proven":
-        return decided.witness is None
+        return decided.witness is None and counted.status == "none"
+    if counted.complete and counted.status == "none":
+        return False
     a_map_breaks = any(rl.member(term, x) and isinstance(x, dict)
                        and not set(x) <= set(names) for x in VALUES)
     if decided.verdict == "falsified":
         x = decided.witness["value"]
         return rl.member(term, x) and isinstance(x, dict) and not set(x) <= set(names)
     return decided.verdict == "unknown" and not a_map_breaks and "no value" in decided.reason
-
 
 def the_closed_record_has_no_other_key() -> bool:
     """Whether, for the closed record of edit, publish and root: every
@@ -518,23 +529,24 @@ def a_statement_about_every_member_is_asked_of_the_right_bound(d: int, n: int) -
 
 def generated_statements_about_keys_agree_with_the_reference(seed: int) -> bool:
     """Whether, for a term drawn from `seed` and the names x and y, the
-    statement about every key of every member is proven exactly when
-    the reference proves the inclusion in the closed record of those
-    names, and a falsifying value is a map the reference places in the
+    statement about every key of every member is proven only when the
+    enumerator finds no member of the term outside the closed record of
+    those names, and, where its universe is complete, exactly then; and
+    a falsifying value is a map the oracle's `member` places in the
     term, holding another key."""
     rl, rc = _rl(), _rc()
     term, names = REF.generated_term(int(seed)), ["x", "y"]
     closed = REF.record(*[(name, REF.ANY, False) for name in names])
-    reference = REF.includes(term, closed)[0]
+    counted = _enumerated([term], [closed])
     decided = rc.decide_every_member(REF._exact(term), rc.every_key_is_one_of(names))
-    if (decided.verdict == "proven") != (reference == "proven"):
+    if decided.verdict == "proven":
+        return counted.status == "none"
+    if counted.complete and counted.status == "none":
         return False
     if decided.verdict == "falsified":
         x = decided.witness["value"]
         return rl.member(term, x) and isinstance(x, dict) and not set(x) <= set(names)
-    return decided.verdict == "proven" or bool(decided.reason)
-
-
+    return bool(decided.reason)
 def only_valued_points_are_asked_for_on_request(e: int) -> bool:
     """Whether the question restricted to points where every document
     has a value gives, for the document of expression `e` asked false,
