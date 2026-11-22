@@ -10475,6 +10475,27 @@ def replace_proof(proof, status: str, sketch: str):
                        quantifier=proof.quantifier, meta=dict(proof.meta))
 
 
+def _executed_disproof(proof) -> bool:
+    """Whether a disproof's witness is a call that ran: the only
+    disproof a negation is proven from."""
+    return bool((proof.meta or {}).get("mathema.witness_executed"))
+
+
+def _unexecuted_negation(proof):
+    """Intent:
+        The not-form of a claim whose positive was disproven without an
+        executed witness (a line read from the source, which may sit in
+        a branch no call reaches): undecided, saying so, never proven.
+    """
+    from .symbolic._proof_support import ProofResult
+    return ProofResult(
+        "undecided",
+        sketch=("the positive claim is falsified only from the source, "  # :draft
+                "and that line was not executed, so its negation is not "
+                "proven: " + (proof.counterexample or proof.sketch or "")),
+        meta=dict(proof.meta or {}))
+
+
 def _provenance_meta(proof) -> dict:
     """Intent:
         The proof-mechanism provenance worth carrying onto the output
@@ -10597,6 +10618,8 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
             proof = replace_proof(proof, "disproven",
                                   "the positive claim is proven, so its "
                                   "negation is falsified: " + (proof.sketch or ""))
+        elif proof.status == "disproven" and not _executed_disproof(proof):
+            proof = _unexecuted_negation(proof)
         elif proof.status == "disproven":
             proof = replace_proof(proof, "proven",
                                   "the positive claim is falsified, and that "
@@ -12033,6 +12056,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             family_proof = replace_proof(family_proof, "disproven",
                                          "the positive claim is proven, so its "
                                          "negation is falsified: " + (family_proof.sketch or ""))
+        elif (family_proof.status == "disproven"
+              and not _executed_disproof(family_proof)):
+            family_proof = _unexecuted_negation(family_proof)
         elif family_proof.status == "disproven":
             family_proof = replace_proof(family_proof, "proven",
                                          "the positive claim is falsified, and that "
