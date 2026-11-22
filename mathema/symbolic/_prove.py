@@ -4768,6 +4768,22 @@ def suspended_call_refusal(fn) -> "str | None":
             f"call does")
 
 
+def _unread_parameters(facts) -> frozenset:
+    """Intent:
+        The parameters the function's body never names, so no value passed
+        for one changes what the body does: a body that names `locals`,
+        `vars`, `eval` or `exec`, which can read its parameters without
+        naming them, has none.
+    """
+    tree = getattr(facts, "tree", None)
+    if tree is None or not hasattr(tree, "body"):
+        return frozenset()
+    named = {n.id for stmt in tree.body for n in ast.walk(stmt) if isinstance(n, ast.Name)}
+    if named & {"locals", "vars", "eval", "exec"}:
+        return frozenset()
+    return frozenset(p for p in facts.params if p not in named)
+
+
 def _listed_missing(domain: dict) -> list:
     """Intent:
         `x = nan` for each missing value a parameter's finite set lists
@@ -4875,7 +4891,9 @@ def _raises_read(fn, facts, exc_name: str | None, domain: dict | None,
     if suspended is not None:
         return ProofResult("unliftable", sketch=suspended)
 
-    listed = _listed_missing(domain or {})
+    unread = _unread_parameters(facts)
+    listed = _listed_missing({p: b for p, b in (domain or {}).items()
+                              if p not in unread})  # :draft
     if listed:
         return ProofResult("unliftable", sketch=(
             # :draft
