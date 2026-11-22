@@ -10,7 +10,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Upgrading from 0.6.6.1
 - A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release.
-- A regular-language definition writes its ranges as lists; ranges written as tuples are refused, and so is a definition that states both `language` and the bounds `at_least` and `at_most`.
+- A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
 - A claim whose every variable is a text has no `[float]` companion row.
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
 

@@ -93,9 +93,9 @@ def _ranges(raw, where: str) -> list:
         raise InvalidTerm(f"{where}: ranges must be a list of [lo, hi] pairs")
     pairs = []
     for pair in raw:
-        if not isinstance(pair, list) or len(pair) != 2:  # :draft
-            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi] "
-                              f"(a list of two code points, as JSON writes it)")
+        # a pair written as a tuple is the list it stands for
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi]")
         lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
         if lo > hi:
             raise InvalidTerm(f"{where}: the range {pair!r} ends before it starts")
