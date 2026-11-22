@@ -107,7 +107,9 @@ def nominal_text(doc: Document) -> str:
 
 
 def _digest(text: str) -> str:
-    return HASH_PREFIX + hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    # a surrogate on its own, which a text literal may hold, is written
+    # as its three UTF-8 bytes; a text with none is its plain UTF-8
+    return HASH_PREFIX + hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def koine_hash(doc: Document, siblings: dict | None = None) -> str:
