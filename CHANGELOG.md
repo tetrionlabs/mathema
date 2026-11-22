@@ -19,6 +19,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
 - A claim whose call passes a literal `None` (`for x in {1}, f(None, 0.5) == 0`) is decided by running that call, never proven by derive, which reads every argument as a real number.
+- `is_defined(f)` over a domain that lists a missing value (`{1, None}`, `[0, 1] | absent`) runs f at each listed value: a raise there falsifies it, with that call as the witness, and its negation reads the same run.
 
 ## 0.6.6.1
 

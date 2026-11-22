@@ -9271,6 +9271,109 @@ def _admitted_scalar_points(ctx) -> list:
     return out
 
 
+def _an_ordinary_value(bound):
+    """Intent:
+        One value, not a missing one, that `bound` admits: a listed
+        member, an interval's closed end or midpoint, else 0, 1 or -1
+        when the bound admits it. `_NO_VALUE` when none of these is
+        admitted. An unbound parameter (`None`) reads over the reals, so
+        0.0.
+    """
+    from .domain import _as_domain, _Sentinel, domain_contains
+    if bound is None:
+        return 0.0
+    dom = _as_domain(bound)
+    candidates: list = []
+    for piece in dom.pieces:
+        if isinstance(piece, frozenset):
+            candidates += sorted((v for v in piece
+                                  if v is not None and not isinstance(v, _Sentinel)),
+                                 key=repr)
+        elif isinstance(piece, tuple) and len(piece) == 2:
+            lo, hi = piece
+            candidates += [lo, hi]
+            if all(isinstance(v, (int, float)) and math.isfinite(v)
+                   for v in (lo, hi)):
+                candidates.append((lo + hi) / 2)
+    candidates += [0.0, 1.0, -1.0]
+    for value in candidates:
+        if isinstance(value, float) and not math.isfinite(value):
+            continue
+        try:
+            if domain_contains(value, bound):
+                return value
+        except Exception:
+            continue
+    return _NO_VALUE
+
+
+_NO_VALUE = object()
+
+
+def _definedness_at_listed_missing(ctx, fn, facts, cj_domain: dict, proof):
+    """Intent:
+        A proven `is_defined` checked at every missing value its domain
+        lists (`{1, None}`, `[0, 1] | absent`, `{nan}`): the body's raise
+        region is read over the real numbers, so each listed value is
+        run, every other parameter at one ordinary value of its domain.
+        `proof` back unchanged when every call returns or nothing is
+        listed; `disproven` with the first raising call as an executed
+        witness; `undecided` when a listed value cannot be run because
+        some other parameter has no ordinary value to call it with.
+    """
+    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _member_sort_key,
+                         _set_sentinels, realise_sentinel)
+    from .gates import _fmt_point
+    from .runtime_types import calling
+    from .symbolic._proof_support import ProofResult
+    listed: dict = {}
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        dom = _as_domain(bound)
+        sentinels = set(_set_sentinels(dom))
+        if dom.absent:
+            sentinels.add(ABSENT)
+        if not sentinels:
+            continue
+        policy = ctx.missing.get(p, NO_ANNOTATION)
+        listed[p] = [v for s in sorted(sentinels, key=_member_sort_key)
+                     for v in realise_sentinel(s, policy.members, policy.absence)]
+    if not listed:
+        return proof
+    base = {p: _an_ordinary_value((cj_domain or {}).get(p)) for p in facts.params}
+    run = calling(fn, facts, _declared_elements(cj_domain))
+    from ._brute_force import _raised_at
+    for p, values in listed.items():
+        others = [q for q in facts.params if q != p and base[q] is _NO_VALUE]
+        if others:
+            return ProofResult(
+                "undecided",
+                sketch=(f"is_defined: the domain lists missing values for "  # :draft
+                        f"{p}, and no ordinary value of {', '.join(others)} "
+                        f"was found to run them with"))
+        for value in values:
+            point = {**base, p: value}
+            raised = _raised_at(run, facts, point)
+            if raised is not None:
+                where = _fmt_point(point, list(facts.params))
+                return ProofResult(
+                    "disproven",
+                    sketch=(f"is_defined: the listed value {p} = {value!r} "  # :draft
+                            f"was run, and f raised {raised}"),
+                    counterexample=f"{where}: raised {raised}",
+                    meta={"mathema.corroboration": "reproduced",
+                          "mathema.witness_executed": True})
+    shown = ", ".join(f"{p} = {v!r}" for p, vs in listed.items() for v in vs)
+    return ProofResult(
+        proof.status,
+        sketch=(f"{proof.sketch}; f returned at each listed missing "  # :draft
+                f"value, run ({shown})"),
+        counterexample=proof.counterexample, quantifier=proof.quantifier,
+        meta=dict(proof.meta or {}))
+
+
 def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                            assumption, statement: str, note: str) -> "Probe | None":
     """Intent:
@@ -11918,6 +12021,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                                 tolerance=cj.tolerance,
                                                 assumption=assumption)
                             if family_derive is not None else None)
+    if (family_proof is not None and family_proof.status == "proven"
+            and "is_defined" in (region_row_kind(cj.name), cj.relation)):
+        family_proof = _definedness_at_listed_missing(ctx, fn, facts,
+                                                      cj_domain, family_proof)
     if family_proof is not None and cj.negated:
         # the not-form: a decided positive claim decides its negation
         # the other way (the falsifying witness IS the proof); an
