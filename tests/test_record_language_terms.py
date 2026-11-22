@@ -42,22 +42,9 @@ def _support():
 
 
 SUPPORT = _support()
-#: the claims that ask the solver
-SOLVER = ("a_found_member_is_a_member", "none_found_means_no_catalogue_value",
-          "a_catalogue_value_is_found", "a_term_and_its_complement_share_nothing",
-          "a_term_equals_its_canonical_form", "inclusion_is_monotone", "inclusion_is_transitive",
-          "the_child_is_inside_its_parent", "generated_terms_keep_the_laws",
-          "a_text_of_any_character_is_found", "a_value_member_does_not_place_is_not_returned",
-          "a_solver_value_of_each_kind_is_read", "the_solvers_record_is_closed",
-          "no_answer_from_the_solver_is_unknown", "find_member_agrees_with_enumeration",
-          "a_length_is_exact_at_its_bounds", "generated_lists_agree_with_enumeration",
-          "several_list_constraints_agree_with_enumeration", "the_hard_cases_have_the_answers_stated",
-          "three_list_terms_agree_with_enumeration", "the_solver_tells_numbers_from_booleans")
-
-
 def test_the_vector_file_holds_what_it_is_expected_to():
     assert (len(VALID), len(INVALID)) == (79, 36)
-    assert len(CLAIMS) == 70
+    assert len(CLAIMS) == 49
 
 
 @pytest.mark.parametrize("vector", VALID, ids=[v["name"] for v in VALID])
@@ -90,8 +77,6 @@ def _points(statement: str) -> list:
 @pytest.mark.parametrize("target", sorted(CLAIMS), ids=lambda t: t.rsplit(".", 1)[1])
 def test_a_law_of_the_claims_file_holds_over_its_domain(target):
     name = target.rsplit(".", 1)[1]
-    if name in SOLVER:
-        pytest.importorskip("z3")
     law = getattr(SUPPORT, name)
     for claim in CLAIMS[target]["claims"]:
         broken = [point for point in _points(claim["statement"]) if law(*point) is not True]
@@ -100,34 +85,13 @@ def test_a_law_of_the_claims_file_holds_over_its_domain(target):
 
 def test_a_nested_record_is_inside_a_wider_one():
     pytest.importorskip("z3")
+    from mathema.koine import record_relations
     child, parent, widened = SUPPORT.CHILD, SUPPORT.PARENT, SUPPORT.WIDENED
-    assert record_language.find_member([child], [parent]).status == "none"
-    found = record_language.find_member([widened], [child])
-    assert found.status == "member"
-    assert record_language.member(widened, found.member)
-    assert not record_language.member(child, found.member)
-    assert found.member["publish"] is True
-
-
-def test_without_a_solver_the_answer_is_unknown(monkeypatch):
-    import builtins
-    real = builtins.__import__
-
-    def no_z3(name, *args, **kwargs):
-        if name == "z3":
-            raise ImportError("no z3")
-        return real(name, *args, **kwargs)
-    monkeypatch.setattr(builtins, "__import__", no_z3)
-    found = record_language.find_member([{"op": "any"}], [])
-    assert found.status == "unknown" and "z3" in found.reason
-
-
-def test_a_null_witness_is_told_from_no_witness():
-    pytest.importorskip("z3")
-    null, nothing = {"op": "choice", "values": [None]}, {"op": "empty"}
-    assert SUPPORT.includes(null, nothing) == ("falsified", [None])
-    assert SUPPORT.disjoint(null, null) == ("falsified", [None])
-    assert SUPPORT.equal(null, nothing) == ("falsified", [None])
-    assert SUPPORT.includes(nothing, null) == ("proven", None)
-    verdict, witness = SUPPORT.includes({"op": "choice", "values": ["a"]}, nothing)
-    assert (verdict, witness) == ("falsified", ["a"])
+    exact = SUPPORT._exact
+    assert record_relations.decide("subset", exact(child), exact(parent)).verdict == "proven"
+    decided = record_relations.decide("subset", exact(widened), exact(child))
+    assert decided.verdict == "falsified"
+    found = decided.witness["value"]
+    assert record_language.member(widened, found)
+    assert not record_language.member(child, found)
+    assert found["publish"] is True
