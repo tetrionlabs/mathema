@@ -151,6 +151,31 @@ def _texts_of(node, into: list) -> None:
             _texts_of(x, into)
 
 
+#: the texts holding a high surrogate followed by a low one
+_PAIR = {"op": "concat", "args": [
+    {"op": "repeat", "arg": {"op": "chars", "ranges": [[0, regular.MAX_CODE_POINT]]},
+     "min": 0, "max": None},
+    {"op": "chars", "ranges": [[0xD800, 0xDBFF]]}, {"op": "chars", "ranges": [[0xDC00, 0xDFFF]]},
+    {"op": "repeat", "arg": {"op": "chars", "ranges": [[0, regular.MAX_CODE_POINT]]},
+     "min": 0, "max": None}]}
+#: what a member holding a surrogate pair is returned with
+ONLY_PAIRS = ("every value the question has holds a surrogate pair, which JSON text reads back "
+              "as the one character beyond the basic plane it encodes")
+
+
+def _holds_a_pair(value) -> bool:
+    """Whether a JSON value holds a text with a high surrogate followed
+    by a low one, in a key or a value, at any depth."""
+    if isinstance(value, str):
+        return any("\ud800" <= a <= "\udbff" and "\udc00" <= b <= "\udfff"
+                   for a, b in zip(value, value[1:]))
+    if isinstance(value, dict):
+        return any(_holds_a_pair(k) or _holds_a_pair(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_holds_a_pair(v) for v in value)
+    return False
+
+
 def _literal(text: str) -> dict:
     return regular.canonical({"op": "literal", "codes": [ord(c) for c in text]})
 
@@ -185,7 +210,9 @@ class _Reading:
             _texts_of(expression, texts)
         for value in values:
             _texts_in(value, texts)
-        self.texts = _TEXT_LOWERING(z3, _EVERY_CODE_POINT, texts)
+        # the surrogate ranges are always told apart, so that a text
+        # holding a pair can be asked about
+        self.texts = _TEXT_LOWERING(z3, _EVERY_CODE_POINT, [*texts, _PAIR])
         self.root = _Place(z3, "value")
         #: each "no key other than" read: its variable, place and names
         self._closed: list = []
@@ -194,6 +221,13 @@ class _Reading:
         self._seen: dict = {}
         self.truths = [self._truth(expression, parameter)
                        for parameter, expression in bodies]
+
+    def no_pair(self):
+        """That no text the variables stand for holds a surrogate pair."""
+        z3 = self.z3
+        pair = self.texts.regex(regular.canonical(_PAIR))
+        return z3.And(*[z3.Implies(place.is_("kind::string"), z3.Not(z3.InRe(place.text, pair)))
+                        for place in self.root.every()])
 
     def shape(self) -> list:
         """What every variable must satisfy to stand for a value: a
@@ -453,7 +487,10 @@ def find_member(inside, outside, *, valued_only: bool = False,
         when a document has no solver reading, when a document has no
         value at the point the solver gives, when the interpreter does
         not place the solver's value as asked, or when the solver gives
-        no answer in time or is not installed.
+        no answer in time or is not installed. A member holding no
+        surrogate pair is given where one exists; a member holding one is
+        given only when every member does, with `ONLY_PAIRS` as its
+        reason.
     """
     inside, outside = list(inside), list(outside)
     try:
@@ -477,12 +514,20 @@ def find_member(inside, outside, *, valued_only: bool = False,
     if outcome != z3.sat:
         return _unanswered(z3, solver, timeout_ms)
     value = reading.read(solver.model())
+    note = ""
+    if _holds_a_pair(value):
+        solver.add(reading.no_pair())
+        again = _checked(z3, solver, timeout_ms)
+        if again == z3.sat:
+            value = reading.read(solver.model())
+        else:
+            note = ONLY_PAIRS
     got = [_outcome(d, value) for d in inside + outside]
     if None in got:
         return Found("unknown", reason=f"a document has no value at {value!r}, so it is "
                                        f"neither true nor false there")
     if all(got[:len(inside)]) and not any(got[len(inside):]):
-        return Found("member", member=value)
+        return Found("member", member=value, reason=note)
     return Found("unknown", reason=f"the solver's value {value!r} is not placed by the "
                                    f"interpreter as asked")
 
