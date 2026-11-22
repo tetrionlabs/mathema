@@ -146,11 +146,12 @@ def test_a_chained_comparison_runs_the_listed_value_inside_the_interval():
     assert row.verdict == "falsified", (row.verdict, row.route, row.note)
 
 
-def test_a_claim_that_cannot_be_run_at_a_point_leaves_the_listed_value_to_its_policy_row():
+def test_a_claim_that_cannot_be_run_at_a_point_is_not_proven_over_an_ordinary_branch():
     row = _row(curved_when_absent,
                "for x in {1, None}, y in [0, 1], d(f(x, y), y, y) == 0")
-    assert row.verdict == "proven", (row.verdict, row.route, row.note)
-    assert "the listed value x = None is judged by its policy row" in row.note, row.note
+    assert row.verdict == "holds", (row.verdict, row.route, row.note)
+    assert row.statement.startswith("for x in {1}, "), row.statement
+    assert "on a branch derive did not read" in row.note, row.note
 
 
 def test_a_true_claim_beside_an_interval_holds_and_says_what_was_sampled():

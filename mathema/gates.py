@@ -305,11 +305,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         f_calls.reset()
         executed.last_classified = False
 
-    from .conjecture import _lists_sentinel
+    from .conjecture import _lists_sentinel, _names_missing
 
     def _admitted(point) -> bool:
-        # a hole or absence the claim does not list as its own point
+        # a hole or absence the claim does not name as its own point
         return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
+                   and not _names_missing(cj_domain.get(p), v)
                    for p, v in point.items())
 
     def _f_returned_none() -> bool:

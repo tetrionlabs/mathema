@@ -2,9 +2,10 @@
 # Copyright 2026 Tetrion Ltd
 """Where the function returns None or nan at a named missing value, its
 return annotation judges the result: a return type that does not admit
-it falsifies, with that point as the witness; one that admits it (or
-no annotation) leaves the point out of the claim's printed domain, the
-claim holds over the rest, and the note says what was returned."""
+it falsifies, with that point as the witness. A None it admits (or no
+annotation) leaves the point out of the claim's printed domain, the
+proof over the rest stands, and the note says what was returned; a nan
+it admits is left to the policy row."""
 import math
 from typing import Optional
 
@@ -47,23 +48,20 @@ def test_none_under_a_float_return_falsifies():
     assert "return type float does not admit" in (row.sketch or ""), row.sketch
 
 
-def test_none_under_an_optional_return_holds_over_the_rest():
+def test_none_under_an_optional_return_leaves_the_point_out():
     row = _row(none_under_optional, TEXT)
-    assert row.verdict == "holds", (row.verdict, row.route, row.note)
+    assert row.verdict == "proven", (row.verdict, row.route, row.note)
     assert "absent" not in row.statement, row.statement
     assert "x = None is left out of the domain: f returned None there" in row.note, \
         row.note
 
 
-def test_none_with_no_return_annotation_holds_over_the_rest():
+def test_none_with_no_return_annotation_leaves_the_point_out():
     row = _row(none_unannotated, TEXT)
-    assert row.verdict == "holds", (row.verdict, row.route, row.note)
+    assert row.verdict == "proven", (row.verdict, row.route, row.note)
     assert "absent" not in row.statement, row.statement
 
 
-def test_a_propagated_nan_under_a_float_return_holds_over_the_rest():
+def test_a_propagated_nan_under_a_float_return_keeps_the_proof():
     row = _row(root, "for x in [0, 1] | {nan}, f(x) >= 0")
-    assert row.verdict == "holds", (row.verdict, row.route, row.note)
-    assert "nan" not in row.statement, row.statement
-    assert "x = nan is left out of the domain: f returned nan there" in row.note, \
-        row.note
+    assert row.verdict == "proven", (row.verdict, row.route, row.note)
