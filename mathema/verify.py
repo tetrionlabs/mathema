@@ -2482,9 +2482,17 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             from .spec import recorded_claims_fingerprint
             recorded_now = recorded_claims_fingerprint(verified_entry, fn)
             # the record holds the claims as written, made under an
-            # earlier rules number: only the rules moved
-            rules_moved = (recorded_fp != current_fp
-                           and recorded_now == current_fp)
+            # earlier rules number, or differs from them only in a
+            # spelling an earlier release wrote: only the rules moved
+            spelled_earlier = any(k == key for k, _c in
+                                  release_moved + quoting_moved + negation_moved)
+            from .spec import recorded_claims
+            same_names = ({c.get("name") for c in recorded_claims(verified_entry)}
+                          == {c.get("name") for c in current_claims})
+            rules_moved = recorded_fp != current_fp and (
+                recorded_now == current_fp
+                or (spelled_earlier and same_names
+                    and not supersessions.get(key)))
             is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
                         and recorded_fp == current_fp and not defaults_moved
                         and version_moved is None and body_moved is None
