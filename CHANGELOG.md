@@ -9,6 +9,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `mathema.regular` has draft calls, not part of the public interface yet: `validate`, `member` and `matcher` on a definition (with a bound and a budget, reporting the work spent), `node_member`, `node_matcher`, `atoms`, `shortest_member`, `MATCH_BUDGET` and `Lowering`.
 
 ### Upgrading from 0.6.6.1
+- A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release.
 - A regular-language definition writes its ranges as lists; ranges written as tuples are refused, and so is a definition that states both `language` and the bounds `at_least` and `at_most`.
 - A claim whose every variable is a text has no `[float]` companion row.
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
