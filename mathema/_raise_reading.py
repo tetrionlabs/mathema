@@ -54,10 +54,13 @@ class ValueKind:
     Python types it may have (None when it may be any object), and
     `magnitude`, an upper bound on its absolute value when it is a
     number (`math.inf` when unbounded), and `least`, a lower bound on
-    that absolute value (0 when the value may be zero)."""
+    that absolute value (0 when the value may be zero), and `sign`, -1
+    when every value is a number below zero, 1 when every value is a
+    number above zero, 0 when neither is known."""
     types: "frozenset | None"
     magnitude: float = math.inf
     least: float = 0.0
+    sign: int = 0
 
 
 ANY = ValueKind(None)
@@ -73,8 +76,10 @@ def _union(a: ValueKind, b: ValueKind) -> ValueKind:
     """
     if a.types is None or b.types is None:
         return ANY
+    sign = b.sign if not a.types else a.sign if not b.types else (
+        a.sign if a.sign == b.sign else 0)
     return ValueKind(a.types | b.types, max(a.magnitude, b.magnitude),
-                     min(a.least, b.least))
+                     min(a.least, b.least), sign)
 
 
 def _up(bound: float) -> float:
@@ -128,11 +133,12 @@ def _least(value) -> float:
 
 def kind_of_value(value) -> ValueKind:
     """Intent:
-        The kind of one known value: its exact type, and its magnitude when it
-        is a number.
+        The kind of one known value: its exact type, and its magnitude and
+        sign when it is a number.
     """
     if type(value) in _NUMBERS:
-        return ValueKind(frozenset({type(value)}), _magnitude(value), _least(value))
+        sign = -1 if value < 0 else 1 if value > 0 else 0
+        return ValueKind(frozenset({type(value)}), _magnitude(value), _least(value), sign)
     return ValueKind(frozenset({type(value)}))
 
 
@@ -143,12 +149,14 @@ def _interval_kind(lo, hi) -> ValueKind:
     """Intent:
         The kind of a number drawn from the interval between `lo` and `hi`: an
         int, float or bool of at most the larger end's magnitude, and at least
-        the smaller end's when the interval does not contain zero.
+        the smaller end's, of the ends' sign, when the interval does not
+        contain zero.
     """
-    least = 0.0
+    least, sign = 0.0, 0
     if type(lo) in _NUMBERS and type(hi) in _NUMBERS and (lo > 0 or hi < 0):
         least = min(_least(lo), _least(hi))
-    return ValueKind(_NUMBERS, max(_magnitude(lo), _magnitude(hi)), least)
+        sign = 1 if lo > 0 else -1
+    return ValueKind(_NUMBERS, max(_magnitude(lo), _magnitude(hi)), least, sign)
 
 
 def kind_of_bound(bound) -> ValueKind:
@@ -525,15 +533,20 @@ def _call_level(node: ast.Call, kinds: dict, ns: _Namespace):
 
 def _compare_level(node: ast.Compare, kinds: dict, ns: _Namespace):
     """Intent:
-        `(level, kind)` for a comparison chain: identity tests, equality and
-        membership of builtin scalars, and ordering of two numbers or two
-        strings are total; ordering of other scalars may raise TypeError;
-        anything else is UNKNOWN.
+        `(level, kind)` for a comparison chain, read link by link as Python
+        runs it: identity tests, equality and membership of builtin scalars,
+        and ordering of two numbers or two strings are total; ordering of
+        other scalars may raise TypeError; anything else is UNKNOWN. A link
+        between two numbers that is false on every value they may hold
+        (`_never_holds`) ends the chain, and nothing after it is read.
     """
-    operands = [node.left, *node.comparators]
-    read = [read_expression(o, kinds, ns) for o in operands]
-    level = min(r[0] for r in read)
-    for op, (_, a), (_, b), right in zip(node.ops, read, read[1:], node.comparators):
+    level, left = read_expression(node.left, kinds, ns)
+    for op, right in zip(node.ops, node.comparators):
+        found, value = read_expression(right, kinds, ns)
+        level = min(level, found)
+        a, b, left = left, value, value
+        if _never_holds(op, a, b):  # :draft
+            return level, _BOOL
         if isinstance(op, (ast.Is, ast.IsNot)):
             continue
         if isinstance(op, (ast.Eq, ast.NotEq)):
@@ -556,6 +569,30 @@ def _compare_level(node: ast.Compare, kinds: dict, ns: _Namespace):
             continue
         return UNKNOWN, _BOOL
     return level, _BOOL
+
+
+def _never_holds(op: ast.AST, a: ValueKind, b: ValueKind) -> bool:
+    """Intent:
+        Whether the ordering `a <op> b` of two numbers is false for every
+        value the kinds admit, read from their signs: a value of sign 1 is
+        above zero, of sign -1 below it, and a magnitude bound of 0 is zero
+        itself. Comparing two such numbers cannot fail, so the link runs
+        and is false.
+    """
+    if not (_is_numeric(a) and _is_numeric(b)):
+        return False
+
+    def at_least_zero(k):
+        return k.sign == 1 or k.magnitude == 0.0
+
+    def at_most_zero(k):
+        return k.sign == -1 or k.magnitude == 0.0
+
+    if isinstance(op, (ast.Lt, ast.LtE)):
+        return (at_least_zero(a) and b.sign == -1) or (a.sign == 1 and at_most_zero(b))
+    if isinstance(op, (ast.Gt, ast.GtE)):
+        return (at_most_zero(a) and b.sign == 1) or (a.sign == -1 and at_least_zero(b))
+    return False
 
 
 def _percent_level(node: ast.BinOp, kinds: dict, ns: "_Namespace"):
@@ -859,6 +896,55 @@ def _imported(node: ast.AST, ns: "_Namespace") -> "dict | None":
     return None
 
 
+def _cause_is_read(node: ast.AST, ns: "_Namespace") -> bool:
+    """Intent:
+        Whether evaluating the cause of `raise E from <node>` and attaching
+        it cannot fail: `node` is a bare name or a module's attribute that
+        resolves where the function is defined to an exception instance, or
+        to an exception class that `raise` builds with no argument and whose
+        construction from no argument is read (`constructor_refusal`).
+    """
+    if not isinstance(node, (ast.Name, ast.Attribute)):
+        return False
+    found = ns.resolve(node)
+    if isinstance(found, BaseException):
+        return True
+    return isinstance(found, type) and issubclass(found, BaseException) \
+        and constructor_refusal(found, 0, []) is None
+
+
+def _group_is_read(call: ast.Call, kinds: dict, ns: "_Namespace") -> bool:
+    """Intent:
+        Whether `ExceptionGroup(message, [E1(...), ...])` builds an
+        `ExceptionGroup` and cannot fail: no keyword and no unpacking, a
+        message that is text and cannot fail to evaluate, and a list or tuple
+        display of at least one call, each to a name that resolves to a
+        subclass of `Exception` whose construction from its arguments is read
+        (`constructor_refusal`) and whose arguments cannot fail to evaluate.
+    """
+    if call.keywords or len(call.args) != 2 \
+            or any(isinstance(a, ast.Starred) for a in call.args):
+        return False
+    level, message = read_expression(call.args[0], kinds, ns)
+    if level < TOTAL or not message.types or not message.types <= {str}:
+        return False
+    members = call.args[1]
+    if not isinstance(members, (ast.List, ast.Tuple)) or not members.elts:
+        return False
+    for member in members.elts:
+        if not isinstance(member, ast.Call) or member.keywords \
+                or any(isinstance(a, ast.Starred) for a in member.args) \
+                or not isinstance(member.func, (ast.Name, ast.Attribute)):
+            return False
+        cls = ns.resolve(member.func)
+        if not (isinstance(cls, type) and issubclass(cls, Exception)) \
+                or constructor_refusal(cls, len(member.args), []) is not None:
+            return False
+        if any(read_expression(a, kinds, ns)[0] < TOTAL for a in member.args):
+            return False
+    return True
+
+
 def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise | UnreadRaise":
     """Intent:
         Whether the path `steps` followed by the `raise` statement
@@ -941,7 +1027,8 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
     if exc is None:
         return UnreadRaise("a bare `raise` re-raises whatever is being handled")  # :draft
     if stmt.cause is not None and not (isinstance(stmt.cause, ast.Constant)
-                                       and stmt.cause.value is None):
+                                       and stmt.cause.value is None) \
+            and not _cause_is_read(stmt.cause, ns):  # :draft
         found, _ = read_expression(stmt.cause, kinds, ns)
         # :draft
         note(min(found, HALTS), f"the cause `{_source(stmt.cause)}` is evaluated before "
@@ -968,7 +1055,11 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
         # :draft
         return UnreadRaise(f"`{name}` where the function is defined is not an exception "
                            f"class")
-    if isinstance(exc, ast.Call):
+    group = cls is getattr(builtins, "ExceptionGroup", None) and isinstance(exc, ast.Call) \
+        and _group_is_read(exc, kinds, ns)  # :draft
+    if group:
+        count, keywords, known = 2, [], True
+    elif isinstance(exc, ast.Call):
         arguments = list(exc.args) + [k.value for k in exc.keywords]
         if any(isinstance(a, ast.Starred) for a in exc.args) \
                 or any(k.arg is None for k in exc.keywords):
@@ -985,7 +1076,7 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
         count, keywords = len(exc.args), [k.arg for k in exc.keywords if k.arg]
     else:
         count, keywords, known = 0, [], True
-    refusal = constructor_refusal(cls, count, keywords)
+    refusal = None if group else constructor_refusal(cls, count, keywords)
     if refusal is not None:
         builtin_only = type(cls) is type and not any(
             k.__module__ != "builtins" and ("__init__" in vars(k) or "__new__" in vars(k))
