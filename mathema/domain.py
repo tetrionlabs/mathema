@@ -3047,7 +3047,7 @@ def _inclusion_meant(segments: list) -> str:
         first = _REBOUND.match(seg)
         if first is not None and first.group("name") == last.group("name"):
             a, b = first.group("domain"), last.group("domain")
-            return f". To state that every member of {a} is in {b}, write: {a} subset {b}"
+            return f". To state that every member of {a} is in {b}, write: {a} subset {b}"  # :draft
     return ""
 
 

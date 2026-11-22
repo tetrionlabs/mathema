@@ -234,7 +234,7 @@ class _Reader:
                     and len(arg.values) == 2 and isinstance(arg.values[1], ast.Constant) \
                     and type(arg.values[1].value) is str and arg.values[1].value == "" \
                     and isinstance(arg.values[0], ast.Name) and arg.values[0].id == param:
-                self.or_empty = True
+                self.or_empty = True  # :draft
                 return
             if not (isinstance(arg, ast.Name) and arg.id == param):
                 raise _Declined(f"the match is on {ast.unparse(arg)}, not on the "
@@ -289,7 +289,7 @@ class _Reader:
         if not builtin:
             plain = _plain_exception_class(bound, self.fn)
             if plain is not None:
-                raise _Declined(f"{exc.id} is not the builtin exception class of that name, "
+                raise _Declined(f"{exc.id} is not the builtin exception class of that name, "  # :draft
                                 f"and {plain}, so building it may do anything")
         if isinstance(node.exc, ast.Call):
             if node.exc.keywords or len(node.exc.args) > 1:
@@ -321,7 +321,7 @@ class _Reader:
                     continue
                 if isinstance(part, ast.FormattedValue) and part.format_spec is None \
                         and isinstance(part.value, ast.Name) \
-                        and type(self._global(part.value.id)) is str:
+                        and type(self._global(part.value.id)) is str:  # :draft
                     if part.value.id not in self.constants:
                         self.constants.append(part.value.id)
                     continue
@@ -416,9 +416,11 @@ def _same_code(fn, source: str, name: str) -> bool:
             if "JUMP" in step.opname or step.opname.startswith("FOR_"):
                 value = ("to", reached(value)) if isinstance(value, int) else value
             elif step.opname in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_METHOD"):
-                # the name alone: the flag beside it says how a callee
+                # the name alone: the NULL beside it, before the name on
+                # some Pythons and after it on others, says how a callee
                 # is pushed, not what is loaded
-                value = step.argrepr.split(" + ")[0]
+                value = next((part for part in step.argrepr.split(" + ")
+                              if part not in ("NULL", "NULL|self")), step.argrepr)
             elif step.opname in ("LOAD_CONST", "RETURN_CONST", "KW_NAMES"):
                 value = constant(value)
             steps.append(("LOAD_ATTR" if step.opname == "LOAD_METHOD" else step.opname,

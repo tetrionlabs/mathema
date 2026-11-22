@@ -5701,7 +5701,7 @@ def _stamp_language_definitions(rows: list, claims: list, fn=None) -> list:
         if assumed and name in by_name:
             memberships = _language_membership_stamp(by_name[name], fn, assumed)
             if memberships:
-                meta = {**meta, "mathema.language_memberships": memberships}
+                meta = {**meta, "mathema.language_memberships": memberships}  # :draft
         if meta:
             row.meta = meta
     return rows
@@ -5757,7 +5757,7 @@ def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
         # a verdict that rests on definitions says which, and how each stands
         meta["mathema.assumptions"] = {
             "standard": domain_relations.standard_assumptions(),
-            "definitions": decision.assumptions}
+            "definitions": decision.assumptions, "texts": decision.texts or []}
         assumed = "; " + domain_relations.assuming_text(decision.assumptions,
                                                         decision.verdict)
     if decision.verdict == "proven":
@@ -11004,7 +11004,7 @@ def _a_language_of_texts(ref) -> bool:
         return False
 
 
-def _premise_is_f_defined(cj) -> bool:
+def _premise_is_f_defined(cj) -> bool:  # :draft
     """Whether a claim's premise is exactly `f is defined` (or its
     other spelling, `is_defined(f)`), with no region pinned to it and
     nothing joined to it."""
@@ -11036,7 +11036,7 @@ def _beyond_a_plain_validator_claim(cj, bound, variable: str = "") -> "str | Non
         return "the claim states a tolerance"
     if len(getattr(cj, "links", None) or []) > 1:
         return "the claim is a chain of comparisons"
-    if set(getattr(cj, "free_vars", None) or ()) - {variable}:
+    if set(getattr(cj, "free_vars", None) or ()) - {variable}:  # :draft
         return "the claim binds a free variable"
     if getattr(cj, "funcs", None):
         return "the claim binds a function, so a call in it may be another function"
@@ -11083,7 +11083,7 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
     seed = domain_relations._guard_seed(f"reading of {text}")
     rng = random.Random(seed)
     out = {"language": text,
-           "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "
+           "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "  # :draft
                         f"is in {text}",
            "status": "assumed", "artefact": {"seed": seed, "texts run": 0}}
     try:
@@ -11203,7 +11203,7 @@ def _validator_proof(cj, fn, cj_domain):
     if defined:
         if not (validator.raises is not None and question == ("", "", True)
                 and cj.relation == "=="):
-            return undecided("the premise f is defined is read only for f(s) == s about "
+            return undecided("the premise f is defined is read only for f(s) == s about "  # :draft
                              "a function that refuses every text outside its language")
         cj = _dc_replace(cj, assuming="")
     beyond = _beyond_a_plain_validator_claim(cj, bound, param)
@@ -11216,7 +11216,7 @@ def _validator_proof(cj, fn, cj_domain):
     path = f"smt: membership, {param} in {stated!r}"
     if validator.or_empty and not _a_language_of_texts(base):
         return undecided(f"the match is on {param} or '', which is {param} only for a "
-                         f"text, and {base!r} is not a language of texts")
+                         f"text, and {base!r} is not a language of texts")  # :draft
     domain = domain_relations.defined_bound(bound)
     if domain is None:
         return undecided(f"the domain of {param} states no regular-language definition")
@@ -11244,13 +11244,13 @@ def _validator_proof(cj, fn, cj_domain):
         if beyond.status != "none":
             # the texts called on leave the variable's language, so the
             # statement is the language the pattern accepts over all text
-            over = _accepted_over_every_text(validator)
+            over = _accepted_over_every_text(validator)  # :draft
             if isinstance(over, str):
                 return undecided(
                     f"the texts {cj.lhs.strip()} is called on are not all shown to be "
-                    f"members of {base!r}, which the membership statement speaks of, and "
+                    f"members of {base!r}, which the membership statement speaks of, and "  # :draft
                     f"{over}" + (f" ({beyond.reason})" if beyond.reason else ""))
-            stated_text = f"the texts {validator.described()} accepts"
+            stated_text = f"the texts {validator.described()} accepts"  # :draft
             path = f"smt: membership, {cj.lhs.strip()} in {stated_text}"
             document = over.to_json().get("definition")
             at_most, at_least = regular.bounds(document)
@@ -11288,6 +11288,8 @@ def _validator_proof(cj, fn, cj_domain):
             assumptions, refuted = domain_relations.check_definitions(
                 domain, *filter(None, [stated_defined]),
                 literals=(prefix, suffix, prefix + suffix))
+            texts, admitted = domain_relations.check_holds_only_texts(domain)
+            refuted = refuted or admitted
             reading = (_validator_reading_check(fn, validator, stated, domain)
                        if over is None else
                        _validator_reading_check(fn, validator, stated_text, domain,
@@ -11300,9 +11302,9 @@ def _validator_proof(cj, fn, cj_domain):
                 "proven",
                 meta={**meta, "mathema.assumptions": {
                     "standard": domain_relations.standard_assumptions(),
-                    "definitions": assumptions}},
+                    "definitions": assumptions, "texts": texts}},
                 sketch=(f"{path}, read from {validator.described()}: no text {param} "
-                        f"in the domain{' where f is defined' if defined else ''} "
+                        f"in the domain{' where f is defined' if defined else ''} "  # :draft
                         f"makes {cj.lhs.strip()} a text "
                         f"{'outside' if accepted else 'in'} that language; "
                         f"{domain_relations.assuming_text(assumptions)}"))
@@ -11314,7 +11316,7 @@ def _validator_proof(cj, fn, cj_domain):
             # a text the function refuses is outside the premise, and on
             # one it accepts it returns its argument, so no text found
             # here breaks the claim; the definitions are too loose to say
-            why = why or "the definitions do not settle where the function is defined"
+            why = why or "the definitions do not settle where the function is defined"  # :draft
             continue
         text = found.member
         if not regular.places(text, inside, outside):
@@ -11550,7 +11552,7 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion":
                            "none (every variable of the claim is a text, so there is "
-                           "no float arithmetic to run)"}
+                           "no float arithmetic to run)"}  # :draft
         return
     if _family_owns_claim(ctx.family):
         # a family claim states a fact about the code itself
