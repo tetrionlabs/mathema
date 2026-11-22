@@ -131,6 +131,10 @@ VALUES += [
     {"x": {"z": 1.5}},
     {"x": {"z": False}},
 ]
+#: a text field holding null, and one holding a number: a statement
+#: whose kind test on a text field is dropped has no value at them
+VALUES += [{"edit": False, "publish": False, "root": None},
+           {"edit": False, "publish": False, "root": 1}]
 DEFINITIONS = REF.DOCUMENTS
 
 

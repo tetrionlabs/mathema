@@ -35,6 +35,13 @@ HIGH, LOW, PAIR = "\ud800", "\udc00", "😀"
 #: texts holding surrogates on their own, a pair, and an astral
 #: character written as one code point
 TEXTS = [HIGH, LOW, "a" + HIGH, LOW + HIGH, PAIR, "a" + PAIR, "\U0001f600", ""]
+#: texts at the edges of the two surrogate ranges: a pair of the first
+#: and of the last high and low surrogates, the two mixed edge pairs, a
+#: pair at the very start and at the very end of a text, each edge
+#: surrogate alone, and the code points just past each range
+TEXTS += ["\ud800\udc00", "\udbff\udfff", "\ud800\udfff", "\udbff\udc00",
+          "\ud800\udc00ab", "ab\udbff\udfff", "\udbff", "\udfff", "\ud7ff\udc00",
+          "\udbff\ue000", "\udc00\ud800", "\ud7ff\ue000"]
 
 
 def _documents() -> list:
