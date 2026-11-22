@@ -1454,7 +1454,58 @@ def _wrapper_is_read(fn) -> bool:  # :draft
         from .._instance_callable import hands_over_to_wrapped
         return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema" \
             or hands_over_to_wrapped(fn)
-    return os.path.abspath(fn.__code__.co_filename).startswith(package)
+    return os.path.abspath(fn.__code__.co_filename).startswith(package) \
+        or _passes_through(fn)  # :draft
+
+
+def _passes_through(fn) -> bool:
+    """Intent:
+        Whether the Python function `fn` is a wrapper whose definition is,
+        after its docstring, the single statement `return g(*args,
+        **kwargs)`, taking nothing but `*args` and `**kwargs` and handing
+        both on unchanged, where `g` is a variable of an enclosing function
+        that holds the function `fn` links as `__wrapped__`: the call runs
+        that function on the same arguments and returns or raises what it
+        does. The definition is read from the source of `fn`'s own code
+        object, whose names must match it.
+    """
+    import textwrap
+    code = fn.__code__
+    if code.co_flags & (inspect.CO_GENERATOR | inspect.CO_COROUTINE
+                        | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE):
+        return False
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(code)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return False
+    fdef = tree.body[0] if tree.body else None
+    if not isinstance(fdef, ast.FunctionDef) or fdef.name != code.co_name:
+        return False
+    args = fdef.args
+    if args.posonlyargs or args.args or args.kwonlyargs or args.vararg is None \
+            or args.kwarg is None or args.defaults or fn.__defaults__ or fn.__kwdefaults__:
+        return False
+    body = strip_docstring(fdef.body)
+    if len(body) != 1 or not isinstance(body[0], ast.Return):
+        return False
+    call = body[0].value
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and len(call.args) == 1 and isinstance(call.args[0], ast.Starred)
+            and isinstance(call.args[0].value, ast.Name)
+            and call.args[0].value.id == args.vararg.arg
+            and len(call.keywords) == 1 and call.keywords[0].arg is None
+            and isinstance(call.keywords[0].value, ast.Name)
+            and call.keywords[0].value.id == args.kwarg.arg):
+        return False
+    held = call.func.id
+    if code.co_varnames != (args.vararg.arg, args.kwarg.arg) \
+            or held not in code.co_freevars or fn.__closure__ is None:
+        return False
+    try:
+        cell = fn.__closure__[code.co_freevars.index(held)].cell_contents
+    except ValueError:
+        return False
+    return cell is getattr(fn, "__wrapped__", None)
 
 
 def _wrapper_name(fn) -> str:
