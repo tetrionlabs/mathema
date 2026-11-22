@@ -36,7 +36,8 @@ text's language is a regular-language node; a list's `min` and `max`
 are whole numbers of zero or more; and a record's `rest` is empty in
 canonical form, so `union []` or a choice of nothing closes a record as
 `empty` does. A whole number whose decimal text is longer than the
-interpreter writes is refused.
+interpreter writes is refused, and so is a text, in a choice or a
+field's name, holding a high surrogate followed by a low one.
 
 `membership_document(node)` is the document of the function of one
 JSON value that returns that truth, and `membership_documents` the two
@@ -111,8 +112,22 @@ def _is_whole_number(value) -> bool:
         or (isinstance(value, float) and value.is_integer())
 
 
+def _no_surrogate_pair(text: str, what: str) -> None:
+    """Refuse a text holding a high surrogate followed by a low one:
+    written as JSON escapes, such a pair reads back as the one character
+    beyond the basic plane it encodes, so the text would not keep its
+    meaning through the definition's own text. A surrogate on its own
+    reads back as itself and is kept."""
+    for i in range(len(text) - 1):
+        if "\ud800" <= text[i] <= "\udbff" and "\udc00" <= text[i + 1] <= "\udfff":
+            raise InvalidTerm(f"{what} {text!r} holds a surrogate pair")
+
+
 def _check_scalar(value) -> None:
-    if value is None or isinstance(value, (bool, str)):
+    if isinstance(value, str):
+        _no_surrogate_pair(value, "the choice value")
+        return
+    if value is None or isinstance(value, bool):
         return
     if not _is_whole_number(value):
         raise InvalidTerm(f"{value!r} is not a value a choice may list (null, a truth value, "
@@ -185,6 +200,7 @@ def check_node(node) -> None:
             if not (isinstance(field, list) and len(field) == 3 and isinstance(field[0], str)
                     and isinstance(field[2], bool)):
                 raise InvalidTerm(f"{field!r} is not a field [name, node, required]")
+            _no_surrogate_pair(field[0], "the field name")
             check_node(field[1])
             names.append(field[0])
         if len(set(names)) != len(names):

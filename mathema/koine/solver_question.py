@@ -362,7 +362,8 @@ class _Reading:
 
     def read(self, model, place: "_Place | None" = None):
         """The JSON value a model gives the variables: a number that is
-        not whole as its whole part and a half, a list as the list of
+        not whole as its whole part and a half, a number of the float
+        kind past every float as the integer, a list as the list of
         nothing, a map as its named keys that are set and, when it
         holds another key, one key no document names, holding null."""
         place = self.root if place is None else place
@@ -378,7 +379,12 @@ class _Reading:
             return of(place.number).as_long()
         if kind == "kind::scalar":
             number = of(place.number).as_long()
-            return float(number) if bool(of(place.whole)) else number + 0.5
+            try:
+                return float(number) if bool(of(place.whole)) else number + 0.5
+            except OverflowError:
+                # no float holds the number; the interpreter judges the
+                # integer read in its place
+                return number
         if kind == "kind::string":
             return self.texts.decode(of(place.text).as_string())
         if kind == "kind::sequence":

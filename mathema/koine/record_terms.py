@@ -348,10 +348,11 @@ def function_of_one_value(expression, *, name: str = "f", key: "str | None" = No
         The document of the function of one JSON value, the parameter
         `value` of `kind::optional(kind::unknown)`, whose body returns
         `expression`. Its `source` line carries the SHA-256 of the
-        expression's compact text, and its key is `key`, or the name
+        expression's compact text in UTF-8, a surrogate on its own
+        written as its three bytes, and its key is `key`, or the name
         and the first twelve digits of that hash.
     """
-    digest = hashlib.sha256(compact(expression).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(compact(expression).encode("utf-8", "surrogatepass")).hexdigest()
     return Document((
         Term("koine", (Str(KOINE_VERSION),)),
         Term("lifter", (), (("language", Str("koine")),
