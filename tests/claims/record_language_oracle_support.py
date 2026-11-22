@@ -506,100 +506,6 @@ def constructors_mean_what_the_nodes_mean(d: int, e: int, v: int) -> bool:
     return True
 
 
-# ---- find_member and the relations derived from it ----------------------
-
-def includes(a: dict, b: dict, timeout_ms: int = 5000):
-    """`("proven", None)` when no value is in node `a` and outside node
-    `b`, `("falsified", [value])` with such a value, or `("unknown",
-    reason)`. The witness is a list of one value, so a witness that is
-    null reads `[None]` and no witness reads `None`."""
-    found = _rl().find_member([a], [b], timeout_ms=timeout_ms)
-    return {"none": ("proven", None), "member": ("falsified", [found.member])}.get(
-        found.status, ("unknown", found.reason))
-
-
-def disjoint(a: dict, b: dict, timeout_ms: int = 5000):
-    """`("proven", None)` when no value is in both nodes, `("falsified",
-    [value])` with a common member, or `("unknown", reason)`."""
-    found = _rl().find_member([a, b], [], timeout_ms=timeout_ms)
-    return {"none": ("proven", None), "member": ("falsified", [found.member])}.get(
-        found.status, ("unknown", found.reason))
-
-
-def equal(a: dict, b: dict, timeout_ms: int = 5000):
-    """`("proven", None)` when each node includes the other,
-    `("falsified", [value])` with a value in one and not the other, or
-    `("unknown", reason)`."""
-    one, other = includes(a, b, timeout_ms), includes(b, a, timeout_ms)
-    if "falsified" in (one[0], other[0]):
-        return one if one[0] == "falsified" else other
-    return ("proven", None) if one[0] == other[0] == "proven" else ("unknown", one[1] or other[1])
-
-
-def a_found_member_is_a_member(t: int, u: int) -> bool:
-    """Whether the value `find_member` gives for a value in term `t` and
-    outside term `u` is, by `member`, in the one and outside the other."""
-    rl, a, b = _rl(), TERMS[int(t)], TERMS[int(u)]
-    found = rl.find_member([a], [b])
-    return found.status != "member" or (rl.member(a, found.member) and not rl.member(b, found.member))
-
-
-def none_found_means_no_catalogue_value(t: int, u: int) -> bool:
-    """Whether, when `find_member` says no value is in term `t` and
-    outside term `u`, no value of the catalogue is."""
-    rl, a, b = _rl(), TERMS[int(t)], TERMS[int(u)]
-    if rl.find_member([a], [b]).status != "none":
-        return True
-    return not any(rl.member(a, v) and not rl.member(b, v) for v in VALUES)
-
-
-def a_catalogue_value_is_found(t: int, u: int) -> bool:
-    """Whether, when some catalogue value is in term `t` and outside
-    term `u`, `find_member` finds a member (it never says none, and on
-    this catalogue it is never left without an answer)."""
-    rl, a, b = _rl(), TERMS[int(t)], TERMS[int(u)]
-    if not any(rl.member(a, v) and not rl.member(b, v) for v in VALUES):
-        return True
-    return rl.find_member([a], [b]).status == "member"
-
-
-def a_term_and_its_complement_share_nothing(t: int) -> bool:
-    a = TERMS[int(t)]
-    return disjoint(a, complement(a))[0] == "proven" and includes(a, a)[0] == "proven"
-
-
-def a_term_equals_its_canonical_form(t: int) -> bool:
-    a = TERMS[int(t)]
-    return equal(a, _rl().canonical(a))[0] == "proven"
-
-
-def inclusion_is_monotone(t: int, u: int) -> bool:
-    """Whether term `t` is included in its union with term `u`, and
-    their intersection in `t`."""
-    a, b = TERMS[int(t)], TERMS[int(u)]
-    return includes(a, union(a, b))[0] == "proven" and includes(inter(a, b), a)[0] == "proven"
-
-
-def inclusion_is_transitive(t: int, u: int, w: int) -> bool:
-    a, b, c = TERMS[int(t)], TERMS[int(u)], TERMS[int(w)]
-    if includes(a, b)[0] != "proven" or includes(b, c)[0] != "proven":
-        return True
-    return includes(a, c)[0] == "proven"
-
-
-def the_child_is_inside_its_parent() -> bool:
-    """Whether the nested configuration record is included in the wider one,
-    and the child with `publish` widened is not included in the child,
-    with a value `member` puts in the one and outside the other."""
-    rl = _rl()
-    verdict, witness = includes(WIDENED, CHILD)
-    return (includes(CHILD, PARENT)[0] == "proven" and verdict == "falsified"
-            and rl.member(WIDENED, witness[0]) and not rl.member(CHILD, witness[0])
-            and includes(PARENT, CHILD)[0] == "falsified")
-
-
-# ---- laws found missing by mutating the module ---------------------------
-
 #: nodes whose canonical text shows the order of keys and the escaping of text
 _WRITTEN = [
     (choice("b", "a"), '{"exact":true,"language":{"op":"choice","values":["a","b"]},"version":1}'),
@@ -669,102 +575,6 @@ def record_of_holds_each_field_under_each_bound(d: int, v: int) -> bool:
     return all(rl.member(built, {"k": value}, bound=bound) == rl.member(document, value, bound=bound)
                for bound in ("at_least", "at_most"))
 
-
-def a_text_of_any_character_is_found(i: int) -> bool:
-    """Whether `find_member` finds the one member of a choice of one
-    text, for texts holding the first code point, the last, a lone
-    surrogate and a character outside ASCII."""
-    wanted = ("\x00", "a\x00b", "\U0010ffff", "\ud800", "\u00e9", "")[int(i)]
-    found = _rl().find_member([choice(wanted)], [])
-    return found.status == "member" and found.member == wanted
-
-
-def a_value_member_does_not_place_is_not_returned(i: int) -> bool:
-    """Whether `find_member` answers `unknown`, and returns no member,
-    when the value read from the solver is one `member` does not place
-    inside every node asked and outside every other: case 0 a value in
-    one of two inside nodes only, case 1 a value in one of two outside
-    nodes, case 2 a value in no inside node."""
-    rl = _rl()
-    inside, outside, wrong = [
-        ([FLAG, choice(True, "a")], [], False),
-        ([FLAG], [choice("a"), OFF], False),
-        ([FLAG], [], "a"),
-    ][int(i)]
-    real = rl._Lowering.read
-    rl._Lowering.read = lambda self, model, value=None, path=(): wrong
-    try:
-        found = rl.find_member(inside, outside)
-    finally:
-        rl._Lowering.read = real
-    return found.status == "unknown" and found.member is None
-
-
-def a_solver_value_of_each_kind_is_read(i: int) -> bool:
-    """Whether the value read from a solver model is of the kind the
-    model gives it, when nothing else is asked of it: 0 null, 1 a
-    boolean, 2 a whole number, 3 a text, 4 a map, 5 a value no node
-    tells apart (in `any`, and in no choice, text or record), and 6 a
-    map with a key no record of the question names, which that record
-    refuses."""
-    import z3
-    rl = _rl()
-    flagged = record(("x", FLAG, False))
-    lowering = rl._Lowering(z3, [flagged, text(_lit("a"))])
-    solver = z3.Solver()
-    solver.add(*lowering.shape)
-    solver.add(lowering.root.is_(rl._KINDS[min(int(i), 4)] if int(i) != 5 else "other"))
-    if int(i) == 6:
-        solver.add(lowering.root.other_key)
-    if solver.check() != z3.sat:
-        return False
-    value = lowering.read(solver.model())
-    scalar = value is None or isinstance(value, (bool, int, str))
-    return [
-        value is None,
-        isinstance(value, bool),
-        isinstance(value, int) and not isinstance(value, bool),
-        isinstance(value, str),
-        isinstance(value, dict),
-        not scalar and not isinstance(value, dict) and rl.member(ANY, value)
-        and not rl.member(flagged, value) and not rl.member(text(_lit("a")), value),
-        isinstance(value, dict) and any(k != "x" for k in value) and not rl.member(flagged, value),
-    ][int(i)]
-
-
-def the_solvers_record_is_closed(t: int) -> bool:
-    """Whether, for a record term `t`, the solver has no value that the
-    record's formula holds and that is a map with a key no record of the
-    question names (true of every term that is no record)."""
-    import z3
-    rl, a = _rl(), TERMS[int(t)]
-    if a["op"] != "record":
-        return True
-    node = rl.canonical(a)
-    if node["op"] != "record":
-        return True
-    lowering = rl._Lowering(z3, [node])
-    solver = z3.Solver()
-    solver.add(*lowering.shape)
-    solver.add(lowering.holds(node, lowering.root), lowering.root.other_key)
-    return solver.check() == z3.unsat
-
-
-def no_answer_from_the_solver_is_unknown() -> bool:
-    """Whether `find_member` answers `unknown`, with the reason and no
-    member, when the solver gives no answer."""
-    import z3
-    rl = _rl()
-    real = z3.Solver.check
-    z3.Solver.check = lambda self, *assumptions: z3.unknown
-    try:
-        found = rl.find_member([FLAG], [])
-    finally:
-        z3.Solver.check = real
-    return found.status == "unknown" and found.member is None and "no answer" in found.reason
-
-
-# ---- lists -------------------------------------------------------------
 
 def lists(item: dict, lo: int = 0, hi: "int | None" = None) -> dict:
     return {"op": "list", "item": item, "min": lo, "max": hi}
@@ -930,152 +740,6 @@ def a_malformed_list_is_refused(i: int) -> bool:
     return False
 
 
-def find_member_agrees_with_enumeration(t: int, u: int) -> bool:
-    """Whether what `find_member` answers for a value in list term `t`
-    and outside list term `u` agrees with running every small list and
-    catalogue value: it finds a member, which `member` places, whenever
-    one of them is such a value, and says none only when none of them
-    is. It is never left without an answer."""
-    rl, a, b = _rl(), LISTS[int(t)], LISTS[int(u)]
-    found = rl.find_member([a], [b])
-    exists = any(rl.member(a, v) and not rl.member(b, v) for v in LVALUES)
-    if found.status == "member":
-        return rl.member(a, found.member) and not rl.member(b, found.member)
-    return found.status == "none" and not exists
-
-
-def a_length_is_exact_at_its_bounds(t: int, n: int) -> bool:
-    """Whether, for item term `t` with a member in the catalogue: the
-    list of exactly `n` items is inside the list of `n` to `n + 1`; the
-    list of up to `n + 1` is outside the list of up to `n` by a list of
-    `n + 1` items; and the unbounded list is outside the list of up to
-    five by a list of six."""
-    rl, a, n = _rl(), TERMS[int(t)], int(n)
-    if not _members(a):
-        return True
-    if includes(lists(a, n, n), lists(a, n, n + 1))[0] != "proven":
-        return False
-    verdict, witness = includes(lists(a, 0, n + 1), lists(a, 0, n))
-    if verdict != "falsified" or len(witness[0]) != n + 1:
-        return False
-    verdict, witness = includes(lists(a), lists(a, 0, 5))
-    return verdict == "falsified" and len(witness[0]) == 6 \
-        and all(rl.member(a, x) for x in witness[0])
-
-
-_NOT_TRUE = complement(choice(True))
-_TRUE_OR_A = choice(True, "a")
-_AB = choice("a", "b")
-#: questions with several list constraints at once, as (inside, outside): a
-#: list of at most one item that needs an item outside two languages, where
-#: one item can be outside both and where none can; the same with room for
-#: two items; the complement of a bounded list met with another bounded
-#: list; and three and four list terms on one side
-_SEVERAL = [
-    ([lists(ANY, 0, 1), complement(lists(FLAG)), complement(lists(_AB))], []),
-    ([lists(ANY, 0, 1), complement(lists(_TRUE_OR_A)), complement(lists(_NOT_TRUE))], []),
-    ([lists(ANY, 0, 2), complement(lists(_TRUE_OR_A)), complement(lists(_NOT_TRUE))], []),
-    ([lists(ANY, 2, 2), complement(lists(_TRUE_OR_A)), complement(lists(_NOT_TRUE))], [lists(FLAG)]),
-    ([lists(ANY, 0, 1)], [lists(FLAG), lists(_AB)]),
-    ([lists(ANY, 0, 1)], [lists(_TRUE_OR_A), lists(_NOT_TRUE)]),
-    ([lists(ANY, 0, 2)], [lists(_TRUE_OR_A), lists(_NOT_TRUE), lists(ANY, 0, 1)]),
-    ([complement(lists(FLAG, 1, 2)), lists(ANY, 0, 3)], []),
-    ([complement(lists(FLAG, 1, 2)), lists(FLAG, 0, 3)], []),
-    ([complement(lists(FLAG, 1, 2)), lists(FLAG, 1, 2)], []),
-    ([complement(lists(FLAG, 1, 2)), lists(FLAG, 2, 3)], [lists(OFF)]),
-    ([complement(lists(FLAG, 0, 2)), complement(lists(_AB, 0, 2)), lists(ANY, 0, 2)], []),
-    ([complement(lists(FLAG, 0, 2)), complement(lists(_AB, 0, 2)), lists(ANY, 0, 2)], [lists(ANY, 2)]),
-    ([complement(lists(FLAG, 0, 2)), lists(union(FLAG, _AB), 0, 3)], [lists(_AB), lists(ANY, 0, 1)]),
-    ([lists(FLAG), lists(OFF, 1), lists(ANY, 0, 2)], [lists(ANY, 0, 1)]),
-    ([lists(FLAG), lists(OFF, 1), lists(ANY, 0, 2), complement(lists(OFF, 2))], []),
-    ([lists(ANY, 3), complement(lists(FLAG)), complement(lists(_AB)), complement(lists(_X))], []),
-    ([lists(ANY, 0, 2), complement(lists(FLAG)), complement(lists(_AB)), complement(lists(_X))], []),
-    ([lists(ANY, 0, 2), complement(lists(FLAG)), complement(lists(_AB)),
-      complement(lists(complement(_X)))], []),
-    ([lists(lists(ANY, 0, 1)), complement(lists(lists(FLAG))), complement(lists(lists(_AB)))],
-     [lists(ANY, 2)]),
-    ([lists(lists(ANY, 0, 1), 0, 1), complement(lists(lists(_TRUE_OR_A))),
-      complement(lists(lists(_NOT_TRUE)))], []),
-    ([lists(lists(ANY, 0, 2), 0, 1), complement(lists(lists(_TRUE_OR_A))),
-      complement(lists(lists(_NOT_TRUE)))], []),
-]
-
-
-def _wrapped(nodes: list, how: int) -> list:
-    """The nodes as they are, each under a record's one required field,
-    or each as the one item of a list."""
-    if int(how) == 1:
-        return [record(("f", n, True)) for n in nodes]
-    if int(how) == 2:
-        return [lists(n, 1, 1) for n in nodes]
-    return nodes
-
-
-def _wrap_value(value, how: int):
-    return {"f": value} if int(how) == 1 else [value] if int(how) == 2 else value
-
-
-def several_list_constraints_agree_with_enumeration(i: int, how: int) -> bool:
-    """Whether `find_member` on question `i` of several list constraints
-    (as written, under a record's field, or as the one item of a list)
-    finds a value `member` places whenever a small list answers it, and
-    says none only when none does; never unknown. A constraint that is
-    put outside under a field or an item is put outside as the wrapped
-    node, so the question stays the same question one place down, with
-    the wrapping itself asked inside."""
-    rl = _rl()
-    inside, outside = _SEVERAL[int(i)]
-    asked_in = _wrapped(inside, how)
-    asked_out = _wrapped(outside, how)
-    if int(how) and not inside:
-        return True
-    found = rl.find_member(asked_in, asked_out)
-
-    def answers(value) -> bool:
-        return all(rl.member(n, value) for n in asked_in) and not any(rl.member(n, value) for n in asked_out)
-    exists = any(answers(_wrap_value(v, how)) for v in LVALUES)
-    if found.status == "member":
-        return answers(found.member)
-    return found.status == "none" and not exists
-
-
-def the_hard_cases_have_the_answers_stated(how: int) -> bool:
-    """Whether, as written, under a field and inside a list: a list of
-    at most one item with an item outside each of two languages is found
-    when one item can be outside both and is none when no item can; with
-    room for two items it is found, with two items."""
-    rl = _rl()
-
-    def ask(i: int):
-        inside, outside = _SEVERAL[i]
-        return rl.find_member(_wrapped(inside, how), _wrapped(outside, how))
-
-    def unwrapped(value):
-        return value["f"] if int(how) == 1 else value[0] if int(how) == 2 else value
-    shared, never, two = ask(0), ask(1), ask(2)
-    return (shared.status == "member" and len(unwrapped(shared.member)) == 1
-            and never.status == "none"
-            and two.status == "member" and len(unwrapped(two.member)) == 2)
-
-
-def three_list_terms_agree_with_enumeration(t: int, u: int, w: int) -> bool:
-    """Whether, for list terms `t`, `u` and `w`, `find_member` agrees
-    with the small lists on a value in `t` and outside both others, and
-    on a value in `t` and in `u` and outside `w`."""
-    rl, a, b, c = _rl(), LISTS[int(t)], LISTS[int(u)], LISTS[int(w)]
-    for inside, outside in (([a], [b, c]), ([a, b], [c])):
-        found = rl.find_member(inside, outside)
-
-        def answers(value, inside=inside, outside=outside) -> bool:
-            return all(rl.member(n, value) for n in inside) and not any(rl.member(n, value) for n in outside)
-        if found.status == "member":
-            if not answers(found.member):
-                return False
-        elif found.status != "none" or any(answers(v) for v in LVALUES):
-            return False
-    return True
-
-
 def numbers_and_booleans_are_told_apart_by_kind(c: int, v: int) -> bool:
     """Whether the choice of constant `c` alone holds value `v` exactly
     when the two are the same value of the same kind: a number is the
@@ -1090,21 +754,6 @@ def numbers_and_booleans_are_told_apart_by_kind(c: int, v: int) -> bool:
     return (rl.member(choice(constant), value) == same
             and rl.member(record(("k", choice(constant), True)), {"k": value}) == same
             and rl.member(lists(choice(constant), 1, 1), [value]) == same)
-
-
-def the_solver_tells_numbers_from_booleans(c: int, d: int) -> bool:
-    """Whether `find_member` finds a value in the choice of constant `c`
-    and outside the choice of constant `d` exactly when the two are not
-    the same value of the same kind, and the value found is of the kind
-    of `c`."""
-    constants = [0, 1, False, True, 0.0, 1.0, -0.0, None, "0", "1", ""]
-    kinds = ["n0", "n1", "bF", "bT", "n0", "n1", "n0", "null", "t0", "t1", "t"]
-    rl = _rl()
-    found = rl.find_member([choice(constants[int(c)])], [choice(constants[int(d)])])
-    if kinds[int(c)] == kinds[int(d)]:
-        return found.status == "none"
-    return (found.status == "member" and rl.member(choice(constants[int(c)]), found.member)
-            and isinstance(found.member, bool) == kinds[int(c)].startswith("b"))
 
 
 def list_of_holds_each_item_under_each_bound(d: int, v: int) -> bool:
@@ -1146,28 +795,6 @@ def generated_list(seed: int, depth: int = 0) -> dict:
                                  for i in range(rng.randint(1, 3))]}
 
 
-def generated_lists_agree_with_enumeration(seed: int) -> bool:
-    """Whether, for two terms with lists drawn from `seed`, the laws of
-    membership hold on the small lists, and `find_member` for the first
-    inside the second finds a value `member` places whenever a small
-    list is one, and says none only when none is."""
-    rl = _rl()
-    a, b = generated_list(int(seed)), generated_list(int(seed) + 5000)
-    once = rl.canonical(a)
-    for value in LVALUES[::7]:
-        x, y = rl.member(a, value), rl.member(b, value)
-        if rl.member(once, value) != x or rl.member(complement(a), value) == x \
-                or rl.member(inter(a, b), value) != (x and y):
-            return False
-    found = rl.find_member([a], [b])
-    exists = any(rl.member(a, v) and not rl.member(b, v) for v in LVALUES)
-    if found.status == "member":
-        return rl.member(a, found.member) and not rl.member(b, found.member)
-    return found.status == "none" and not exists
-
-
-# ---- generated terms and values -----------------------------------------
-
 def generated_term(seed: int, depth: int = 0) -> dict:
     """A term drawn from `seed`: every node kind, records up to three
     deep over the field names x, y and z."""
@@ -1201,7 +828,7 @@ def generated_value(seed: int, depth: int = 0):
 def generated_terms_keep_the_laws(seed: int) -> bool:
     """Whether, for two terms and forty values drawn from `seed`:
     canonical is idempotent and keeps membership; complement, union and
-    intersection mean not, or and and; and what `find_member` answers
+    intersection mean not, or and and; and what `find_by_enumeration` answers
     about the first inside the second agrees with `member` on the drawn
     values and on the value it finds."""
     rl = _rl()
@@ -1216,31 +843,7 @@ def generated_terms_keep_the_laws(seed: int) -> bool:
             return False
         if rl.member(union(a, b), value) != (x or y) or rl.member(inter(a, b), value) != (x and y):
             return False
-    found = rl.find_member([a], [b])
+    found = rl.find_by_enumeration([a], [b])
     if found.status == "member":
         return rl.member(a, found.member) and not rl.member(b, found.member)
-    if found.status == "none":
-        return not any(rl.member(a, v) and not rl.member(b, v) for v in values)
-    return False
-
-
-def many_list_terms_at_one_place_are_decided(n: int) -> bool:
-    """Whether a question of `n` list terms at one place is decided
-    within `find_member`'s cap. Each term is a list of lists of lists
-    of one of `n + 1` whole numbers, the `i`-th of `i` to `i + n`, so
-    all share the number `n`; the list of lists of empty lists is left
-    out. The question has a member, and it is asked with the default
-    cap of 5000 ms: True when the answer is that member, in every term
-    by `member`, and not `unknown`. A lowering that holds one item
-    variable for every list term at a place, at each of the three
-    depths, passes the cap as `n` grows."""
-    rl, n = _rl(), int(n)
-
-    def nested(node: dict) -> dict:
-        for _ in range(3):
-            node = lists(node)
-        return node
-
-    terms = [nested(choice(*range(i, i + n + 1))) for i in range(n)]
-    found = rl.find_member(terms, [nested({"op": "empty"})])
-    return found.status == "member" and all(rl.member(t, found.member) for t in terms)
+    return not any(rl.member(a, v) and not rl.member(b, v) for v in values)
