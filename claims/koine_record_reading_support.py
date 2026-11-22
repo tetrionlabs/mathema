@@ -5,7 +5,8 @@ KOINE route reads, and about the shape of what it writes, are stated
 over.
 
 The modules under claim are `mathema.koine.record_membership` and
-`mathema.koine.record_relations`. `mathema.record_language` is what the
+`mathema.koine.record_relations`. The record-language oracle
+(`tests/_record_language_oracle.py`) is what the
 route is compared with: a definition it refuses (by raising) the route
 refuses with `InvalidTerm`, and a definition it reads the route reads,
 with the same members under each bound, or declines by name for a list
@@ -140,8 +141,7 @@ def _rm():
 
 
 def _rl():
-    from mathema import record_language
-    return record_language
+    return REF._load()
 
 
 def _reference_reads(document) -> bool:

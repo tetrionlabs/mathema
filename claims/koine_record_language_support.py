@@ -12,12 +12,13 @@ record-language node, as a KOINE document).
 
 Each function takes whole numbers a claim can quantify: indices into
 `TERMS` and `VALUES` (the catalogues of
-`claims/record_language_support.py`, with more values), into
+`tests/claims/record_language_oracle_support.py`, with more values), into
 `REGULAR` (regular-language nodes, one of each operation), `TEXTS`,
 `NAMESETS`, `DEFINITIONS` and the lists of malformed terms. Each
 returns the truth of one statement, so a claim reads `f(t, v) == True`.
 
-`mathema.record_language.member` is the statement of membership the
+The record-language oracle's `member` (`tests/_record_language_oracle.py`)
+is the statement of membership the
 KOINE documents are compared with."""
 from __future__ import annotations
 
@@ -29,7 +30,8 @@ _HERE = Path(__file__).resolve().parent
 
 def _reference_support():
     spec = importlib.util.spec_from_file_location(
-        "record_language_support", _HERE / "record_language_support.py")
+        "record_language_oracle_support",
+        _HERE.parent / "tests" / "claims" / "record_language_oracle_support.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -170,8 +172,7 @@ def _rm():
 
 
 def _rl():
-    from mathema import record_language
-    return record_language
+    return REF._load()
 
 
 def _syntax():

@@ -62,7 +62,7 @@ def test_a_law_of_the_claims_file_holds_over_its_domain(target):
 
 def test_a_nested_closed_record_is_a_subset_of_a_wider_one():
     pytest.importorskip("z3")
-    from mathema import record_language
+    record_language = SUPPORT.REF._load()
     child, parent, widened = SUPPORT.CHILD, SUPPORT.PARENT, SUPPORT.WIDENED
     inside = solver_question.find_member([record_membership.membership_document(child)],
                                          [record_membership.membership_document(parent)])

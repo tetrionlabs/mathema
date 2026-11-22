@@ -12,7 +12,8 @@ Each function takes indices into the catalogues of
 `claims/koine_record_language_support.py` (`TERMS`, `VALUES`,
 `DEFINITIONS`) and into `EXPRESSIONS`, single terms and small
 combinations of them, some with no value at some points. Each returns
-the truth of one statement. `mathema.record_language` is what the
+the truth of one statement. The record-language oracle
+(`tests/_record_language_oracle.py`) is what the
 answers are compared with: its `member` for a value, its `find_member`
 for a question."""
 from __future__ import annotations
@@ -66,8 +67,7 @@ def _rm():
 
 
 def _rl():
-    from mathema import record_language
-    return record_language
+    return REF._load()
 
 
 def _rc():
