@@ -38,7 +38,17 @@ def _reference_support():
 
 
 REF = _reference_support()
-TERMS = REF.TERMS
+def _holds_a_list(node) -> bool:
+    if isinstance(node, dict):
+        return node.get("op") == "list" or any(_holds_a_list(x) for x in node.values())
+    if isinstance(node, list):
+        return any(_holds_a_list(x) for x in node)
+    return False
+
+
+#: the oracle's catalogue terms less those holding a list node, which
+#: the KOINE route declines by name in this version
+TERMS = [t for t in REF.TERMS if not _holds_a_list(t)]
 #: the reference catalogue, then values it lacks: two keys holding
 #: null, a nested record alone, numbers written as floats, a lone
 #: surrogate, the empty key, and a key no term names
