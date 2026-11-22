@@ -1729,7 +1729,9 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
         domain. Proven when the function is wrapped by
         @enforce_domain (values) or @enforce_dimensions (shape) covering
         this parameter, rejection by construction, the wrapper checks
-        every call before the body runs. Undecided (None) otherwise:
+        every call before the body runs, the wrapper being one those
+        decorators built (`authoring._built_by_enforcement`), not any
+        function carrying their attributes. Undecided (None) otherwise:
         the trials at concrete out-of-domain values decide empirically.
 
     Notes:
@@ -1742,6 +1744,11 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
     from .symbolic import ProofResult
     param = lhs_src
     if _declared((domain or {}).get(param), "refusal"):
+        return None
+    from .authoring import _built_by_enforcement
+    if not _built_by_enforcement(fn):
+        # a function mathema's enforcement did not build checks nothing,
+        # whatever attributes it carries
         return None
     enforced = getattr(fn, "__mathema_enforced_domain__", None)
     if enforced is not None and param in enforced:

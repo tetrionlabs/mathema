@@ -22,6 +22,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `is_defined(f)` over a domain that lists a missing value (`{1, None}`, `[0, 1] | absent`) runs f at each listed value: a raise there falsifies it, with that call as the witness, and its negation reads the same run.
 - A negated claim (`not is_state_safe(f)`, `not is_deterministic(f)`) is proven from its positive's disproof only when that disproof's witness was executed; a disproof read from the source alone leaves the negation unknown, with the reason.
 - `is_empty_safe(xs)` runs every empty input the parameter admits (the empty tuple beside the empty list for a plain or abstract sequence), and a raise on a non-empty input no longer falsifies it.
+- `excluded_outside_domain(x)` is proven by construction only for a wrapper `enforce_domain` or `enforce_dimensions` built; a function that merely carries their attribute is decided by calls outside the domain.
 
 ## 0.6.6.1
 
