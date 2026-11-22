@@ -1392,8 +1392,72 @@ def _defaults_moved(fn, merged_entry: dict, verified_entry: dict) -> bool:
     return now != recorded
 
 
+def _language_definition_moved(fn, merged_entry: dict,
+                               verified_entry: dict) -> "str | None":
+    """Intent:
+        Why a record no longer stands on the languages it read, as the
+        sentence verify reports, or None when it does. A row whose
+        verdict rested on running a language's own membership
+        (`mathema.rests_on_membership`) is never fresh, since no stamp
+        covers what that membership depends on. Otherwise a language
+        whose regular-language definition differs from the one stamped
+        on a row (`mathema.language_definitions`) has moved; so has one
+        that was stamped and now states no definition or does not
+        resolve, and the language of a validator's membership statement
+        once the pattern the function reads is another one. A row whose
+        verdict rests on a definition checked against the language's
+        membership also stamps that membership's code
+        (`mathema.language_memberships`); the language has moved when
+        that code is another one or no longer resolves. A language
+        the record never stamped has not moved: the record made no
+        statement about it.
+    """
+    from .conjecture import language_definition_stamp, _language_membership_stamp
+    from .spec import entry_claims
+    recorded: dict = {}
+    memberships: dict = {}
+    for c in (verified_entry or {}).get("claims") or []:
+        meta = c.get("meta") or {}
+        ran = meta.get("mathema.rests_on_membership")
+        if ran:
+            return (f"the verdict rests on running the membership of {ran[0]}, which "
+                    f"the record does not stamp")
+        stamp = meta.get("mathema.language_definitions")
+        if stamp:
+            recorded.setdefault(meta.get("mathema.companion_of") or c.get("name") or "",
+                                {}).update(stamp)
+        ran = meta.get("mathema.language_memberships")
+        if ran:
+            memberships.setdefault(meta.get("mathema.companion_of") or c.get("name") or "",
+                                   {}).update(ran)
+    if not recorded and not memberships:
+        return None
+    try:
+        current = entry_claims(merged_entry or {})
+    except Exception:
+        return None
+    for cj in current:
+        was = recorded.get(cj.name)
+        if not was:
+            continue
+        now = language_definition_stamp(cj, fn)
+        for language, digest in sorted(was.items()):
+            if now.get(language) != digest:
+                return f"the definition of {language} moved"
+    for cj in current:
+        was = memberships.get(cj.name)
+        if not was:
+            continue
+        now = _language_membership_stamp(cj, fn, set(was))
+        for language, identity in sorted(was.items()):
+            if now.get(language) != identity:
+                return f"the definition of {language} moved"
+    return None
+
+
 def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
-                    provenance, library_version, premises, dependency) -> list[str]:
+                    provenance, library_version, premises, dependency,
+                    language_definition=None) -> list[str]:
     """The triggers that make a function invalidated, changed since its
     record, in `transitions.OWN_TRIGGERS` order with `dependency` last:
     each one that fired."""
@@ -1401,6 +1465,7 @@ def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
              "claims": claims, "pseudo-infinity": pseudo_infinity,
              "library-version": library_version is not None and library_version is not False,
              "definition-rows": definitions, "premises": premises,
+             "language-definition": language_definition is not None,
              "dependency": dependency}
     return [name for name, on in fired.items() if on]
 
@@ -2413,6 +2478,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             version_moved = (_library_version_moved(merged_entry, verified_entry)
                              if key in library else None)
             body_moved = _provenance_moved(facts_now, verified_entry)
+            language_moved = _language_definition_moved(fn, merged_entry, verified_entry)
             from .spec import recorded_claims_fingerprint
             recorded_now = recorded_claims_fingerprint(verified_entry, fn)
             # the record holds the claims as written, made under an
@@ -2422,6 +2488,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
                         and recorded_fp == current_fp and not defaults_moved
                         and version_moved is None and body_moved is None
+                        and language_moved is None
                         and not pinf_moved and not definitions_moved
                         and not stale_rows.get(key)
                         and (premise_now == (recorded_premises or {})
@@ -2561,6 +2628,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else f"{body_moved} changed" if body_moved
                    and same_form(facts_now.form, recorded_form)
                    and recorded_fp == current_fp
+                   else language_moved if language_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
                    else "forced (--all)" if all and is_fresh
                    else "targeted re-verify" if only and is_fresh
                    else "no baseline record" if not recorded_form
@@ -2586,7 +2656,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     provenance=body_moved, library_version=version_moved,
                     premises=premise_now != (recorded_premises or {})
                     if premise_now or recorded_premises else False,
-                    dependency=dependency_changed)
+                    dependency=dependency_changed,
+                    language_definition=language_moved)
                 rec.meta["mathema.invalidated_by"] = triggers
                 if triggers:
                     invalidated_keys.add(key)

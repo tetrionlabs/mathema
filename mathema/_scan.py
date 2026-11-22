@@ -48,6 +48,41 @@ def _opens_string(s: str, i: int) -> bool:
     return s[i] in _QUOTES
 
 
+def _raw_string_end(s: str, i: int) -> "int | None":
+    """Intent:
+        The index just past a raw literal whose `r` prefix is `s[i]`
+        (`r'[a-z]+'`, `r"[a-z]+"`), or None when `s[i]` does not start
+        one. The prefix must stand alone as a name.
+
+    Notes:
+        After a name a single quote is otherwise a derivative prime, so
+        `r'(x)` is the derivative of a function named `r`. A single
+        quoted raw string is read only when the quote is closed and
+        what follows the closing quote is not a name or an opening
+        bracket (as it is in `r'(x) + r'(y)`).
+    """
+    if s[i] not in "rR" or i + 1 >= len(s) or s[i + 1] not in _QUOTES:
+        return None
+    if i > 0 and (s[i - 1].isalnum() or s[i - 1] in "_'.)"):
+        return None
+    end = _string_end(s, i + 1)
+    if s[i + 1] == '"':
+        return end
+    if end < i + 3 or s[end - 1] != "'" or (end == i + 3 and s[i + 2] == "\\"):
+        return None
+    if end < len(s) and (s[end].isalnum() or s[end] in "_('"):
+        return None
+    return end
+
+
+def _literal_end(s: str, i: int) -> "int | None":
+    """The index just past the quoted literal starting at `s[i]`, its
+    raw prefix included, or None when no literal starts there."""
+    if _opens_string(s, i):
+        return _string_end(s, i)
+    return _raw_string_end(s, i)
+
+
 def mask_strings(s: str) -> tuple[str, list[str]]:
     """Intent:
         `s` with every quoted literal replaced by a numbered placeholder
@@ -60,8 +95,8 @@ def mask_strings(s: str) -> tuple[str, list[str]]:
     literals: list[str] = []
     i = 0
     while i < len(s):
-        if _opens_string(s, i):
-            end = _string_end(s, i)
+        end = _literal_end(s, i)
+        if end is not None:
             out.append(_STRING_MARK.format(len(literals)))
             literals.append(s[i:end])
             i = end
@@ -227,8 +262,8 @@ def _split_commas(s: str) -> list[str]:
     i = 0
     while i < len(s):
         ch = s[i]
-        if _opens_string(s, i):
-            end = _string_end(s, i)
+        end = _literal_end(s, i)
+        if end is not None:
             cur.append(s[i:end])
             i = end
             continue
