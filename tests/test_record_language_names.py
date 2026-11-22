@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """Field names and texts the record-language term reads exactly: a
-field's name never makes it the same solver variable as another value,
-a text is never changed by the canonical form, and a node that is not
-of the schema is refused as one."""
+field's name never makes it the same solver variable as another value
+in the question the KOINE route asks (a record holding a list, which
+that route declines, is asked of the oracle's enumerator), a text is
+never changed by the canonical form, and a node that is not of the
+schema is refused as one."""
 import pytest
 
 from tests import _record_language_oracle as rl
+from mathema.koine import record_membership, solver_question
 from mathema.regular import InvalidTerm
 
 
@@ -42,7 +45,12 @@ def exact(node):
 def test_a_record_whose_field_names_look_like_paths_has_its_member_found(node, value):
     pytest.importorskip("z3")
     assert rl.member(node, value)
-    found = rl.find_member([node], [])
+    try:
+        document = record_membership.membership_document(node)
+    except record_membership.Declined:
+        found = rl.find_by_enumeration([node])
+    else:
+        found = solver_question.find_member([document], [])
     assert found.status == "member", found
     assert rl.member(node, found.member)
 
@@ -51,7 +59,8 @@ def test_a_found_member_is_told_from_a_value_with_a_dotted_name():
     pytest.importorskip("z3")
     node = record(["a.b", choice(1), True], ["a", record(["b", choice(2), True]), True])
     other = record(["a.b", choice(7), True], ["a", record(["b", choice(2), True]), True])
-    found = rl.find_member([node], [other])
+    found = solver_question.find_member([record_membership.membership_document(node)],
+                                        [record_membership.membership_document(other)])
     assert found.status == "member", found
     assert rl.member(node, found.member) and not rl.member(other, found.member)
 
