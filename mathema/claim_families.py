@@ -2295,6 +2295,38 @@ def _empty_value(fn, facts, target: str, cj=None) -> tuple:
     return [], f"{target} = [] (an empty list)"
 
 
+def _empty_values(fn, facts, target: str, cj=None) -> list:
+    """Intent:
+        Every `(value, shown)` empty input `target` admits: the empty
+        container `_empty_value` builds, and, for a parameter that takes
+        a plain sequence of any kind (no annotation, a tuple, or an
+        abstract `Sequence`, `Collection`, `Iterable`), the empty tuple
+        beside the empty list.
+    """
+    import collections.abc as _abc
+    import typing
+    first = _empty_value(fn, facts, target, cj)
+    if not isinstance(first[0], list) or first[0] != [] \
+            or not first[1].endswith("(an empty list)"):
+        return [first]
+    try:
+        annotation = typing.get_type_hints(fn).get(
+            target, inspect.signature(fn).parameters[target].annotation)
+    except Exception:
+        try:
+            annotation = inspect.signature(fn).parameters[target].annotation
+        except (KeyError, TypeError, ValueError):
+            return [first]
+    origin = typing.get_origin(annotation) or annotation
+    takes_tuples = (annotation is inspect.Parameter.empty or origin is tuple
+                    or origin in (_abc.Sequence, _abc.Collection,
+                                  _abc.Iterable, _abc.Reversible,
+                                  _abc.Container, _abc.Sized))
+    if not takes_tuples:
+        return [first]
+    return [first, ((), f"{target} = () (an empty tuple)")]  # :draft
+
+
 def _realised(fn, facts, target: str, cells: list, cj=None):
     """A container of `cells` for `target`, through its runtime type: a
     float numpy array, a float pandas or polars Series (an int one when
@@ -2366,14 +2398,16 @@ def _empty_outcome(out, declared: "str | None") -> "str | None":
 
 def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                  trials: int):
-    """Empirical half of is_empty_safe[xs]: call fn with the empty
-    container, realised through the parameter's runtime type, then a
-    single-element and a longer one (every other parameter freshly
-    sampled). At the empty input a raise behind a recognized emptiness
-    guard passes, an unguarded raise fails, a finite value passes, a
-    hole fails, and a None fails unless the return type declares it. A
-    raise or non-finite result on the non-empty inputs fails outright.
-    The row says what f did at the empty input."""
+    """Empirical half of is_empty_safe[xs]: call fn with every empty
+    input the parameter admits (`_empty_values`: the empty container
+    realised through its runtime type, and the empty tuple beside the
+    empty list for a plain sequence), then a single-element and a
+    longer one (every other parameter freshly sampled). At an empty
+    input a raise behind a recognized emptiness guard passes, an
+    unguarded raise fails, a finite value passes, a hole fails, and a
+    None fails unless the return type declares it. What f does on a
+    non-empty input says nothing about the empty one and never fails
+    the claim. The row says what f did at the empty input."""
     from ._missing_words import declared_optional_return, value_shown
     from .hazards import _emptiness_guard_params
     target = cj.lhs
@@ -2381,9 +2415,10 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     guarded = target in _emptiness_guard_params(facts)
     declared = declared_optional_return(fn)
-    shapes = ("empty", "single", "longer")
+    empties = _empty_values(fn, facts, target, cj)
+    shapes = ("empty", "single", "longer") + tuple(
+        f"empty:{i}" for i in range(1, len(empties)))
     state: dict = {"idx": 0, "said": None}
-    empty, shown = _empty_value(fn, facts, target, cj)
 
     element = (_typed_element_draw(fn, target, None, rng)
                or (lambda: rng.uniform(-10, 10)))
@@ -2391,24 +2426,30 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
-        cells = ([] if shape == "empty"
+        empty_at = (0 if shape == "empty" else int(shape.split(":")[1])
+                    if shape.startswith("empty:") else None)
+        cells = ([] if empty_at is not None
                  else [element()] if shape == "single"
                  else [element() for _ in range(5)])
-        value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
+        if empty_at is not None:
+            value, shown = empties[empty_at]
+        else:
+            value = _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
             name = type(exc).__name__
-            if shape == "empty":
+            if empty_at is not None:
                 if guarded:
                     state["said"] = state["said"] or f"{shown}: f raised {name} behind a guard"
                     return True   # deliberate rejection
                 return (f"{shown}: f raised {name} with no guard for the empty input; "
                         f"guard it (`if not {target}: raise ValueError(...)`) so the "
                         f"raise is deliberate, or return a value")
-            return (f"{target} = {cells!r} raised {name}")
-        if shape == "empty":
+            # a non-empty input is no case of the empty one
+            return True
+        if empty_at is not None:
             why = _empty_outcome(out, declared)
             if why is not None:
                 return f"{shown}: {why}"
@@ -2416,12 +2457,6 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"{shown}: f returned None, as its return type {declared} declares"
                 if out is None else f"{shown}: f returned {value_shown(out)}")
             return True
-        try:
-            as_float = float(out)
-        except (TypeError, ValueError):
-            return True
-        if as_float != as_float or math.isinf(as_float):
-            return (f"{target} = {cells!r} returned {out!r}")
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,
