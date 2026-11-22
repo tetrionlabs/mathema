@@ -1,16 +1,12 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
-"""Record-language terms: the solver-neutral definition a language of
-JSON values states, and the one question asked about such terms.
+"""The record-language oracle: the written meaning of a record-language
+term, and a search for a member over a small universe of values, with
+no solver. It is a test helper, so no module of the package imports it.
 
-A definition is a plain JSON document shaped as a regular-language
-definition is: `{"kind": "record_language", "version": 1, "exact":
-bool, ...}`. An exact definition carries its language under `language`;
-one that is not exact carries two bounds in its place, `at_least` (a
-language holding every member) and `at_most` (a language holding only
-members). `source` is provenance and no part of the meaning:
-`term_hash` reads the version, the exact flag and the nodes, in
-canonical form, and nothing else.
+The document format (validate, canonical form, canonical text, hash, the
+definitions built from definitions) is `mathema.record_term`'s, read
+here under the same names; this module adds what a term means.
 
 The values a language is of are the JSON values: null, the two
 booleans, numbers, texts, lists, and maps from text keys to values. A
@@ -21,53 +17,61 @@ then by value, never by Python's `==`, under which `True == 1`. A key a
 map does not hold is unset; a key holding null holds a value like any
 other.
 
-A language is a node keyed by `op`:
+`member(document, value)` reads a node as it is written, once the
+format accepts it: `empty` holds nothing and `any` everything; a choice
+holds the scalars it lists; a text node the texts of its regular
+language; a closed record the maps whose every key is one of its
+fields, each set key's value in its field's node and each required key
+set; a list node the lists of its item's values, of a length from `min`
+to `max`; `union`, `inter` and `complement` (over every JSON value) are
+or, and and not.
 
-- `empty`, no value, and `any`, every value;
-- `choice`, exactly the scalar `values` listed (null, a boolean, a whole
-  number, a text);
-- `text`, the texts in the language of a regular-language node
-  (`mathema.regular`), under `language`;
-- `record`, the maps whose every key is one of its `fields`, each
-  written `[name, node, required]`: a key that is set holds a value of
-  its node, and a required key is set. `rest` is the language of the
-  value under any other key; this version reads `empty` there only, a
-  closed record;
-- `list`, the lists whose every item is a value of the node `item`, of
-  a length from `min` to `max` (`max` null for no end);
-- `union`, `inter` and `complement`, the last over every JSON value.
+`find_by_enumeration(inside, outside)` looks for a value in every node
+of `inside` and in no node of `outside` among `universe(nodes)`. The
+universe holds, at each place of the question (the value itself, and
+the value under each key a record there names, to any depth): every
+constant a choice there lists; one value no choice lists and no node
+there reads by its kind (the number 0.5); when a record stands there,
+the maps that set each key a record there names or leave it unset, with
+each value of the universe at that key's place, with and without one
+key no record names; when a text node stands there, a shortest text in
+each cell the languages of the text nodes and the listed texts there
+cut the texts into; and when a list node
+stands there, the empty list and the lists of one and two values of the
+universe at the item's place.
 
-A number that is not whole is a value no node of this version tells
-apart from another: it is a member of `any` and of a complement, and of
-no choice, text, record or list.
-
-`find_member` asks whether some value lies inside every one of a list
-of nodes and outside every one of another, which is how inclusion,
-equality and disjointness of two languages are all decided. The `z3`
-dependency is the optional `mathema[smt]` extra.
+When no node of the question is a text or a list node, the membership
+of a value in every node depends only on its class at each place: which
+listed constant it equals, if any (a choice compares by kind and then
+by value); a value that equals none, and is not a map where a record
+stands, is in one class with every other such value; and a map where a
+record stands is in the class given by each named key, unset or the
+class of its value there, and by whether some other key is set. The
+universe holds one value of every class, so a question with a member
+has one in it, and `none` is then a proof: the result says so
+(`complete`). With a text or a list node the classes are not finite in
+this way, and `none` says only that the universe holds no member.
 """
 from __future__ import annotations
 
-import hashlib
-import json
+import itertools
+from dataclasses import dataclass
 
 from mathema import regular
-from mathema.regular import Found, InvalidTerm
+from mathema.record_term import (KIND, VERSION, InvalidTerm, bounds, canonical, canonical_text,
+                                 complement_of, inter_of, is_definition, list_of, record_of,
+                                 term_hash, union_of, validate)
 
-KIND = "record_language"
-VERSION = 1
-
-_EMPTY = {"op": "empty"}
-_ANY = {"op": "any"}
-#: the keys each operation's node holds beside `op`, and no others
-_NODE_KEYS = {"empty": (), "any": (), "choice": ("values",), "text": ("language",),
-              "record": ("fields", "rest"), "list": ("item", "min", "max"),
-              "union": ("args",), "inter": ("args",),
-              "complement": ("arg",)}
 _BOUNDS = ("at_least", "at_most")
+#: the most values `universe` builds at one place before it stops, the
+#: result then not complete
+LIMIT = 50_000
+#: the longest text `universe` looks for in or outside a text node's language
+TEXT_LIMIT = 24
+#: the most regular languages at one place whose every cell `universe`
+#: looks into
+CELLS = 6
 
-
-# ---- values -----------------------------------------------------------
 
 def _scalar_key(value) -> "tuple | None":
     """A scalar value as `(kind, value)`, numbers by their value, or
@@ -83,280 +87,6 @@ def _scalar_key(value) -> "tuple | None":
     if isinstance(value, str):
         return ("text", value)
     return None
-
-
-def _serial(value) -> str:
-    """The one serialisation of a canonical value: JSON with sorted
-    keys, no white space, ASCII only.
-
-    Raises:
-        InvalidTerm: the value holds a whole number too long for Python
-            to write in decimal.
-    """
-    try:
-        return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
-    except ValueError as e:
-        raise InvalidTerm(f"a value this term cannot write: {e}") from None
-
-
-def _no_surrogate(text: str, what: str) -> str:
-    """`text`, when it holds no high surrogate followed by a low one.
-    ASCII JSON writes such a pair as the same two escapes as the one
-    character beyond the basic plane they encode, and reads those
-    escapes back as that character, so a term holding the pair would not
-    keep its meaning through its own canonical text. A surrogate on its
-    own is written and read back as itself.
-
-    Raises:
-        InvalidTerm: the text holds such a pair.
-    """
-    for i in range(len(text) - 1):
-        if "\ud800" <= text[i] <= "\udbff" and "\udc00" <= text[i + 1] <= "\udfff":
-            raise InvalidTerm(f"{what} {text!r} holds the surrogate pair U+{ord(text[i]):04X} "
-                              f"U+{ord(text[i + 1]):04X}, which JSON text reads back as one "
-                              "character")
-    return text
-
-
-# ---- the canonical form and the hash ----------------------------------
-
-def canonical(node) -> dict:
-    """Intent:
-        The canonical form of a node, its arguments made canonical
-        first, by these rules and no others.
-
-        1. `choice`: equal values kept once (a number by its value, so
-           `1.0` is written `1`); sorted by their serialisation; no
-           value is `empty`.
-        2. `text`: the regular-language node canonical by
-           `regular.canonical`; the empty regular language is `empty`.
-        3. `record`: fields sorted by name; a required field whose node
-           is `empty` makes `empty`; an optional field whose node is
-           `empty` stays, and forbids the key.
-        4. `union`: nested unions flattened; `empty` arguments dropped;
-           an `any` argument makes `any`; equal arguments kept once;
-           sorted by their serialisation; none left is `empty`; one
-           left is that argument.
-        5. `inter`: nested intersections flattened; `any` arguments
-           dropped; an `empty` argument makes `empty`; equal arguments
-           kept once; sorted; none left is `any`; one left is that
-           argument.
-        6. `list`: a `max` below its `min` makes `empty`; a `max` of 0,
-           or an `empty` item with a `min` of 0, is the list of nothing,
-           written with an `empty` item, `min` 0 and `max` 0; an `empty`
-           item with a `min` above 0 makes `empty`.
-        7. `complement`, `empty` and `any` are kept as they are.
-
-        The rules read the form and not the meaning: two nodes with the
-        same members may have two canonical forms.
-
-    Raises:
-        InvalidTerm: the node is not of the schema: an unknown `op`,
-            keys other than the operation's own, a choice value that is
-            no scalar, a field not written `[name, node, required]`, a
-            name twice, a `rest` other than `empty`, or a list whose
-            `min` or `max` is not a whole number of zero or more.
-    """
-    if not isinstance(node, dict) or not isinstance(node.get("op"), str) \
-            or node["op"] not in _NODE_KEYS:
-        raise InvalidTerm(f"not a record-language node: {node!r}")
-    op = node["op"]
-    if set(node) != {"op", *_NODE_KEYS[op]}:
-        raise InvalidTerm(f"a {op} node holds op and {list(_NODE_KEYS[op])}, not {sorted(node)}")
-    if op in ("empty", "any"):
-        return {"op": op}
-    if op == "choice":
-        if not isinstance(node["values"], list):
-            raise InvalidTerm("the values of a choice are a list")
-        keys = []
-        for value in node["values"]:
-            key = _scalar_key(value)
-            if key is None:
-                raise InvalidTerm(f"{value!r} is not a value a choice may list (null, a "
-                                  f"boolean, a whole number, a text)")
-            if key[0] == "text":
-                _no_surrogate(key[1], "the choice value")
-            keys.append(key)
-        by_text = {_serial(key[1]): key[1] for key in keys}
-        values = [by_text[text] for text in sorted(by_text)]
-        return {"op": "choice", "values": values} if values else dict(_EMPTY)
-    if op == "text":
-        language = _regular_canonical(node["language"])
-        return dict(_EMPTY) if language == {"op": "empty"} else {"op": "text", "language": language}
-    if op == "complement":
-        return {"op": "complement", "arg": canonical(node["arg"])}
-    if op == "record":
-        return _canonical_record(node)
-    if op == "list":
-        return _canonical_list(node)
-    if not isinstance(node["args"], list):
-        raise InvalidTerm(f"the args of a {op} are a list")
-    args: list = []
-    for arg in map(canonical, node["args"]):
-        args.extend(arg["args"] if arg["op"] == op else [arg])
-    absorbing, unit = (_ANY, _EMPTY) if op == "union" else (_EMPTY, _ANY)
-    if absorbing in args:
-        return dict(absorbing)
-    by_text = {_serial(a): a for a in args if a != unit}
-    kept = [by_text[text] for text in sorted(by_text)]
-    if not kept:
-        return dict(unit)
-    return kept[0] if len(kept) == 1 else {"op": op, "args": kept}
-
-
-#: the canonical form of each regular-language node read, by its serialisation
-_REGULAR: dict = {}
-
-
-def _regular_canonical(node) -> dict:
-    """`regular.canonical` of a text node's language, remembered by the
-    node's serialisation, since one language is read under many
-    records."""
-    try:
-        key = _serial(node)
-    except (TypeError, ValueError):
-        return regular.canonical(node)
-    if key not in _REGULAR:
-        if len(_REGULAR) > 4096:
-            _REGULAR.clear()
-        _REGULAR[key] = regular.canonical(node)
-    return json.loads(_serial(_REGULAR[key]))
-
-
-def _canonical_record(node: dict) -> dict:
-    if not isinstance(node["fields"], list):
-        raise InvalidTerm("the fields of a record are a list of [name, node, required]")
-    if canonical(node["rest"]) != _EMPTY:
-        raise InvalidTerm("this version reads a closed record only: rest is empty")
-    fields = []
-    for field in node["fields"]:
-        if not isinstance(field, list) or len(field) != 3 or not isinstance(field[0], str) \
-                or not isinstance(field[2], bool):
-            raise InvalidTerm(f"{field!r} is not a field [name, node, required]")
-        fields.append([_no_surrogate(field[0], "the field name"), canonical(field[1]), field[2]])
-    names: list[str] = [name for name, _, _ in fields]
-    if len(set(names)) != len(names):
-        raise InvalidTerm(f"a record names a field once, not {sorted(names)}")
-    if any(required and value == _EMPTY for _, value, required in fields):
-        return dict(_EMPTY)
-    return {"op": "record", "fields": sorted(fields, key=lambda f: f[0]), "rest": dict(_EMPTY)}
-
-
-def _count(value, what: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise InvalidTerm(f"the {what} of a list is a whole number of zero or more, not "
-                          f"{value!r}")
-    return value
-
-
-def _canonical_list(node: dict) -> dict:
-    item = canonical(node["item"])
-    lo = _count(node["min"], "min")
-    hi = None if node["max"] is None else _count(node["max"], "max")
-    if hi is not None and hi < lo:
-        return dict(_EMPTY)
-    if hi == 0 or (item == _EMPTY and lo == 0):
-        return {"op": "list", "item": dict(_EMPTY), "min": 0, "max": 0}
-    if item == _EMPTY:
-        return dict(_EMPTY)
-    return {"op": "list", "item": item, "min": lo, "max": hi}
-
-
-def _meaning(document) -> tuple:
-    """`(exact, at_most, at_least)` of a document's meaning, whatever
-    kind and version it states, the nodes canonical."""
-    if not isinstance(document, dict):
-        raise InvalidTerm("a definition is an object")
-    version = document.get("version")
-    if not isinstance(version, int) or isinstance(version, bool):
-        raise InvalidTerm(f"the version {version!r} is not a whole number")
-    exact = document.get("exact")
-    bounds = [key for key in _BOUNDS if key in document]
-    if exact is True and "language" in document and not bounds:
-        node = canonical(document["language"])
-        return True, node, node
-    if exact is False and len(bounds) == 2 and "language" not in document:
-        return False, canonical(document["at_most"]), canonical(document["at_least"])
-    raise InvalidTerm("an exact definition states 'language' and no bound; one that is not "
-                      "exact states 'at_least' and 'at_most' and no 'language'")
-
-
-def _read(document) -> tuple:
-    """`_meaning` of a definition this module answers questions about:
-    of this kind and version."""
-    meaning = _meaning(document)
-    if document.get("kind") != KIND:
-        raise InvalidTerm(f"not a {KIND} definition")
-    if document["version"] != VERSION:
-        raise InvalidTerm(f"{KIND} version {document['version']!r} is not read; this reads "
-                          f"version {VERSION}")
-    return meaning
-
-
-def canonical_text(document) -> str:
-    """Intent:
-        The text a definition's hash is taken of: the serialisation
-        (JSON, sorted keys, no white space, ASCII only) of its version,
-        its exact flag and its canonical node or two bounds. `kind`,
-        `source` and any other key are not in it.
-
-    Raises:
-        InvalidTerm: the document is not of the schema.
-    """
-    exact, at_most, at_least = _meaning(document)
-    meaning: dict = {"version": document["version"], "exact": exact}
-    if exact:
-        meaning["language"] = at_most
-    else:
-        meaning["at_least"], meaning["at_most"] = at_least, at_most
-    return _serial(meaning)
-
-
-def validate(document) -> None:
-    """Intent:
-        Nothing when `document` is a well-formed definition of any kind
-        and version. `is_definition` says whether this module answers
-        questions about it, which also needs this kind and version.
-
-    Raises:
-        InvalidTerm: naming the rule the document breaks.
-    """
-    canonical_text(document)
-
-
-def term_hash(document) -> str:
-    """Intent:
-        The identity of a definition's meaning: the SHA-256, in lower
-        case hex, of its `canonical_text`.
-
-    Raises:
-        InvalidTerm: the document is not of the schema.
-    """
-    return hashlib.sha256(canonical_text(document).encode("ascii")).hexdigest()
-
-
-def is_definition(document) -> bool:
-    """Whether `document` is a record-language definition this module
-    reads."""
-    try:
-        _read(document)
-    except InvalidTerm:
-        return False
-    return True
-
-
-def bounds(document) -> tuple:
-    """Intent:
-        `(at_most, at_least)` for a definition, as canonical nodes: a
-        language holding only members, and one holding every member.
-        They are one node when the definition is exact.
-
-    Raises:
-        InvalidTerm: the document is not a definition of this kind and
-            version.
-    """
-    _, at_most, at_least = _read(document)
-    return at_most, at_least
 
 
 # ---- membership of one value -------------------------------------------
@@ -395,384 +125,185 @@ def _holds(node: dict, value) -> bool:
     return True
 
 
-def member(document, value, *, bound: "str | None" = None) -> bool:
-    """Intent:
-        Whether the JSON value `value` is in the language a definition
-        states, or, with `bound` (`at_least` or `at_most`), in that
-        bound of a definition that is not exact. No solver is asked. A
-        bare node (an object with an `op`) is read as the language it
-        is.
-
-    Raises:
-        InvalidTerm: the document is not a definition of this kind and
-            version, the bound is neither bound, or the definition is
-            not exact and no bound is named.
-    """
-    if isinstance(document, dict) and "op" in document:
-        return _holds(canonical(document), value)
-    exact, at_most, at_least = _read(document)
+def _written(document, bound: "str | None") -> dict:
+    """The node a definition writes for `bound`, as written, once the
+    format accepts the definition."""
+    exact = document["exact"]
+    bounds(document)
     if bound is None:
         if not exact:
             raise InvalidTerm("the definition is not exact: name its at_least or its at_most "
                               "bound")
-        return _holds(at_most, value)
+        return document["language"]
     if bound not in _BOUNDS:
         raise InvalidTerm(f"a bound is at_least or at_most, not {bound!r}")
-    return _holds(at_least if bound == "at_least" else at_most, value)
+    return document["language"] if exact else document[bound]
 
 
-# ---- definitions built from definitions --------------------------------
-
-def _definition(at_most: dict, at_least: dict, exact: bool) -> dict:
-    if exact:
-        return {"kind": KIND, "version": VERSION, "exact": True, "language": at_most}
-    return {"kind": KIND, "version": VERSION, "exact": False, "at_least": at_least,
-            "at_most": at_most}
-
-
-def complement_of(document) -> dict:
+def member(document, value, *, bound: "str | None" = None) -> bool:
     """Intent:
-        The definition of every value outside a definition's language.
-        Its `at_most` is the complement of the definition's `at_least`
-        and its `at_least` the complement of the `at_most`: what is
-        certainly outside is what is outside every possible member. It
-        is exact when the definition is.
+        Whether the JSON value `value` is in the language a definition
+        states, or, with `bound` (`at_least` or `at_most`), in that
+        bound of a definition that is not exact; a bare node (an object
+        with an `op`) is read as the language it is. The node is read as
+        it is written, once `mathema.record_term` accepts it.
 
     Raises:
-        InvalidTerm: the document is not a definition this module reads.
+        InvalidTerm: the format refuses the document or node, the bound
+            is neither bound, or the definition is not exact and no
+            bound is named.
     """
-    exact, at_most, at_least = _read(document)
-    return _definition({"op": "complement", "arg": at_least},
-                       {"op": "complement", "arg": at_most}, exact)
+    if isinstance(document, dict) and "op" in document:
+        canonical(document)
+        return _holds(document, value)
+    return _holds(_written(document, bound), value)
 
 
-def _joined(op: str, documents) -> dict:
-    read = [_read(d) for d in documents]
-    return _definition(canonical({"op": op, "args": [r[1] for r in read]}),
-                       canonical({"op": op, "args": [r[2] for r in read]}),
-                       all(r[0] for r in read))
+# ---- a member over a small universe -------------------------------------
+
+@dataclass(frozen=True)
+class Enumerated:
+    """What `find_by_enumeration` found: `status` is `member` (with the
+    value) or `none`; `complete` says whether `none` is a proof (no text
+    or list node in the question, and the universe built in full)."""
+    status: str
+    member: object = None
+    complete: bool = False
 
 
-def union_of(*documents) -> dict:
-    """The definition of the values in any of the definitions' languages,
-    bound by bound; exact when each of them is."""
-    return _joined("union", documents)
-
-
-def inter_of(*documents) -> dict:
-    """The definition of the values in every one of the definitions'
-    languages, bound by bound; exact when each of them is."""
-    return _joined("inter", documents)
-
-
-def record_of(fields) -> dict:
-    """Intent:
-        The definition of the closed records over `fields`, each given
-        as `(name, definition, required)`: its `at_most` holds each
-        field's `at_most` and its `at_least` each field's `at_least`.
-        It is exact when each field's definition is.
-
-    Raises:
-        InvalidTerm: a definition is not one this module reads, or a
-            name is given twice.
-    """
-    read = [(name, _read(d), required) for name, d, required in fields]
-
-    def over(side: int) -> dict:
-        return canonical({"op": "record", "rest": dict(_EMPTY),
-                          "fields": [[name, r[side], required] for name, r, required in read]})
-    return _definition(over(1), over(2), all(r[0] for _, r, _ in read))
-
-
-def list_of(document, lo: int = 0, hi: "int | None" = None) -> dict:
-    """The definition of the lists of `lo` to `hi` values of a
-    definition's language (`hi` None for no end), bound by bound; exact
-    when the definition is."""
-    exact, at_most, at_least = _read(document)
-
-    def over(item: dict) -> dict:
-        return canonical({"op": "list", "item": item, "min": lo, "max": hi})
-    return _definition(over(at_most), over(at_least), exact)
-
-
-# ---- lowering to z3 ---------------------------------------------------
-
-#: the kinds of value a solver variable may be; the last stands for every
-#: value no node of this version tells apart: a number that is not whole
-_KINDS = ("null", "boolean", "number", "text", "map", "list", "other")
-#: the step of a place from a list to one of its items
-_ITEM = 0
-#: a key no field of the question carries
-_OTHER_KEY = "\x00"
-
-
-class _Value:
-    """One value of the question as solver variables: its kind, the
-    boolean, whole number or text it is when of that kind; when a map,
-    for each field name the question uses at this place whether the key
-    is set and the value under it, and whether it holds a key that is
-    no such name; and, when a list, its length and its first items, as
-    many as the question has list nodes at this place."""
-
-    def __init__(self, z3, path: str) -> None:
-        self.z3, self.path = z3, path
-        # a path is "value" then, per step, a field name by its repr or
-        # an item by its index in brackets, so two places never share
-        # a variable and no name holds a NUL
-        self.kind = z3.Int(f"{path} kind")
-        self.boolean = z3.Bool(f"{path} boolean")
-        self.number = z3.Int(f"{path} number")
-        self.text = z3.String(f"{path} text")
-        self.other_key = z3.Bool(f"{path} other key")
-        self.keys: dict = {}
-        self.length = z3.Int(f"{path} length")
-        self.items: list = []
-
-    def is_(self, kind: str):
-        return self.kind == _KINDS.index(kind)
-
-    def item(self, i: int) -> "_Value":
-        while len(self.items) <= i:
-            self.items.append(_Value(self.z3, f"{self.path}[{len(self.items)}]"))
-        return self.items[i]
-
-    def key(self, name: str) -> tuple:
-        if name not in self.keys:
-            self.keys[name] = (self.z3.Bool(f"{self.path}.{name!r} set"),
-                               _Value(self.z3, f"{self.path}.{name!r}"))
-        return self.keys[name]
-
-
-def _texts(node: dict, into: list) -> None:
-    """Every regular-language node a record-language node reads a text
-    by: the language of each `text` node and the literal of each text a
-    `choice` lists."""
+def _gather(node: dict, path: tuple, places: dict) -> None:
+    """What the nodes standing at each place write: their constants, the
+    names their records give, whether a text or a list node stands
+    there, and the texts of its languages a value there could hold."""
+    place = places.setdefault(path, {"constants": [], "names": set(), "open": False,
+                                     "texts": [], "records": False})
     op = node["op"]
-    if op == "text":
-        into.append(node["language"])
-    elif op == "choice":
-        into.extend(_literal(v) for v in node["values"] if isinstance(v, str))
+    if op == "choice":
+        place["constants"].extend(node["values"])
+    elif op == "text":
+        place["open"] = True
+        place["texts"].append(node["language"])
+    elif op == "list":
+        place["open"] = True
+        _gather(node["item"], (*path, None), places)
     elif op == "complement":
-        _texts(node["arg"], into)
+        _gather(node["arg"], path, places)
     elif op in ("union", "inter"):
         for arg in node["args"]:
-            _texts(arg, into)
+            _gather(arg, path, places)
     elif op == "record":
-        for _, inner, _ in node["fields"]:
-            _texts(inner, into)
-    elif op == "list":
-        _texts(node["item"], into)
-
-
-def _literal(text: str) -> dict:
-    return regular.canonical({"op": "literal", "codes": [ord(c) for c in text]})
-
-
-def _names(node: dict, into: dict, lists: dict, path: tuple = (), denied: bool = False) -> None:
-    """What the nodes that may stand at each place use: `into[path]` is
-    the set of field names of the records at `path`, and `lists[path]`
-    the number of list nodes there that the question may ask a value to
-    be outside of because of an item: those under an odd number of
-    complements (`denied`), whose item is not `any`. A place where a
-    list node stands at all has an entry, 0 when none is such a node."""
-    op = node["op"]
-    if op == "record":
-        into.setdefault(path, set())
+        place["records"] = True
         for name, inner, _ in node["fields"]:
-            into[path].add(name)
-            _names(inner, into, lists, (*path, name), denied)
-    elif op == "list":
-        lists[path] = lists.get(path, 0) + (1 if denied and node["item"] != _ANY else 0)
-        _names(node["item"], into, lists, (*path, _ITEM), denied)
-    elif op == "complement":
-        _names(node["arg"], into, lists, path, not denied)
-    elif op in ("union", "inter"):
-        for arg in node["args"]:
-            _names(arg, into, lists, path, denied)
+            place["names"].add(name)
+            _gather(inner, (*path, name), places)
 
 
-class _Lowering:
-    """One question's nodes as formulas over one value.
-
-    A list is held as its length and its first `k` items. Whether a
-    list is in `list {item, min, max}` rests on its length and on
-    whether some item is outside `item`, never on order or repetition.
-    So a list that answers a question can be rebuilt, at the same
-    length, from one item kept for each list node the question needs it
-    to be outside of because of an item, the other positions filled
-    with copies: every list node it was inside, it is still inside, and
-    a node the question only ever asks a value to be inside can only
-    gain. `k` is therefore the number of list nodes at the place that
-    stand under an odd number of complements, a node among `outside`
-    counting one, and whose item is not `any` (such a node is left only
-    by length); and at least one, for the items a list that is not
-    empty has. A list read from a model is those items and, past the
-    `k`-th, copies of the first."""
-
-    def __init__(self, z3, inside: list, outside: "list | tuple" = ()) -> None:
-        self.z3 = z3
-        texts: list = []
-        self.names: dict = {}
-        self.lists: dict = {}
-        for node in inside:
-            _texts(node, texts)
-            _names(node, self.names, self.lists)
-        for node in outside:
-            _texts(node, texts)
-            _names(node, self.names, self.lists, (), True)
-        # regular's lowering of every text node and text constant of the
-        # question at once, over one set of atoms, so their formulas agree
-        self.texts = regular._Lowering(z3, [[0, regular.MAX_CODE_POINT]], texts)
-        self.root = _Value(z3, "value")
-        self.shape: list = []
-        self._shaped(self.root, ())
-
-    def _shaped(self, value: _Value, path: tuple) -> None:
-        """Every variable a model must give a meaning to: a kind that
-        is one of the kinds, a text over the question's symbols, and
-        the same of the value under each name used at this place."""
-        z3 = self.z3
-        self.shape.append(z3.And(value.kind >= 0, value.kind < len(_KINDS)))
-        self.shape.append(z3.InRe(value.text, self.texts.everything))
-        for name in sorted(self.names.get(path, ())):
-            _, inner = value.key(name)
-            self._shaped(inner, (*path, name))
-        self.shape.append(value.length >= 0)
-        for i in range(self.kept(path)):
-            self._shaped(value.item(i), (*path, _ITEM))
-
-    def kept(self, path: tuple) -> int:
-        """How many items of a list at `path` the question holds as
-        variables: none where no list node stands, else one for each
-        node counted there and at least one."""
-        return max(1, self.lists[path]) if path in self.lists else 0
-
-    def holds(self, node: dict, value: _Value, path: tuple = ()):
-        z3, op = self.z3, node["op"]
-        if op == "empty":
-            return z3.BoolVal(False)
-        if op == "any":
-            return z3.BoolVal(True)
-        if op == "choice":
-            return z3.Or(*[self._is(value, v) for v in node["values"]])
-        if op == "text":
-            return z3.And(value.is_("text"), z3.InRe(value.text, self.texts.regex(node["language"])))
-        if op == "complement":
-            return z3.Not(self.holds(node["arg"], value, path))
-        if op in ("union", "inter"):
-            parts = [self.holds(arg, value, path) for arg in node["args"]]
-            return (z3.Or if op == "union" else z3.And)(*parts)
-        if op == "list":
-            parts = [value.is_("list"), value.length >= node["min"]]
-            if node["max"] is not None:
-                parts.append(value.length <= node["max"])
-            for i in range(self.kept(path)):
-                parts.append(z3.Implies(value.length > i,
-                                        self.holds(node["item"], value.item(i), (*path, _ITEM))))
-            return z3.And(*parts)
-        own = {name: (inner, required) for name, inner, required in node["fields"]}
-        parts = [value.is_("map"), z3.Not(value.other_key)]
-        for name in sorted(self.names.get(path, ())):
-            is_set, under = value.key(name)
-            if name not in own:
-                parts.append(z3.Not(is_set))
-                continue
-            inner, required = own[name]
-            inside = self.holds(inner, under, (*path, name))
-            parts.append(z3.And(is_set, inside) if required else z3.Implies(is_set, inside))
-        return z3.And(*parts)
-
-    def _is(self, value: _Value, constant):
-        z3 = self.z3
-        if constant is None:
-            return value.is_("null")
-        if isinstance(constant, bool):
-            return z3.And(value.is_("boolean"), value.boolean == constant)
-        if isinstance(constant, int):
-            return z3.And(value.is_("number"), value.number == constant)
-        return z3.And(value.is_("text"), z3.InRe(value.text, self.texts.regex(_literal(constant))))
-
-    def read(self, model, value: "_Value | None" = None, path: tuple = ()):
-        """The JSON value a model gives the question's value."""
-        value = self.root if value is None else value
-        kind = _KINDS[model.eval(value.kind, model_completion=True).as_long()]
-        if kind == "null":
-            return None
-        if kind == "boolean":
-            return bool(model.eval(value.boolean, model_completion=True))
-        if kind == "number":
-            return model.eval(value.number, model_completion=True).as_long()
-        if kind == "text":
-            return self.texts.decode(model.eval(value.text, model_completion=True).as_string())
-        if kind == "other":
-            return 1.5
-        if kind == "list":
-            kept = self.kept(path)
-            if not kept:
-                return []
-            length = model.eval(value.length, model_completion=True).as_long()
-            items = [self.read(model, value.item(i), (*path, _ITEM)) for i in range(min(length, kept))]
-            return items + [json.loads(_serial(items[0])) for _ in range(length - kept)]
-        out = {}
-        for name in sorted(self.names.get(path, ())):
-            is_set, under = value.key(name)
-            if bool(model.eval(is_set, model_completion=True)):
-                out[name] = self.read(model, under, (*path, name))
-        if bool(model.eval(value.other_key, model_completion=True)):
-            out[_OTHER_KEY] = None
-        return out
+def _texts_of(languages: list) -> list:
+    """A shortest text, of at most `TEXT_LIMIT` characters, of each cell
+    the regular `languages` cut the texts into: in some of them and
+    outside the others, for every choice of which (each language alone
+    when there are more than `CELLS` of them)."""
+    document = {"kind": regular.KIND, "version": regular.VERSION,
+                "alphabet": [[0, regular.MAX_CODE_POINT]], "exact": True}
+    if len(languages) <= CELLS:
+        signs = itertools.product((True, False), repeat=len(languages))
+        cells = [[n if inside else {"op": "complement", "arg": n}
+                  for n, inside in zip(languages, chosen)] for chosen in signs]
+    else:
+        cells = [[n] for n in languages] + [[{"op": "complement", "arg": n}] for n in languages]
+    out = []
+    for parts in cells:
+        node = {"op": "inter", "args": parts} if parts else {"op": "epsilon"}
+        found = regular.shortest_member({**document, "language": node}, limit=TEXT_LIMIT)
+        if found is not None:
+            out.append(found)
+    return out
 
 
-def find_member(inside, outside, *, timeout_ms: int = 5000) -> Found:
+def _values_at(path: tuple, places: dict, limit: int) -> tuple:
+    """`(values, complete)`: the universe at one place, and whether it
+    was built in full with no text or list node standing there or below."""
+    place = places.get(path, {"constants": [], "names": set(), "open": False, "texts": [],
+                              "records": False})
+    complete = not place["open"]
+    seen: dict = {}
+
+    def add(value):
+        key = repr((type(value).__name__, value))
+        seen.setdefault(key, value)
+    for value in [*place["constants"], 0.5]:
+        add(value)
+    if place["texts"]:
+        literals = [{"op": "literal", "codes": [ord(c) for c in v]}
+                    for v in place["constants"] if isinstance(v, str)]
+        for text in _texts_of(place["texts"] + literals):
+            add(text)
+    if (*path, None) in places:
+        add([])
+        items, _ = _values_at((*path, None), places, limit)
+        for length in (1, 2):
+            for chosen in itertools.islice(itertools.product(items, repeat=length), limit):
+                add(list(chosen))
+    names = sorted(place["names"])
+    if not place["records"]:
+        return list(seen.values()), complete
+    per_key = []
+    for name in names:
+        under, inner_complete = _values_at((*path, name), places, limit)
+        complete = complete and inner_complete
+        per_key.append([_UNSET, *under])
+    other = "\x00"
+    while other in place["names"]:
+        other += "\x00"
+    count = 0
+    for chosen in itertools.product(*per_key):
+        for extra in (False, True):
+            value = {name: v for name, v in zip(names, chosen) if v is not _UNSET}
+            if extra:
+                value[other] = None
+            add(value)
+            count += 1
+            if count >= limit:
+                return list(seen.values()), False
+    return list(seen.values()), complete
+
+
+_UNSET = object()
+
+
+def universe(nodes) -> tuple:
     """Intent:
-        A JSON value that every node in `inside` holds and no node in
-        `outside` holds: `member` with the value, `none` when no such
-        value exists, or `unknown` with the reason.
+        `(values, complete)`: the universe of a question over `nodes`,
+        as the module states it, and whether it is complete for them.
 
     Raises:
-        InvalidTerm: a node is not of the schema.
-
-    Notes:
-        `none` is a proof for this version's nodes: no node tells apart
-        two values the solver's value stands for alike. A value the
-        solver gives is returned only when `member` places it inside
-        and outside as asked; otherwise the answer is `unknown`.
+        InvalidTerm: the format refuses a node.
     """
-    inside = [canonical(n) for n in inside]
-    outside = [canonical(n) for n in outside]
-    try:
-        import z3
-    except ImportError:
-        return Found("unknown", reason="z3 is not installed (the mathema[smt] extra)")
-    lowering = _Lowering(z3, inside, outside)
-    solver = z3.Solver()
-    solver.set("timeout", int(timeout_ms))
-    solver.add(*lowering.shape)
-    for node in inside:
-        solver.add(lowering.holds(node, lowering.root))
-    for node in outside:
-        solver.add(z3.Not(lowering.holds(node, lowering.root)))
-    import threading
-    watchdog = threading.Timer(timeout_ms / 1000.0 + 1.0, solver.ctx.interrupt)
-    watchdog.daemon = True
-    watchdog.start()
-    try:
-        outcome = solver.check()
-    finally:
-        watchdog.cancel()
-    if outcome == z3.unsat:
-        return Found("none")
-    if outcome != z3.sat:
-        return Found("unknown", reason=f"z3 gave no answer within {timeout_ms} ms "
-                                       f"({solver.reason_unknown()})")
-    value = lowering.read(solver.model())
-    if all(_holds(n, value) for n in inside) and not any(_holds(n, value) for n in outside):
-        return Found("member", member=value)
-    return Found("unknown", reason=f"the solver's value {value!r} is not placed by member as "
-                                   f"asked")
+    places: dict = {}
+    for node in nodes:
+        canonical(node)
+        _gather(node, (), places)
+    return _values_at((), places, LIMIT)
 
 
-__all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "bounds", "canonical", "canonical_text",
-           "complement_of", "find_member", "inter_of", "is_definition", "list_of", "member",
-           "record_of",
-           "term_hash", "union_of", "validate"]
+def find_by_enumeration(inside, outside=()) -> Enumerated:
+    """Intent:
+        A value of `universe(inside + outside)` in every node of
+        `inside` and in no node of `outside`: `member` with the value,
+        or `none`, complete when the universe is.
+
+    Raises:
+        InvalidTerm: the format refuses a node.
+    """
+    inside, outside = list(inside), list(outside)
+    values, complete = universe(inside + outside)
+    for value in values:
+        if all(_holds(n, value) for n in inside) and not any(_holds(n, value) for n in outside):
+            return Enumerated("member", value, complete)
+    return Enumerated("none", None, complete)
+
+
+__all__ = ["Enumerated", "InvalidTerm", "KIND", "CELLS", "LIMIT", "TEXT_LIMIT", "VERSION", "bounds", "canonical",
+           "canonical_text", "complement_of", "find_by_enumeration", "inter_of",
+           "is_definition", "list_of", "member", "record_of", "term_hash", "union_of",
+           "universe", "validate"]
