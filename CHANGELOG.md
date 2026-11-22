@@ -15,7 +15,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A claim whose stored text mathema cannot write fails its function's row and shows its kept row as `unchecked`; the function is checked again on every run until the text can be written.
 - A risk accepted on a claim that a later check proves or finds holding stays in the record as history, is no longer counted as accepted risk, and the sweep says so.
 - After an earlier key's release move, a moved key still names its rename remedy.
-- The release-move notes name the character an escape now reads as, print every note that applies to a claim, and docsync's diagnostics follow `--root`.
+- A note names each character it shows (`a tab (U+0009)`), a claim whose stored text moved in more than one way gets every note that applies, and docsync's diagnostics follow `--root`.
 
 ## 0.6.6.1
 
