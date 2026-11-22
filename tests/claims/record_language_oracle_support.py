@@ -18,6 +18,7 @@ file, so the claims are checked against the module in this tree and the
 same statements over more than the catalogue."""
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import random
@@ -422,7 +423,7 @@ def a_record_is_monotone_in_a_field(t: int, u: int, v: int) -> bool:
 def a_text_node_holds_the_texts_of_its_language(v: int) -> bool:
     """Whether value `v` is in each text node of the catalogue exactly
     when it is a text the regular term's own matcher holds."""
-    rl, regular, value = _rl(), _load("regular"), VALUES[int(v)]
+    rl, regular, value = _rl(), importlib.import_module("mathema.regular"), VALUES[int(v)]
     return all(rl.member(text(n), value) == (isinstance(value, str) and regular.node_member(n, value))
                for n in (_lit("a"), DOLLAR, SHALLOW, DEEP))
 
