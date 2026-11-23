@@ -52,9 +52,6 @@ _NUMBERS = ("kind::int", "kind::scalar")
 NOT, AND, OR = "operator::logic::not", "operator::logic::and", "operator::logic::or"
 EQUAL, NOT_EQUAL = "operator::comparison::equal", "operator::comparison::not_equal"
 _EVERY_CODE_POINT = [[0, regular.MAX_CODE_POINT]]
-#: the lowering of regular-language nodes: the draft export where
-#: `regular` offers one, else the class it is the name of
-_TEXT_LOWERING = getattr(regular, "Lowering", None) or regular._Lowering
 
 
 class NoReading(ValueError):
@@ -216,7 +213,7 @@ class _Reading:
             _texts_in(value, texts)
         # the surrogate ranges are always told apart, so that a text
         # holding a pair can be asked about
-        self.texts = _TEXT_LOWERING(z3, _EVERY_CODE_POINT, [*texts, _PAIR])
+        self.texts = regular.lower_into([*texts, _PAIR], z3, _EVERY_CODE_POINT)
         self.root = _Place(z3, "value")
         #: each "no key other than" read: its variable, place and names
         self._closed: list = []
