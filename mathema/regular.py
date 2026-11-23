@@ -31,7 +31,9 @@ Membership needs no solver: `contains` and `matcher` read a definition by
 derivatives over its own alphabet, within a budget, and read a bare node
 (an object with an `op`) over all characters. `validate`, `contains`,
 `matcher`, `atoms`, `shortest_member` and `find_member` are the public
-calls of the term algebra.
+calls of the term algebra. `lower_into`, the lowering of one
+question's text nodes into z3 for a caller that asks its own question,
+is a draft call.
 """
 from __future__ import annotations
 
@@ -918,6 +920,25 @@ class _Lowering:
 
 
 
+def lower_into(nodes, z3, alphabet=None):  # :draft
+    """Intent:
+        The text nodes of one question lowered into z3 over one set of
+        atoms, the atoms of `alphabet` (every code point when None)
+        under the character sets of all of `nodes`: an object whose
+        `regex(node)` is the z3 regular expression of a canonical node
+        among them, `everything` the regular expression of every string
+        over the atoms, and `decode(text)` a string the solver gives,
+        each symbol read as a character of its atom. The nodes are
+        lowered together because the atoms are shared: two nodes lowered
+        apart could cut the alphabet two ways.
+
+    Raises:
+        InvalidTerm: a node or the alphabet is not of the schema.
+    """
+    ranges = _ranges(alphabet, "alphabet") if alphabet is not None else [[0, MAX_CODE_POINT]]
+    return _Lowering(z3, ranges, [canonical(n) for n in nodes])
+
+
 def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -> Found:
     """Intent:
         A string over `alphabet` (code point ranges) that every node in
@@ -975,4 +996,5 @@ def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -
 __all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "alphabet_of", "atoms", "bounds",
            "canonical", "canonical_text", "MatchBudget", "contains", "matcher", "places",
            "representatives", "shortest_member", "find_member", "is_definition", "term_hash",
+           "lower_into",
            "validate"]
