@@ -23,7 +23,7 @@ def test_a_bounded_repeat_then_anything_is_answered(length):
     assert holds("a" * length)
     assert holds("ab" * (length // 2) + "zz")
     assert not holds("z" + "a" * length)
-    assert regular.member(STARTS, "b" * length)
+    assert regular.contains(STARTS, "b" * length)
 
 
 def test_the_answers_agree_with_the_pattern():
@@ -44,7 +44,7 @@ def _nested(depth):
 def test_a_term_too_deep_to_read_fails_with_the_budget_not_recursion():
     deep = {"op": "concat", "args": [_nested(3000), ANYTHING]}
     try:
-        answered = regular.member(deep, "ab")
+        answered = regular.contains(deep, "ab")
     except regular.MatchBudget:
         return
     assert answered is True

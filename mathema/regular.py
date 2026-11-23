@@ -27,16 +27,11 @@ over the whole alphabet, since no node can distinguish two characters
 of one atom, and a string found is mapped back to a character of each
 atom. The `z3-solver` dependency is the optional `mathema[smt]` extra.
 
-Membership needs no solver: `member` and `matcher` read a definition by
-derivatives over its own alphabet, within a budget, and `node_member`
-and `node_matcher` read a bare node over all characters. `validate`,
-`member` and `matcher` on a definition, `node_member`, `node_matcher`,
-`atoms`, `shortest_member`, `MATCH_BUDGET` and `Lowering` (one
-question's nodes lowered to z3 over one symbol per atom, so the text
-nodes of one question share atoms) are draft, not part of the public
-interface yet. `member` and `matcher` also accept a bare node (an
-object with an `op`) and read it as `node_member` and `node_matcher` do,
-for the callers that pass one.
+Membership needs no solver: `contains` and `matcher` read a definition by
+derivatives over its own alphabet, within a budget, and read a bare node
+(an object with an `op`) over all characters. `validate`, `contains`,
+`matcher`, `atoms`, `shortest_member` and `find_member` are the public
+calls of the term algebra.
 """
 from __future__ import annotations
 
@@ -98,9 +93,9 @@ def _ranges(raw, where: str) -> list:
         raise InvalidTerm(f"{where}: ranges must be a list of [lo, hi] pairs")
     pairs = []
     for pair in raw:
-        if not isinstance(pair, list) or len(pair) != 2:  # :draft
-            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi] "
-                              f"(a list of two code points, as JSON writes it)")
+        # a pair written as a tuple is the list it stands for
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi]")
         lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
         if lo > hi:
             raise InvalidTerm(f"{where}: the range {pair!r} ends before it starts")
@@ -341,7 +336,7 @@ def canonical_text(document) -> str:
     return _serial(meaning)
 
 
-def validate(document) -> None:  # :draft
+def validate(document) -> None:
     """Intent:
         Nothing when `document` is a well-formed definition of any kind
         and version: an object stating a whole-number version, an
@@ -502,10 +497,6 @@ def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
     return out
 
 
-#: the number of derivative terms a matcher may build when no budget is
-#: given
-MATCH_BUDGET = _MATCH_STEPS  # :draft
-
 
 class _Steps(dict):
     """The derivatives one matcher has taken, by `(term, code)`, with
@@ -573,7 +564,7 @@ def _prepared_node(node, budget: "int | None" = None) -> _Prepared:
         raise MatchBudget(budget, 0) from None
 
 
-def node_member(node, text: str) -> bool:  # :draft
+def _node_member(node, text: str) -> bool:
     """Intent:
         Whether the string `text` is in the language of a bare `node`,
         decided by taking the derivative of the term by each character
@@ -591,15 +582,15 @@ def node_member(node, text: str) -> bool:  # :draft
     return _prepared_node(node)(text)
 
 
-def node_matcher(node) -> _Prepared:  # :draft
+def _node_matcher(node) -> _Prepared:
     """Intent:
-        `node_member` for one bare node, prepared once: a function from
+        `_node_member` for one bare node, prepared once: a function from
         a string to whether the node's language holds it, for asking
         about many strings, reporting the work it has `spent`.
 
     Raises:
         InvalidTerm: the node is not of the schema.
-        MatchBudget: as `node_member`, when the node is prepared or
+        MatchBudget: as `_node_member`, when the node is prepared or
             when the returned function is called.
     """
     return _prepared_node(node)
@@ -629,7 +620,7 @@ def _prepared_definition(document, bound: "str | None", budget: "int | None") ->
     return kept
 
 
-def member(document, text: str, *, bound: "str | None" = None,  # :draft
+def contains(document, text: str, *, bound: "str | None" = None,
            budget: "int | None" = None) -> bool:
     """Intent:
         Whether the string `text` is in the language a definition
@@ -637,12 +628,12 @@ def member(document, text: str, *, bound: "str | None" = None,  # :draft
         character outside it is no member, and a complement is taken
         inside it), or, with `bound` (`at_least` or `at_most`), in that
         bound of a definition that is not exact. `budget` is the most
-        derivative terms the question may build (`MATCH_BUDGET` when
+        derivative terms the question may build (`_MATCH_STEPS` when
         None). The prepared term is remembered by the definition's hash,
         so asking again costs one step per character; `matcher` gives
         the work spent.
 
-        A bare node (an object with an `op`) is read as `node_member`
+        A bare node (an object with an `op`) is read as `_node_member`
         reads it.
 
     Raises:
@@ -653,25 +644,25 @@ def member(document, text: str, *, bound: "str | None" = None,  # :draft
             budget, or went deeper into the term than `_MATCH_DEPTH`;
             it carries the `budget` and the work `spent`.
     """
-    if isinstance(document, dict) and "op" in document:  # :draft
-        return node_member(document, text)
+    if isinstance(document, dict) and "op" in document:
+        return _node_member(document, text)
     return _prepared_definition(document, bound, budget)(text)
 
 
-def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None):  # :draft
+def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None):
     """Intent:
-        `member` for one definition, prepared once and remembered by the
+        `contains` for one definition, prepared once and remembered by the
         definition's hash: a function from a string to whether the
         definition's language (or its `bound`) holds it, with the
         `budget` it works within and the derivative terms it has
-        `spent`. A bare node is prepared as `node_matcher` prepares it.
+        `spent`. A bare node is prepared as `_node_matcher` prepares it.
 
     Raises:
-        InvalidTerm: as `member`.
-        MatchBudget: as `member`, when the returned function is called.
+        InvalidTerm: as `contains`.
+        MatchBudget: as `contains`, when the returned function is called.
     """
-    if isinstance(document, dict) and "op" in document:  # :draft
-        return node_matcher(document)
+    if isinstance(document, dict) and "op" in document:
+        return _node_matcher(document)
     return _prepared_definition(document, bound, budget)
 
 
@@ -683,8 +674,8 @@ def places(text: str, inside, outside) -> bool:
         its budget.
     """
     try:
-        return all(member(n, text) for n in inside) \
-            and not any(member(n, text) for n in outside)
+        return all(contains(n, text) for n in inside) \
+            and not any(contains(n, text) for n in outside)
     except MatchBudget:
         return False
 
@@ -708,7 +699,7 @@ def representatives(nodes, alphabet=None) -> list:
 
 # ---- atoms ------------------------------------------------------------
 
-def atoms(nodes, alphabet=None) -> list:  # :draft
+def atoms(nodes, alphabet=None) -> list:
     """Intent:
         The atoms of `alphabet` (all of Unicode when None) under the
         character sets of `nodes`, as `(ranges, representative)` pairs:
@@ -739,7 +730,7 @@ def atoms(nodes, alphabet=None) -> list:  # :draft
     return [(held[k], chr(members[k])) for k in range(len(members))]
 
 
-def shortest_member(document, *, bound: "str | None" = None, limit: int = 12) -> "str | None":  # :draft
+def shortest_member(document, *, bound: "str | None" = None, limit: int = 12) -> "str | None":
     """Intent:
         A shortest string of at most `limit` characters in the language
         a definition states (or in its `bound`), or None when it holds
@@ -750,9 +741,9 @@ def shortest_member(document, *, bound: "str | None" = None, limit: int = 12) ->
         that no member is that short. No solver is asked.
 
     Raises:
-        InvalidTerm: as `member`.
+        InvalidTerm: as `contains`.
         MatchBudget: the search built more derivative terms than
-            `MATCH_BUDGET`.
+            `_MATCH_STEPS`.
     """
     prepared = _prepared_definition(document, bound, None)
     at_most, at_least = bounds(document)
@@ -925,8 +916,6 @@ class _Lowering:
         return "".join(chr(self.members[ord(ch) - _SYMBOL_BASE]) for ch in plain)
 
 
-#: the draft name of the lowering
-Lowering = _Lowering  # :draft
 
 
 def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -> Found:
@@ -983,7 +972,7 @@ def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -
     return Found("member", member=lowering.decode(value.as_string()))
 
 
-__all__ = ["Found", "InvalidTerm", "KIND", "Lowering", "MATCH_BUDGET", "VERSION", "alphabet_of",
-           "atoms", "bounds", "canonical", "canonical_text", "MatchBudget", "matcher", "member",
-           "node_matcher", "node_member", "places", "representatives", "shortest_member",
-           "find_member", "is_definition", "term_hash", "validate"]
+__all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "alphabet_of", "atoms", "bounds",
+           "canonical", "canonical_text", "MatchBudget", "contains", "matcher", "places",
+           "representatives", "shortest_member", "find_member", "is_definition", "term_hash",
+           "validate"]

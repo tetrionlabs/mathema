@@ -48,7 +48,7 @@ class Defined:
         return isinstance(value, str) and self._accepts(value) is not None
 
     def to_json(self):
-        return {"name": self.name, "definition": self._definition}
+        return {"name": self.name, "term": self._definition}
 
 
 def _exact(node):

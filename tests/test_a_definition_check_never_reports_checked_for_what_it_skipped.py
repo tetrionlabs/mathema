@@ -43,11 +43,11 @@ def _gen_ab(rng):
 
 #: every string over a and b, stating (a|b)*: the definition is right
 OVER_AB = StringLanguage("overab", level="predicate", accepts=lambda s: set(s) <= set("ab"),
-                         pool="ab", generate=_gen_ab, schema={"definition": AB_STAR})
+                         pool="ab", generate=_gen_ab, schema={"term": AB_STAR})
 #: states (a|b)* and accepts only a's, raising on every string with a b
 PARTIAL = _RaisesOnB("partial", level="predicate", accepts=lambda s: set(s) <= {"a"},
                      pool="a", generate=lambda rng: "a" * rng.randint(0, 3),
-                     schema={"definition": AB_STAR})
+                     schema={"term": AB_STAR})
 
 
 def _long_tail(s):
@@ -60,14 +60,14 @@ def _long_tail(s):
 TAIL = StringLanguage("tail", level="predicate", accepts=_long_tail, pool="abcxyz",
                       generate=lambda rng: "".join(rng.choice("abcxyz")
                                                    for _ in range(rng.randint(0, 6))),
-                      schema={"definition": LOWER_UP_TO_SIX})
+                      schema={"term": LOWER_UP_TO_SIX})
 #: up to six lower-case letters, stating exactly that
 SHORT = StringLanguage("short", level="predicate",
                        accepts=lambda s: len(s) <= 6 and set(s) <= set("abcdefghijklmnopqrstuvwxyz"),
                        pool="abcxyz",
                        generate=lambda rng: "".join(rng.choice("abcxyz")
                                                     for _ in range(rng.randint(0, 6))),
-                       schema={"definition": LOWER_UP_TO_SIX})
+                       schema={"term": LOWER_UP_TO_SIX})
 
 
 @pytest.fixture
