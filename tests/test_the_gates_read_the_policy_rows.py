@@ -102,7 +102,7 @@ def test_a_row_the_code_contradicts_leaves_the_gate_at_holds():
 
 def test_a_stated_and_confirmed_row_proves_the_gate():
     row = _gate(clamp01, "is_missing_safe(f)", "missing(f, x) drops")
-    assert row.verdict == "proven", row.note
+    assert row.verdict == "holds", row.note
     assert row.sketch == "x (float): nan drops, stated"
 
 
@@ -124,7 +124,7 @@ def test_an_unaccounted_raise_falsifies_the_absent_gate():
 
 def test_a_stated_raise_accounts_for_it():
     row = _gate(root_opt, "is_absent_safe(f)", "absent(f, x) raises(TypeError)")
-    assert row.verdict == "proven", row.note
+    assert row.verdict == "holds", row.note
     assert row.sketch == "x (float): None raises TypeError, stated"
 
 

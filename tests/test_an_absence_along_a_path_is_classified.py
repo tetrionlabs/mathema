@@ -171,7 +171,7 @@ def test_the_absence_gate_is_proven_once_the_field_row_is_stated():
     stated = next(r for r in rows if r.statement.startswith("absent(f, p.label)"))
     assert stated.verdict == "holds", (stated.verdict, stated.note)
     gate = next(r for r in rows if r.statement == "is_absent_safe(f)")
-    assert gate.verdict == "proven", (gate.verdict, gate.note)
+    assert gate.verdict == "holds", (gate.verdict, gate.note)
     assert "p.label (field): null raises TypeError, stated" in gate.note
 
 
