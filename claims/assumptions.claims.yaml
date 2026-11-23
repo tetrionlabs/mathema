@@ -1,0 +1,20 @@
+mathema.domain_relations.agreed_on_counts:
+  claims:
+    - name: agreement_is_some_compared_none_against_none_skipped
+      statement: 'for compared in {0, 1, 2, 3}, disagreed in {0, 1, 2}, skipped in {0, 1, 2}, f(compared, disagreed, skipped) == (compared > 0 and disagreed == 0 and skipped == 0)'
+    - name: nothing_compared_is_no_agreement
+      statement: 'for disagreed in {0, 1, 2}, skipped in {0, 1, 2}, f(0, disagreed, skipped) == False'
+    - name: a_skipped_value_is_no_agreement
+      statement: 'for compared in {0, 1, 2, 3}, skipped in {1, 2}, f(compared, 0, skipped) == False'
+claims.smt_support.record_agreed:
+  claims:
+    - name: the_record_agrees_exactly_when_its_counts_do
+      statement: 'let stated = claims.smt_support.agreement_stated, for compared in {0, 1, 2, 3}, disagreed in {0, 1, 2}, skipped in {0, 1, 2}, f(compared, disagreed, skipped) == stated(compared, disagreed, skipped)'
+claims.smt_support.outline_entry_is_bare:
+  claims:
+    - name: the_outline_is_bare_exactly_when_every_value_agreed
+      statement: 'let stated = claims.smt_support.agreement_stated, for compared in {0, 1, 2, 3}, disagreed in {0, 1, 2}, skipped in {0, 1, 2}, f(compared, disagreed, skipped) == stated(compared, disagreed, skipped)'
+claims.smt_support.shortfall_is_empty:
+  claims:
+    - name: nothing_fell_short_exactly_when_every_value_agreed
+      statement: 'let stated = claims.smt_support.agreement_stated, for compared in {0, 1, 2, 3}, disagreed in {0, 1, 2}, skipped in {0, 1, 2}, f(compared, disagreed, skipped) == stated(compared, disagreed, skipped)'
