@@ -7,15 +7,15 @@ Notable changes to mathema are recorded here from its first public release onwar
 ### Highlights
 - A function read as a pattern validator is decided on the solver route for more claim forms: `assuming f is defined, f(s) == s` for a validator that refuses every text outside its language; a match on `s or ''` over a language of texts; a `let`-bound variable with another name than the parameter; literal text added around the variable, decided over all text when the texts called on leave the variable's language; an exception class of the function's own package with a builtin exception as its only base and nothing of its own; and a message reading a module-level text constant.
 - `mathema.regular` has the calls of a term algebra: `validate`, `contains` and `matcher` (on a definition, with a bound and a budget, reporting the work spent, or on a bare node), `atoms`, `shortest_member` and `find_member`.
+- A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release; a form that states both is read by `term`.
+- A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
 
 ### Upgrading from 0.6.6.1
-- A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release.
-- A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
 - A claim whose every variable is a text has no `[float]` companion row.
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
 
 ### Fixes
-- The check of a language's definition compares the strings the claim itself writes, and reports `assumed`, never `checked`, when the language's membership raised on a string; a proven line names each definition it assumed.
+- The check of a language's definition compares the strings the claim itself writes. Agreement on the values tried is no proof: the definition, the reading of a validator and `<L> holds only texts` each stand as `assumed`, with a `corroboration` record of the values drawn, compared and skipped, the seed and the outcome. A proven line names each assumption it rests on and its corroboration.
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
