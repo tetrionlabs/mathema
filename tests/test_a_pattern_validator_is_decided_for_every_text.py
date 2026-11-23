@@ -88,7 +88,7 @@ class Defined:
         return isinstance(value, str) and bool(self._accepts(value))
 
     def to_json(self):
-        return {"name": self.name, "definition": self._definition}
+        return {"name": self.name, "term": self._definition}
 
 
 #: the whole-text language each bound method accepts, by pattern and mode
@@ -113,7 +113,7 @@ def _begins_as(language, arguments, negated):
     definition of that set where these tests define the pattern's."""
     pattern = _COMPILED[json.loads(arguments[0])]
     node = _DEFINITIONS.get((pattern.pattern, "match"))
-    base = language.to_json().get("definition")
+    base = language.to_json().get("term")
     definition = None
     if node is not None and base is not None:
         definition = _exact({"op": "inter", "args": [base["language"], node]})

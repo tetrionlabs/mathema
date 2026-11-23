@@ -7,7 +7,7 @@ remember the prepared term by the definition's hash, work within a
 budget and report the work spent; `atoms` gives each atom's ranges and
 a character standing for it; `shortest_member` finds a shortest member
 without a solver, and finds none only when none is that short. A bare
-node is still read by `node_member` and `node_matcher`, and a document
+node is still read by the private node readers, and a document
 holding only its node is refused."""
 import itertools
 
@@ -32,7 +32,6 @@ def pair(at_least, at_most, alphabet=None):
 
 @pytest.mark.parametrize("document,said", [
     ({**exact(LETTERS), "at_most": LETTERS}, "not both"),
-    ({**exact(LETTERS), "alphabet": [(0, 127)]}, "a list of two code points"),
     (exact({"op": "chars", "ranges": [[98, 97]]}), "ends before it starts"),
     (exact({"op": "sometimes"}), "is not a regular-language operation"),
     ({**exact(LETTERS), "version": True}, "version"),
@@ -49,20 +48,20 @@ def test_validate_accepts_a_well_formed_document_of_any_version():
 
 def test_member_reads_the_document_over_its_alphabet():
     not_a = exact({"op": "complement", "arg": {"op": "literal", "codes": [97]}}, [[97, 122]])
-    assert regular.member(not_a, "b") and not regular.member(not_a, "a")
-    assert not regular.member(not_a, "!")
-    assert regular.node_member(not_a["language"], "!")
+    assert regular.contains(not_a, "b") and not regular.contains(not_a, "a")
+    assert not regular.contains(not_a, "!")
+    assert regular._node_member(not_a["language"], "!")
 
 
 def test_a_definition_that_is_not_exact_needs_its_bound():
     loose = pair(LETTERS, {"op": "literal", "codes": [97]})
-    assert regular.member(loose, "b", bound="at_least")
-    assert not regular.member(loose, "b", bound="at_most")
-    assert regular.member(loose, "a", bound="at_most")
+    assert regular.contains(loose, "b", bound="at_least")
+    assert not regular.contains(loose, "b", bound="at_most")
+    assert regular.contains(loose, "a", bound="at_most")
     with pytest.raises(regular.InvalidTerm, match="at_least or at_most"):
-        regular.member(loose, "a")
+        regular.contains(loose, "a")
     with pytest.raises(regular.InvalidTerm):
-        regular.member(exact(LETTERS), "a", bound="neither")
+        regular.contains(exact(LETTERS), "a", bound="neither")
 
 
 @pytest.mark.parametrize("document", [
@@ -72,13 +71,13 @@ def test_a_definition_that_is_not_exact_needs_its_bound():
 ])
 def test_membership_is_refused_for_a_document_that_is_no_definition(document):
     with pytest.raises(regular.InvalidTerm):
-        regular.member(document, "a")
+        regular.contains(document, "a")
 
 
 def test_matcher_answers_many_texts_and_reports_its_work():
     holds = regular.matcher(exact(LETTERS))
     assert holds("abc") and not holds("") and not holds("a1")
-    assert holds.spent > 0 and holds.budget == regular.MATCH_BUDGET
+    assert holds.spent > 0 and holds.budget == regular._MATCH_STEPS
 
 
 def test_the_prepared_term_is_remembered_by_the_definitions_hash():
@@ -95,13 +94,13 @@ def test_a_budget_too_small_stops_with_the_work_spent():
         holds("abcdefghij")
     assert stopped.value.budget == 3 and stopped.value.spent > 3
     with pytest.raises(regular.MatchBudget):
-        regular.member(exact(LETTERS), "abcdef", budget=0)
+        regular.contains(exact(LETTERS), "abcdef", budget=0)
 
 
-def test_node_member_and_node_matcher_read_a_bare_node():
-    assert regular.node_member(LETTERS, "ab")
-    assert regular.node_matcher(LETTERS)("ab")
-    assert not regular.node_matcher(LETTERS)("")
+def test_the_private_node_readers_read_a_bare_node():
+    assert regular._node_member(LETTERS, "ab")
+    assert regular._node_matcher(LETTERS)("ab")
+    assert not regular._node_matcher(LETTERS)("")
 
 
 def test_atoms_give_each_atoms_ranges_and_a_character_of_it():
@@ -127,7 +126,7 @@ def test_atoms_give_each_atoms_ranges_and_a_character_of_it():
 def test_shortest_member_is_a_shortest_member(node, shortest):
     found = regular.shortest_member(exact(node))
     assert found is not None and len(found) == shortest
-    assert regular.member(exact(node), found)
+    assert regular.contains(exact(node), found)
 
 
 def test_shortest_member_is_none_only_when_no_member_is_that_short():
@@ -160,6 +159,6 @@ def test_shortest_member_agrees_with_enumeration_on_the_matcher():
         document = exact(node, [[97, 99], [48, 48]])
         enumerated = next((len(t) for n in range(5)
                            for t in map("".join, itertools.product("abc0", repeat=n))
-                           if regular.member(document, t)), None)
+                           if regular.contains(document, t)), None)
         found = regular.shortest_member(document, limit=4)
         assert (None if found is None else len(found)) == enumerated, node

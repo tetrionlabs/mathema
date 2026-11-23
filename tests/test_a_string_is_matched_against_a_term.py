@@ -65,7 +65,7 @@ def test_the_matcher_agrees_with_re_on_every_short_string(node, pattern):
     holds = regular.matcher(node)
     for text in SHORT + ["a\n", "ab\n", "\n", "abcabc"]:
         assert holds(text) == (re.fullmatch(pattern, text) is not None), text
-        assert regular.member(node, text) == holds(text)
+        assert regular.contains(node, text) == holds(text)
 
 
 @pytest.mark.parametrize("node,pattern", TERMS[:6], ids=[p for _, p in TERMS[:6]])
@@ -73,7 +73,7 @@ def test_the_matcher_agrees_with_the_solver_on_every_string_up_to_length_three(n
     pytest.importorskip("z3")
     for text in ["".join(t) for n in range(4) for t in itertools.product("ab", repeat=n)]:
         asked = regular.find_member(ALL, inside=[lit(text), node], outside=[])
-        assert (asked.status == "member") == regular.member(node, text), text
+        assert (asked.status == "member") == regular.contains(node, text), text
 
 
 def test_a_term_and_its_canonical_form_hold_the_same_strings():
@@ -147,4 +147,4 @@ def test_the_matcher_agrees_with_the_package_that_compiles_terms():
         document = {"kind": "regular_language", "version": 1, "alphabet": ALL, "exact": True,
                     "language": node}
         for text in SHORT:
-            assert regular.member(node, text) == bool(theirs.member(document, text)), text
+            assert regular.contains(node, text) == bool(theirs.member(document, text)), text
