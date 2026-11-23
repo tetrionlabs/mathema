@@ -11083,11 +11083,12 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
         (returned unchanged, or True,
         for an accepted text; the validator's own exception, or False,
         for a refused one). Returns the assumption the proof rests on,
-        as `domain_relations.check_definition` does: `checked` with the
-        seed and the number of texts run, `assumed` when no member
-        could be drawn or a drawn text was skipped because a
-        language's `contains` raised on it (the artefact names the
-        skipped texts), or `refuted` with the `disagreement`.
+        as `domain_relations.check_definition` does: `assumed`, with
+        the corroboration record of the texts run and of those skipped
+        because a language's `contains` raised on them (the artefact
+        names the skipped texts), or `refuted` with the
+        `disagreement`. A reading whose stated language does not
+        resolve carries no corroboration.
     """
     import random
 
@@ -11155,8 +11156,9 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
     shown = list(dict.fromkeys(skipped))
     out["artefact"].update({"texts skipped": len(shown), "skipped": [
         repr(v) for v in shown[:domain_relations.GUARD_SKIPPED_SHOWN]]})
-    if out["artefact"]["texts run"] and not shown:
-        out["status"] = "checked"
+    out["corroboration"] = domain_relations.corroboration_record(  # :draft
+        out["artefact"]["texts run"], len(shown), seed, draws=domain_relations.GUARD_DRAWS,
+        **{"definition strings cap": _READING_FROM_DEFINITION})
     return out
 
 

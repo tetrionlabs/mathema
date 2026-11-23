@@ -803,18 +803,21 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
         term, so the term and `contains` must agree on every string;
         for a pair the membership must lie between them. Returns the
         assumption a verdict rests on: the `statement` (`<text> == its
-        stated definition`), its `status`, and the `artefact` to run it
+        stated definition`), its `status`, the `corroboration` record
+        (`corroboration_record`), and the `artefact` to run it
         again (the seed, the members drawn, the length bound, the
         number of atoms, the number of strings compared and skipped,
         and the first `GUARD_SKIPPED_SHOWN` skipped strings).
 
         A string on which `contains` raises is skipped: the definition
-        is not compared there. The status is `checked` when every
-        string was compared and agreed; `assumed` when a string was
-        skipped or none was compared; and `refuted`, with the
-        `disagreement` naming the string, when the definition and the
-        membership part. When the matcher runs out of its budget the
-        result carries `unfinished` and no status is claimed.
+        is not compared there. Agreement on the strings compared is
+        evidence about the assumption and no proof of it, so the
+        status is `assumed` however many agreed, and the corroboration
+        record says how many were compared and skipped; it is
+        `refuted`, with the `disagreement` naming the string, when the
+        definition and the membership part. When the matcher runs out
+        of its budget the result carries `unfinished` and no
+        corroboration.
     """
     from . import regular
     seed = _guard_seed(text)
@@ -846,9 +849,66 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
     out["artefact"].update({"members drawn": drawn, "length bound": bound, "atoms": atoms,
                             "strings compared": compared, "strings skipped": len(skipped),
                             "skipped": [repr(v) for v in skipped[:GUARD_SKIPPED_SHOWN]]})
-    if compared and not skipped:
-        out["status"] = "checked"
+    out["corroboration"] = corroboration_record(  # :draft
+        compared, len(skipped), seed, draws=GUARD_DRAWS,
+        **{"enumerated cap": GUARD_ENUMERATED, "near misses cap": GUARD_NEAR_MISSES})
     return out
+
+
+def corroboration_record(compared: int, skipped: int, seed: "int | None", *,
+                         draws: int, **caps) -> dict:
+    """Intent:
+        The record of a run that compared an assumption with a
+        language's own membership and found no disagreement: `values
+        drawn` (every value put to the comparison), `values compared`,
+        `values skipped` (a value is skipped where `contains` raised
+        on it), `disagreed` (zero: a run that finds a disagreement
+        refutes the assumption and returns no record), the `seed` of
+        the sampler (None for a run that draws nothing at random),
+        `draws` (how many values the run asks each language's sampler
+        for), the run's other `caps` by name, and the `outcome` in
+        words. The record is evidence about the assumption; a verdict
+        holds given the assumption, never because of the record.
+    """
+    return {"values drawn": compared + skipped, "values compared": compared,
+            "values skipped": skipped, "disagreed": 0, "seed": seed, "draws": draws,
+            **caps,
+            "outcome": "none disagreed" if compared else "none compared"}  # :draft
+
+
+#: the status an assumption was stored with before agreement on the
+#: values tried was recorded as corroboration
+_STORED_AS_CHECKED = "checked"
+
+
+def assumption_status(assumption: dict) -> "str | None":
+    """Intent:
+        The status of an assumption as it is read: `assumed` or
+        `refuted` as stored, and `assumed` for one stored as `checked`,
+        which meant that the values tried agreed.
+    """
+    status = assumption.get("status")
+    return "assumed" if status == _STORED_AS_CHECKED else status
+
+
+def corroboration_text(assumption: dict) -> "str | None":
+    """Intent:
+        The corroboration of one assumption in words: how many values
+        were compared against the language's own `contains`, that none
+        disagreed, and how many were skipped because it raised. None
+        for an assumption that carries no corroboration record.
+    """
+    record = assumption.get("corroboration")
+    if not isinstance(record, dict):
+        return None
+    if not record.get("values compared"):
+        said = "not corroborated: no value was compared"  # :draft
+    else:
+        said = (f"corroborated: {record['values compared']} draws "  # :draft
+                f"against contains, none disagreed")
+    if record.get("values skipped"):
+        said += f", {record['values skipped']} skipped where contains raised"  # :draft
+    return said
 
 
 def _is_member(language, value) -> bool:
@@ -891,8 +951,9 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
         that is not a text is not what its definition states. Each
         language is asked about its own hazard values that are not
         texts and about `NOT_TEXTS`. An assumption is `<text> holds only
-        texts`, `checked` with the number of values run; the
-        disagreement names the first value admitted, or is None.
+        texts`, `assumed` with the corroboration record of the values
+        run (`corroboration_record`), or `refuted`; the disagreement
+        names the first value admitted, or is None.
     """
     seen: dict = {}
     refuted = None
@@ -907,14 +968,23 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
             except Exception:
                 pass
             values.extend(NOT_TEXTS)
-            admitted = [v for v in values if _is_member(language, v)]
+            admitted, raised = [], 0
+            for value in values:
+                try:
+                    if language.contains(value):
+                        admitted.append(value)
+                except Exception:
+                    raised += 1
             entry = {"language": text, "statement": f"{text} holds only texts",  # :draft
-                     "status": "checked", "artefact": {"values run": len(values)}}
+                     "status": "assumed", "artefact": {"values run": len(values)}}
             if admitted:
                 entry["status"] = "refuted"
                 entry["disagreement"] = (f"{admitted[0]!r} is a member of {text}, and a "
                                          f"regular-language definition holds only texts")  # :draft
                 refuted = refuted or entry["disagreement"]
+            else:
+                entry["corroboration"] = corroboration_record(  # :draft
+                    len(values) - raised, raised, None, draws=0)
             seen[text] = entry
     return list(seen.values()), refuted
 
@@ -941,14 +1011,15 @@ def standard_assumptions() -> dict:
 
 def assuming_text(assumptions: list, verdict: str = "proven") -> str:
     """Intent:
-        `proven, assuming A (checked), B (assumed)` for the definitions
+        `proven, assuming A (assumed), B (assumed)` for the definitions
         a verdict rests on (`falsified, assuming ...` for a falsified
-        one); the verdict word alone when it read none.
+        one), each with its status as read (`assumption_status`); the
+        verdict word alone when it read none.
     """
     if not assumptions:
         return verdict
     return f"{verdict}, assuming " + ", ".join(  # :draft
-        f"{a['statement']} ({a['status']})" for a in assumptions)
+        f"{a['statement']} ({assumption_status(a)})" for a in assumptions)
 
 
 def _decide_languages(rel: Relation) -> Decision:
@@ -1154,6 +1225,7 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
            "RELATION", "Relation", "Statement", "Term", "WORDS", "assuming_text",
+           "assumption_status", "corroboration_record", "corroboration_text",
            "check_definition", "check_definitions", "check_holds_only_texts", "decide",
            "not_as_written",
            "standard_assumptions",
