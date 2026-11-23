@@ -83,7 +83,8 @@ def test_an_honest_language_of_texts_is_still_proven(fn, text):
     row = T.row(fn or plain, text.format("as"))
     assert row.verdict == "proven", (row.verdict, row.note, row.sketch)
     texts = row.meta["mathema.assumptions"]["texts"]
-    assert {"statement": "L[as] holds only texts", "status": "checked"}.items() <= texts[0].items()
+    assert {"statement": "L[as] holds only texts", "status": "assumed"}.items() <= texts[0].items()
+    assert texts[0]["corroboration"]["disagreed"] == 0
 
 
 def test_the_refusal_names_the_value_that_is_no_text():

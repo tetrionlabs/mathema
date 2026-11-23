@@ -133,12 +133,13 @@ def test_a_proven_row_lists_each_definition_it_read_and_how_it_stands(served):
     assert set(stated) == {"L[onlya]", "L[right]"}
     for text, entry in stated.items():
         assert entry["statement"] == f"{text} == its stated definition"
-        assert entry["status"] == "checked"
+        assert entry["status"] == "assumed"
+        assert entry["corroboration"]["disagreed"] == 0
         assert entry["artefact"]["members drawn"] >= 1
         assert isinstance(entry["artefact"]["seed"], int)
     assert row.sketch.endswith(
-        "proven, assuming L[onlya] == its stated definition (checked), "
-        "L[right] == its stated definition (checked)")
+        "proven, assuming L[onlya] == its stated definition (assumed), "
+        "L[right] == its stated definition (assumed)")
 
 
 def test_a_validators_proof_lists_its_reading_as_an_assumption(served):
@@ -162,8 +163,8 @@ def test_a_reading_the_function_does_not_bear_out_is_declined(served):
 def test_a_falsified_with_no_executed_string_says_what_it_assumes(served):
     row = _row(check, "L[onlya] not subset L[right]")
     assert row.verdict == "falsified", (row.verdict, row.note)
-    ending = ("falsified, assuming L[onlya] == its stated definition (checked), "
-              "L[right] == its stated definition (checked)")
+    ending = ("falsified, assuming L[onlya] == its stated definition (assumed), "
+              "L[right] == its stated definition (assumed)")
     assert row.sketch.endswith(ending) and row.note.endswith(ending)
     assert len(row.meta["mathema.assumptions"]["definitions"]) == 2
     assert "mathema.rests_on_membership" not in row.meta
@@ -216,7 +217,7 @@ def test_a_checked_definition_says_what_was_enumerated(served):
     defined = domain_relations.defined_bound(parse_binding("s in L[right]")[1])
     (text, language, most, least), = defined.read
     checked = domain_relations.check_definition(text, language, most, least, defined.alphabet)
-    assert checked["status"] == "checked"
+    assert checked["status"] == "assumed" and checked["corroboration"]["disagreed"] == 0
     artefact = checked["artefact"]
     assert artefact["atoms"] == 2 and artefact["length bound"] >= 6
     assert artefact["strings compared"] > 9000 and artefact["members drawn"] >= 1
@@ -234,7 +235,7 @@ def test_the_check_of_a_definition_asks_no_solver(served, monkeypatch):
         raise AssertionError("the check of a definition asked the solver")
     monkeypatch.setattr(regular, "find_member", no_solver)
     assert domain_relations.check_definition(
-        text, language, most, least, defined.alphabet)["status"] == "checked"
+        text, language, most, least, defined.alphabet)["status"] == "assumed"
 
 
 def test_a_check_that_does_not_finish_claims_no_status(served, monkeypatch):
@@ -253,6 +254,6 @@ def test_a_check_that_does_not_finish_claims_no_status(served, monkeypatch):
 
 def test_a_solver_string_the_matcher_reads_otherwise_is_not_reported(served, monkeypatch):
     from mathema import regular
-    monkeypatch.setattr(regular, "places", lambda text, inside, outside: False)
+    monkeypatch.setattr(regular, "_places", lambda text, inside, outside: False)
     row = _row(check, "L[right] subset L[onlya]")
     assert row.verdict == "unknown", (row.verdict, row.counterexample)
