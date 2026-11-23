@@ -38,8 +38,8 @@ _AUTO_LET = ("let compute_square_root = numpy.sqrt, for acceleration in [0, 10],
              "deceleration in [0, 10], "
              "compute_square_root(acceleration) + deceleration >= 0")
 #: texts whose rendering reads back as a different rendering
-UNSTABLE = {False: {_AND_OF_RELATIONS, _HUGE_LITERAL},
-            True: {_AND_OF_RELATIONS, _HUGE_LITERAL, _AUTO_LET}}
+UNSTABLE = {False: {_HUGE_LITERAL},
+            True: {_HUGE_LITERAL, _AUTO_LET}}
 PARSING = sorted(t for t, v in CORPUS.items() if v["parses"])
 
 

@@ -543,18 +543,23 @@ def _split_unparseable(claims: list, grammar: str, fn,
         `(readable, unreadable)`: the claims kept for adjudication, and
         `(name, error)` for each claim an authoring surface states
         (its name in `authored`) whose mathema-grammar statement does
-        not parse, so that claim is reported on its own while the
-        others are adjudicated. A claim only the verified record holds
-        is kept as it is.
+        not parse, and for each claim whose stored text mathema cannot
+        write (`CanonicalTextError`), so that claim is reported on its
+        own while the others are adjudicated. Any other claim only the
+        verified record holds is kept as it is.
     """
     from .conjecture import InvalidConjecture
     from .spec import claims_fingerprint
+    from .conjecture import CanonicalTextError
     readable, unreadable = [], []
     for c in claims:
-        if c.get("name") in authored:
-            try:
-                claims_fingerprint([c], grammar, fn)
-            except InvalidConjecture as e:
+        try:
+            claims_fingerprint([c], grammar, fn)
+        except CanonicalTextError as e:
+            unreadable.append((c.get("name") or c.get("statement"), e))
+            continue
+        except InvalidConjecture as e:
+            if c.get("name") in authored:
                 unreadable.append((c.get("name") or c.get("statement"), e))
                 continue
         readable.append(c)
@@ -591,14 +596,99 @@ def split_unparseable_entry(entry: dict) -> tuple:
 
 
 def unparseable_claim_message(key: str, name: str, where: "str | None",
-                              error, rerun: str = "verify") -> str:
+                              error, rerun: str = "verify",
+                              location: "dict | None" = None) -> str:
     """Intent:
         The one line naming a declared claim that does not parse, with
-        the parser's message and where to correct it.
+        the parser's message and where to correct it; for a claim that
+        parses but whose stored text does not read back as it
+        (`CanonicalTextError`), `canonical_text_defect_message` at
+        `location`.
     """
+    from .conjecture import CanonicalTextError
+    if isinstance(error, CanonicalTextError):
+        return canonical_text_defect_message(key, name, where, error, location)
     where = where or "its docstring or claims file"
     return (f"{key}: claim {name!r} declared in {where} does not parse "
             f"({error}); correct it there and re-run {rerun}")
+
+
+def claim_location(root: str, source: "str | None", key: str,
+                   name: str) -> "dict | None":
+    """Intent:
+        Where claim `name` of `key` is stated in the claims file or
+        record at `source` (relative to `root`), as `{"file", "line",
+        "text"}` (the line holding its statement, stripped), or None
+        when there is no source or the claim is not found in it.
+    """
+    from .spec import claim_statement_line
+    if not source:
+        return None
+    path = os.path.join(root, source)
+    line = claim_statement_line(path, key, name)
+    if line is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read().splitlines()[line - 1].strip()
+    except (OSError, IndexError, UnicodeDecodeError):
+        return None
+    return {"file": source, "line": line, "text": text}
+
+
+def canonical_text_defect_message(key: str, name: str, where: "str | None",
+                                  error, location: "dict | None" = None,
+                                  command: str = "verify") -> str:
+    """Intent:
+        The diagnostic for a claim whose stored text mathema cannot
+        write (`CanonicalTextError`): a summary line naming the function
+        and the claim, then `Error: <title>`, where the claim is stated
+        (`on <file> line <n>, claim <name> of <key>:` and the quoted
+        line, when `location` is known, else the claim, the function and
+        the file or docstring, and the claim's text), and one sentence
+        saying it is a defect in mathema to report and what became of
+        the claim in this `command` run.
+    """
+    shown = where or "its docstring or claims file"
+    # :draft
+    done = ("was not checked" if command == "verify"
+            else "was not compared with its record")
+    # :draft
+    summary = (f"{key}: claim {name!r} {done}: mathema cannot write its "
+               f"stored text, a defect in mathema's rendering of the claim")
+    # :draft
+    lines = [summary, "", "Error: mathema cannot write this claim's stored text", ""]
+    if location is not None:
+        # :draft
+        lines.append(f"  on {location['file']} line {location['line']}, "
+                     f"claim {name} of {key}:")
+        lines.append(f"  {location['line']}:   {location['text']}")
+    else:
+        # :draft
+        lines.append(f"  claim {name} of {key}, in {shown}:")
+        stated = getattr(error, "text", None)
+        if stated:
+            lines.append(f"      {stated}")
+    # :draft
+    problem = getattr(error, "problem", None) or "it does not read back"
+    rendered = getattr(error, "text", None)
+    wrote = f" ({rendered})" if rendered else ""
+    if command == "verify":
+        # :draft
+        became = ("the claim is unchecked this run and no record was written "
+                  "for it (an earlier record of it is kept as it was, and its "
+                  "function is checked again on every run until mathema can "
+                  "write the claim's stored text)")
+    else:
+        # :draft
+        became = ("its record is left as it was and verify reports it the "
+                  "same way")
+    # :draft
+    lines += ["", f"The text mathema wrote for it{wrote} does not read back "
+                  f"as the claim: {problem}; this is a defect in mathema, not "
+                  f"in the claim, so please report it with this claim, and "
+                  f"{became}."]
+    return "\n".join(lines)
 
 
 @dataclass
@@ -1072,7 +1162,9 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
         InvalidConjecture: a claim the fingerprint cannot read.
 
     Notes:
-        A claim named in an authoring `conflicts` entry is left out.
+        A claim named in an authoring `conflicts` entry is left out; one
+        named in a `canonical-text-defect` entry is left out and listed
+        in `unreadable` with its error.
         A pending supersession keeps the verified version. The verified
         layer is append-only in membership: a claim removed from every
         authoring surface is rebuilt from its verified row, so the set
@@ -1081,7 +1173,7 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
     """
     from .authoring import resolve_declared
     from .conjecture import GRAMMAR
-    from .spec import claims_fingerprint
+    from .spec import stored_claims_fingerprint
     from .sync import apply_verified_wins
     withheld = {c["claim"] for c in conflicts
                 if c.get("kind") == "authoring"}
@@ -1096,10 +1188,16 @@ def claims_now(key: str, fn, file_entry: dict, verified_entry: dict,
     grammar = merged.get("grammar", GRAMMAR)
     authored = {c.get("name") for c in merged.get("claims") or []}
     claims, unreadable = _split_unparseable(claims, grammar, fn, authored)
+    defects = {c["claim"]: c["error"] for c in conflicts
+               if c.get("kind") == "canonical-text-defect"}
+    if defects:
+        claims = [c for c in claims if c.get("name") not in defects]
+        named = {name for name, _ in unreadable}
+        unreadable += [(name, e) for name, e in defects.items() if name not in named]
     entry = dict(merged)
     entry["claims"] = claims
     return {"entry": entry, "claims": claims, "grammar": grammar,
-            "fingerprint": claims_fingerprint(claims, grammar, fn),
+            "fingerprint": stored_claims_fingerprint(claims, grammar, fn),
             "retired_notes": retired_notes, "unreadable": unreadable}
 
 
@@ -1836,6 +1934,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     """Intent:
         The sweep body of `verify_project`, which shields it from the
         per-key state-dependence warning chatter.
+
+    Notes:
+        Each key is processed under a guard: an `Exception` raised for
+        one key (a `RecursionError` included) fails that key alone, puts
+        back the record it had before the run and drops what the run
+        gathered for it, and the sweep goes on. `MemoryError`,
+        `KeyboardInterrupt`, `SystemExit` and the wall-clock alarm end
+        the run, after the guard puts back the key's record the same
+        way.
     """
     from . import analyze, check
     from .compendium import external_premises as _external_premises
@@ -1849,7 +1956,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         _compendium._QUIET["on"] = False
     library_claims = load_library_claims(root)
     stub_premises = _external_premises(root, library_claims=library_claims)
-    from .conjecture import InvalidConjecture, _resolve_func_ref
+    from .conjecture import CanonicalTextError, InvalidConjecture, _resolve_func_ref
     from .inventory import chain_moved, function_dependencies
     from .spec import (_dependency_state, dependencies_current_probe,
                        entry_claims, load_declared, load_verified,
@@ -1865,6 +1972,15 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # claims whose record differs from what is written only because the
     # canonical text moved in one release, reported once for the run
     release_moved: list = []
+    # claims whose record differs only in how an earlier release quoted
+    # a string literal in the stored text, reported once for the run
+    quoting_moved: list = []
+    # claims whose record differs only in an earlier release writing a
+    # negated relation without its parentheses, reported once for the run
+    negation_moved: list = []
+    # per key, the claims whose record row stores a statement that does
+    # not parse: each is adjudicated again and its row rewritten
+    stale_rows: dict = {}
     from .spec import foreign_grammar_warnings
     out.lines.extend(foreign_grammar_warnings(root))
     from .compendium import own_package_compendium_files
@@ -2024,464 +2140,591 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.lines.append(f"FAIL {msg}")
         key_problems.setdefault(key, []).append(msg)
 
+    # per key re-adjudicated this run, the record file it writes and
+    # that file's bytes before the run (None when it had none), so a key
+    # whose processing raises after the write gets its prior record back
+    prior_records: dict = {}
+    # per key, the earlier record rows of claims mathema could not store
+    # this run, kept on disk as they were and unchecked
+    unchecked_rows: dict = {}
+    # per key, the claims whose stored text an earlier release wrote for
+    # two claims: claim name -> the row's stored statement and verdict
+    ambiguous_rows: dict = {}
+
+    def _drop_key_state(key: str) -> None:
+        invalidated_keys.discard(key)
+        supersessions.pop(key, None)
+        grammar_changes.pop(key, None)
+        release_moved[:] = [m for m in release_moved if m[0] != key]
+        quoting_moved[:] = [m for m in quoting_moved if m[0] != key]
+        negation_moved[:] = [m for m in negation_moved if m[0] != key]
+        stale_rows.pop(key, None)
+        unchecked_rows.pop(key, None)
+        ambiguous_rows.pop(key, None)
+
     pending: list = []   # (key, why, claims_for_gate, rec_or_none,
                          #  deps, accepted, unresolved, source_line)
     for key in keys:
-        if key in broken:
-            # a record that does not read is never re-adjudicated or
-            # written over: that would replace the history it holds
-            # with a fresh record. The key fails and names the repair.
-            src, reason = broken[key]["source"], broken[key]["reason"]
-            _fail(key, f"{key}: the verified record {src} {reason}; "
-                       f"nothing was checked or written for this key. "
-                       f"Repair it (after a merge, keep every discoveries, "
-                       f"historical and superseded row from both sides), "
-                       f"or restore it with `git restore {src}`, and "
-                       f"re-run verify")
-            out.keys.append({"key": key, "why": "unreadable-record",
-                             "passed": False,
-                             "problems": list(key_problems[key]),
-                             "counts": {}, "claims": []})
-            continue
-        # the freshness baseline comes from the verified layer alone; a
-        # declared entry (claims/*.yaml, claimspec.yaml, ...) never
-        # carries an identity, so it must never be read for this
-        verified_info = verified.get(key)
-        verified_entry = verified_info["entry"] if verified_info else {}
-        # the CI half of the acceptance policy: a standing acceptance
-        # the policy would refuse to write today fails the sweep, so an
-        # unverified sign-off cannot ride in through the record file
-        for msg in acceptance_policy_problems(key, verified_entry, policy):
-            _fail(key, msg)
-        from .acceptance import unaccepted_retirements
-        for section, name in unaccepted_retirements(verified_entry):
-            _fail(key, f"{key}: the {section} row {name!r} carries no "
-                       f"acceptance, and only `mathema accept` retires a "
-                       f"claim, so it retires nothing; remove the row, or "
-                       f"accept the claim: mathema accept {key} "
-                       f"{name} --as ...")
-        recorded_form = (verified_entry.get("identity") or {}).get("form")
-        declared_info = declared.get(key)
-        source = (declared_info or verified_info)["source"]
-        fn = _resolve_func_ref(key, root=root)
-        if fn is None and key in eager and key in library:
-            out.lines.append(f"note {key}: not importable from the "
-                             f"installed library; nothing checked")
-            continue
-        if fn is None:
-            from .compendium import is_library_record
-            if is_library_record(verified_entry):
-                # a compendium key whose library is not importable
-                # here: testimony, never a sweep failure. Its rows
-                # still resolve premises at their recorded verdicts;
-                # adjudicating them again needs the library.
-                out.lines.append(
-                    f"note {key}: library claims only, the library is "
-                    f"not importable here; accept rows --as trusted, or "
-                    f"install the library for verify to check them")
-                continue
-            msg = f"{key}: cannot resolve to a live function"
-            out.problems.append(msg)
-            line = (f"FAIL {key}: cannot resolve to a live function "
-                    f"(declared in {source})")
-            failure = _import_failure(key, root)
-            if failure:
-                line += f"; {failure}"
-            row = {"key": key, "why": "unresolvable", "passed": False,
-                   "problems": ["cannot resolve to a live function"],
-                   "counts": {}, "claims": []}
-            if key in moved:
-                remedies = [rename_command(n, key) for n in moved[key]]
-                line += (f"; its form hash matches "
-                         f"{', '.join(moved[key])}, which has no record. "
-                         f"If it moved, a human keeps its history with: "
-                         + " (or) ".join(remedies))
-                row["moved_to"] = list(moved[key])
-                row["remedy"] = remedies
-            out.lines.append(line)
-            # never reaches `pending`, so it gets its own structured
-            # entry, nothing may be visible in prose alone
-            out.keys.append(row)
-            continue
-        if key in moved_here and not verified_entry:
-            # a fresh record here would start the history over while the
-            # orphan still holds it; nothing is adjudicated or written
-            # for this key until a human renames the record or removes
-            # the orphan
-            remedies = [rename_command(key, o) for o in moved_here[key]]
-            _fail(key, f"{key}: no record yet, and its form hash matches "
-                       f"the orphan record {', '.join(moved_here[key])}; "
-                       f"nothing was checked or written for this key. "
-                       f"If it moved, a human keeps its history with: "
-                       + " (or) ".join(remedies)
-                       + "; if it is a different function, remove the "
-                         "orphan record instead")
-            out.keys.append({"key": key, "why": "moved-pending",
-                             "passed": False,
-                             "problems": list(key_problems[key]),
-                             "moved_from": list(moved_here[key]),
-                             "remedy": remedies,
-                             "counts": {}, "claims": []})
-            continue
-        # file-declared claims win per claim name over decorator/
-        # docstring claims on the live function (spec.declare()/
-        # authoring.py's three-surface precedence), merge before
-        # adjudicating or fingerprinting, so both see the same,
-        # complete claim set
-        from .spec import integrity_diagnosis, integrity_matches
-        if integrity_matches(verified_entry) is False:
-            integrity_warned.add(key)
-            diagnosis = integrity_diagnosis(key, verified_entry, root)
-            if policy.get("require_verification"):
-                # under a policy that requires human-verified sign-offs
-                # the record's own contents are part of the evidence,
-                # so a mismatch fails the sweep rather than warning
-                _fail(key, diagnosis.replace("WARN ", "", 1)
-                      + " This project's policy requires verification, "
-                        "so the mismatch fails the run.")
-            else:
-                out.lines.append(diagnosis)
-        file_entry = declared_info["entry"] if declared_info else {}
-        # a record the running version cannot parse (a claim whose
-        # statement no longer reads as a law) is a per-key finding
-        # with a named remedy, never a sweep-wide abort: the store
-        # is committed evidence, and every other key still deserves
-        # its verdict
+        record_written = False
         try:
-            from .sync import claim_conflicts
-            _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
-            for conflict in _conflicts:
-                if conflict.get("kind") == "release-move":
-                    release_moved.append((key, conflict["claim"]))
-                    continue
-                if conflict.get("kind") == "supersession":
-                    supersessions.setdefault(key, {})[conflict["claim"]] = \
-                        conflict["authored"]
-                    msg = (f"{key}: claim {conflict['claim']!r} was "
-                           f"re-authored but is already verified, the "
-                           f"verified version is the one checked; to adopt the "
-                           f"change, run: mathema accept {key} "
-                           f"{conflict['claim']} --as superseded")
-                else:
-                    msg = (f"{key}: claim {conflict['claim']!r} differs "
-                           f"between the docstring and the declared file, and "
-                           f"neither version is checked until it is "
-                           f"resolved; to resolve it, run: mathema docsync")
+            if key in broken:
+                # a record that does not read is never re-adjudicated or
+                # written over: that would replace the history it holds
+                # with a fresh record. The key fails and names the repair.
+                src, reason = broken[key]["source"], broken[key]["reason"]
+                _fail(key, f"{key}: the verified record {src} {reason}; "
+                           f"nothing was checked or written for this key. "
+                           f"Repair it (after a merge, keep every discoveries, "
+                           f"historical and superseded row from both sides), "
+                           f"or restore it with `git restore {src}`, and "
+                           f"re-run verify")
+                out.keys.append({"key": key, "why": "unreadable-record",
+                                 "passed": False,
+                                 "problems": list(key_problems[key]),
+                                 "counts": {}, "claims": []})
+                continue
+            # the freshness baseline comes from the verified layer alone; a
+            # declared entry (claims/*.yaml, claimspec.yaml, ...) never
+            # carries an identity, so it must never be read for this
+            verified_info = verified.get(key)
+            verified_entry = verified_info["entry"] if verified_info else {}
+            # the CI half of the acceptance policy: a standing acceptance
+            # the policy would refuse to write today fails the sweep, so an
+            # unverified sign-off cannot ride in through the record file
+            for msg in acceptance_policy_problems(key, verified_entry, policy):
                 _fail(key, msg)
-            # a claim whose two surfaces disagree has no single meaning
-            # to record, so neither version is adjudicated or written
-            withheld = {c["claim"] for c in _conflicts
-                        if c.get("kind") == "authoring"}
-            now = claims_now(key, fn, file_entry, verified_entry,
-                             _conflicts, (declared_info or {}).get("source"))
-            retired_notes = now["retired_notes"]
-            out.lines.extend(retired_notes)
-            retired_noted = {ln.split("'")[1] for ln in retired_notes}
-            entry_grammar = now["grammar"]
-            current_claims = now["claims"]
-            for claim_name, error in now["unreadable"]:
-                msg = unparseable_claim_message(
-                    key, claim_name, (declared_info or {}).get("source"),
-                    error)
-                out.authoring_errors.append(msg)
+            from .acceptance import unaccepted_retirements
+            for section, name in unaccepted_retirements(verified_entry):
+                _fail(key, f"{key}: the {section} row {name!r} carries no "
+                           f"acceptance, and only `mathema accept` retires a "
+                           f"claim, so it retires nothing; remove the row, or "
+                           f"accept the claim: mathema accept {key} "
+                           f"{name} --as ...")
+            recorded_form = (verified_entry.get("identity") or {}).get("form")
+            declared_info = declared.get(key)
+            source = (declared_info or verified_info)["source"]
+            fn = _resolve_func_ref(key, root=root)
+            if fn is None and key in eager and key in library:
+                out.lines.append(f"note {key}: not importable from the "
+                                 f"installed library; nothing checked")
+                continue
+            if fn is None:
+                from .compendium import is_library_record
+                if is_library_record(verified_entry):
+                    # a compendium key whose library is not importable
+                    # here: testimony, never a sweep failure. Its rows
+                    # still resolve premises at their recorded verdicts;
+                    # adjudicating them again needs the library.
+                    out.lines.append(
+                        f"note {key}: library claims only, the library is "
+                        f"not importable here; accept rows --as trusted, or "
+                        f"install the library for verify to check them")
+                    continue
+                msg = f"{key}: cannot resolve to a live function"
+                out.problems.append(msg)
+                line = (f"FAIL {key}: cannot resolve to a live function "
+                        f"(declared in {source})")
+                failure = _import_failure(key, root)
+                if failure:
+                    line += f"; {failure}"
+                row = {"key": key, "why": "unresolvable", "passed": False,
+                       "problems": ["cannot resolve to a live function"],
+                       "counts": {}, "claims": []}
+                if key in moved:
+                    remedies = [rename_command(n, key) for n in moved[key]]
+                    line += (f"; its form hash matches "
+                             f"{', '.join(moved[key])}, which has no record. "
+                             f"If it moved, a human keeps its history with: "
+                             + " (or) ".join(remedies))
+                    row["moved_to"] = list(moved[key])
+                    row["remedy"] = remedies
+                out.lines.append(line)
+                # never reaches `pending`, so it gets its own structured
+                # entry, nothing may be visible in prose alone
+                out.keys.append(row)
+                continue
+            if key in moved_here and not verified_entry:
+                # a fresh record here would start the history over while the
+                # orphan still holds it; nothing is adjudicated or written
+                # for this key until a human renames the record or removes
+                # the orphan
+                remedies = [rename_command(key, o) for o in moved_here[key]]
+                _fail(key, f"{key}: no record yet, and its form hash matches "
+                           f"the orphan record {', '.join(moved_here[key])}; "
+                           f"nothing was checked or written for this key. "
+                           f"If it moved, a human keeps its history with: "
+                           + " (or) ".join(remedies)
+                           + "; if it is a different function, remove the "
+                             "orphan record instead")
+                out.keys.append({"key": key, "why": "moved-pending",
+                                 "passed": False,
+                                 "problems": list(key_problems[key]),
+                                 "moved_from": list(moved_here[key]),
+                                 "remedy": remedies,
+                                 "counts": {}, "claims": []})
+                continue
+            # file-declared claims win per claim name over decorator/
+            # docstring claims on the live function (spec.declare()/
+            # authoring.py's three-surface precedence), merge before
+            # adjudicating or fingerprinting, so both see the same,
+            # complete claim set
+            from .spec import integrity_diagnosis, integrity_matches
+            if integrity_matches(verified_entry) is False:
+                integrity_warned.add(key)
+                diagnosis = integrity_diagnosis(key, verified_entry, root)
+                if policy.get("require_verification"):
+                    # under a policy that requires human-verified sign-offs
+                    # the record's own contents are part of the evidence,
+                    # so a mismatch fails the sweep rather than warning
+                    _fail(key, diagnosis.replace("WARN ", "", 1)
+                          + " This project's policy requires verification, "
+                            "so the mismatch fails the run.")
+                else:
+                    out.lines.append(diagnosis)
+            file_entry = declared_info["entry"] if declared_info else {}
+            # a record the running version cannot parse (a claim whose
+            # statement no longer reads as a law) is a per-key finding
+            # with a named remedy, never a sweep-wide abort: the store
+            # is committed evidence, and every other key still deserves
+            # its verdict
+            try:
+                from .sync import claim_conflicts
+                _conflicts = claim_conflicts(fn, file_entry, verified_entry or None)
+                for conflict in _conflicts:
+                    if conflict.get("kind") == "release-move":
+                        moves = conflict.get("moved") or ()
+                        if "literal-quoting" in moves:
+                            quoting_moved.append((key, conflict["claim"]))
+                        if "not-parentheses" in moves:
+                            negation_moved.append((key, conflict["claim"]))
+                        if not moves:
+                            release_moved.append((key, conflict["claim"]))
+                        continue
+                    if conflict.get("kind") == "ambiguous-text":
+                        ambiguous_rows.setdefault(key, {})[conflict["claim"]] = {
+                            "statement": conflict.get("verified"),
+                            "verdict": conflict.get("verdict")}
+                        out.lines.append(ambiguous_text_note(key, conflict))
+                        continue
+                    if conflict.get("kind") == "canonical-text-defect":
+                        # reported with the claims `claims_now` leaves out
+                        continue
+                    if conflict.get("kind") == "unreadable-record":
+                        stale_rows.setdefault(key, []).append(conflict["claim"])
+                        # :draft
+                        out.lines.append(
+                            f"note {key}: the stored text of claim "
+                            f"{conflict['claim']!r} could not be read and was "
+                            f"replaced; the claim is checked again as written "
+                            f"(it read: {conflict['verified']})")
+                        continue
+                    if conflict.get("kind") == "supersession":
+                        supersessions.setdefault(key, {})[conflict["claim"]] = \
+                            conflict["authored"]
+                        msg = (f"{key}: claim {conflict['claim']!r} was "
+                               f"re-authored but is already verified, the "
+                               f"verified version is the one checked; to adopt the "
+                               f"change, run: mathema accept {key} "
+                               f"{conflict['claim']} --as superseded")
+                    else:
+                        msg = (f"{key}: claim {conflict['claim']!r} differs "
+                               f"between the docstring and the declared file, and "
+                               f"neither version is checked until it is "
+                               f"resolved; to resolve it, run: mathema docsync")
+                    _fail(key, msg)
+                # a claim whose two surfaces disagree has no single meaning
+                # to record, so neither version is adjudicated or written
+                withheld = {c["claim"] for c in _conflicts
+                            if c.get("kind") == "authoring"}
+                now = claims_now(key, fn, file_entry, verified_entry,
+                                 _conflicts, (declared_info or {}).get("source"))
+                retired_notes = now["retired_notes"]
+                out.lines.extend(retired_notes)
+                out.lines.extend(domain_escape_notes(key, now["claims"]))
+                retired_noted = {ln.split("'")[1] for ln in retired_notes}
+                entry_grammar = now["grammar"]
+                current_claims = now["claims"]
+                kept_rows = []
+                for claim_name, error in now["unreadable"]:
+                    source = (declared_info or {}).get("source")
+                    msg = unparseable_claim_message(
+                        key, claim_name, source, error,
+                        location=claim_location(root, source, key, claim_name)
+                        if isinstance(error, CanonicalTextError) else None)
+                    if isinstance(error, CanonicalTextError):
+                        kept_rows.append(claim_name)
+                    if not isinstance(error, CanonicalTextError):
+                        # a claim mathema cannot render is mathema's defect,
+                        # not one the author fixes on an authoring surface
+                        out.authoring_errors.append(msg)
+                        out.problems.append(msg)
+                        out.lines.append(f"FAIL {msg}")
+                    else:
+                        _fail(key, msg)
+                if kept_rows:
+                    unchecked_rows[key] = [
+                        r for r in (verified_entry or {}).get("claims") or []
+                        if isinstance(r, dict) and r.get("name") in kept_rows]
+                merged_entry = now["entry"]
+                out.grammars_seen.update(c.get("grammar", entry_grammar)
+                                         for c in current_claims)
+                current_fp = now["fingerprint"]
+            except CanonicalTextError as e:
+                # mathema cannot write a claim's stored text: its defect, and
+                # the record is left as it was
+                source = (declared_info or {}).get("source")
+                name = getattr(e, "claim_name", None) or "a claim"
+                msg = canonical_text_defect_message(
+                    key, name, source, e, claim_location(root, source, key, name))
                 out.problems.append(msg)
                 out.lines.append(f"FAIL {msg}")
-            merged_entry = now["entry"]
-            out.grammars_seen.update(c.get("grammar", entry_grammar)
-                                     for c in current_claims)
-            current_fp = now["fingerprint"]
-        except InvalidConjecture as e:
-            if _record_has_unreadable_claim(verified_entry):
-                from .spec import record_file_name
-                msg = (f"{key}: a claim in this function's verified "
-                       f"record does not parse under the current "
-                       f"grammar ({e}); rebuild the record: delete "
-                       f".mathema/verified/{record_file_name(key)} and "
-                       f"re-run verify")
-            elif _docstring_claims_fail(fn):
-                # the message names the claim, the docstring and fn
-                msg = f"{key}: {e}; correct it there and re-run verify"
-                out.authoring_errors.append(msg)
-            else:
-                where = ((declared_info or {}).get("source")
-                         or "its docstring or claims file")
-                bad = _unparseable_claim_name(
-                    (declared_info or {}).get("entry") or {})
-                which = f"the claim {bad!r}" if bad else "a claim"
-                msg = (f"{key}: {which} declared in {where} does not "
-                       f"parse ({e}); correct it there and re-run verify")
-                out.authoring_errors.append(msg)
-            out.problems.append(msg)
-            out.lines.append(f"FAIL {msg}")
-            out.keys.append({"key": key, "why": "unreadable-record",
-                             "passed": False, "problems": [msg],
-                             "counts": {}, "claims": []})
-            continue
-        recorded_fp = (verified_entry.get("identity") or {}).get(
-            "claims_fingerprint")
-        facts_now = analyze(fn)
-        state = lock_state(key, facts_now.form, locks, verified_entry)
-        if state == "changed":
-            # the lock's whole point: the record is left exactly as it
-            # was (no re-adjudication, no baseline drift onto code a
-            # human never sanctioned), and the run fails naming the
-            # remedy. Restoring the function, or a human unlocking,
-            # are the two ways forward.
-            lk = locks.get(key) or {}
-            msg = (f"{key}: locked at form {namespaced_form(lk.get('form'))} but the code "
-                   f"is now {facts_now.form}; the record is unchanged. "
-                   f"Restore the function, or a human runs: "
-                   f"mathema unlock {key}")
-            out.problems.append(msg)
-            lock_messages[key] = msg
-            stored = verified_entry.get("claims") or []
-            pending.append((key, "locked-changed", stored, None, None,
-                            _risk_state(verified_entry), (),
-                            verified_info))
-            continue
-        if state in ("removed-outside", "moved-outside"):
-            # the meta entry no longer matches the record's lock stamp
-            # without `mathema unlock` having run. The record, stamp
-            # included, is left exactly as it was, so the finding
-            # stands on every sweep until the lock is put right.
-            if state == "removed-outside":
-                msg = (f"{key}: the verified record carries a lock stamp "
-                       f"but .mathema/meta/locks.yaml has no entry; a "
-                       f"lock is only removed by a human running "
-                       f"`mathema unlock {key}` (restore the entry, or "
-                       f"unlock properly)")
-            else:
-                stamped = (verified_entry.get("locked") or {}).get("form")
+                out.keys.append({"key": key, "why": "canonical-text-defect",
+                                 "passed": False, "problems": [msg],
+                                 "counts": {}, "claims": []})
+                continue
+            except InvalidConjecture as e:
+                if _record_has_unreadable_claim(verified_entry):
+                    from .spec import record_file_name
+                    msg = (f"{key}: a claim in this function's verified "
+                           f"record does not parse under the current "
+                           f"grammar ({e}); rebuild the record: delete "
+                           f".mathema/verified/{record_file_name(key)} and "
+                           f"re-run verify")
+                elif _docstring_claims_fail(fn):
+                    # the message names the claim, the docstring and fn
+                    msg = f"{key}: {e}; correct it there and re-run verify"
+                    out.authoring_errors.append(msg)
+                else:
+                    where = ((declared_info or {}).get("source")
+                             or "its docstring or claims file")
+                    bad = _unparseable_claim_name(
+                        (declared_info or {}).get("entry") or {})
+                    which = f"the claim {bad!r}" if bad else "a claim"
+                    msg = (f"{key}: {which} declared in {where} does not "
+                           f"parse ({e}); correct it there and re-run verify")
+                    out.authoring_errors.append(msg)
+                out.problems.append(msg)
+                out.lines.append(f"FAIL {msg}")
+                out.keys.append({"key": key, "why": "unreadable-record",
+                                 "passed": False, "problems": [msg],
+                                 "counts": {}, "claims": []})
+                continue
+            recorded_fp = (verified_entry.get("identity") or {}).get(
+                "claims_fingerprint")
+            facts_now = analyze(fn)
+            state = lock_state(key, facts_now.form, locks, verified_entry)
+            if state == "changed":
+                # the lock's whole point: the record is left exactly as it
+                # was (no re-adjudication, no baseline drift onto code a
+                # human never sanctioned), and the run fails naming the
+                # remedy. Restoring the function, or a human unlocking,
+                # are the two ways forward.
                 lk = locks.get(key) or {}
-                msg = (f"{key}: .mathema/meta/locks.yaml pins form "
-                       f"{namespaced_form(lk.get('form'))} but the record was locked at "
-                       f"{namespaced_form(stamped)}; the lock was moved without `mathema "
-                       f"unlock {key}`, and the record is unchanged "
-                       f"(restore the entry, or a human unlocks and "
-                       f"re-locks)")
-            out.problems.append(msg)
-            lock_messages[key] = msg
-            pending.append((key, "lock-" + state,
-                            verified_entry.get("claims") or [], None, None,
-                            _risk_state(verified_entry), (),
-                            verified_info))
-            continue
-        from .compendium import premise_state as _premise_state
-        premise_now = _premise_state(current_claims, stub_premises)
-        recorded_premises = (verified_entry.get("meta") or {}).get(
-            "mathema.premise_state")
-        defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
-        from .definitions import definition_state
-        try:
-            definitions_now = definition_state(fn, facts_now, root)
-        except TimeoutError:
-            raise
-        except Exception:
-            definitions_now = {}
-        definitions_moved = definitions_now != ((verified_entry.get("meta")
-                                                 or {}).get(
-            "mathema.definition_rows") or {})
-        pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
-                                            verified_entry)
-        version_moved = (_library_version_moved(merged_entry, verified_entry)
-                         if key in library else None)
-        body_moved = _provenance_moved(facts_now, verified_entry)
-        language_moved = _language_definition_moved(fn, merged_entry, verified_entry)
-        is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
-                    and recorded_fp == current_fp and not defaults_moved
-                    and version_moved is None and body_moved is None
-                    and language_moved is None
-                    and not pinf_moved and not definitions_moved
-                    and (premise_now == (recorded_premises or {})
-                         if premise_now or recorded_premises else True))
-        deps_now = function_dependencies(fn, facts_now) if is_fresh else None
-        dependency_changed = is_fresh and any(
-            _dependency_state(d, verified) == "invalidated"
-            for d in deps_now or [])
-        if is_fresh and not dependency_changed:
-            # a callee's form stored when this record was adjudicated
-            # against the callee's live form: a change re-adjudicates
-            # whether or not the callee has a record of its own
-            stored_forms = {d.get("key"): d.get("form") for d in
-                            verified_entry.get("dependencies") or []
-                            if d.get("kind") == "function"
-                            and d.get("key") and d.get("form")}
-            dependency_changed = any(
-                d.get("key") in stored_forms and d.get("form")
-                and not same_form(d.get("form"), stored_forms[d.get("key")])
-                for d in deps_now or [] if d.get("kind") == "function")
-        if is_fresh and not dependency_changed:
-            dependency_changed = chain_moved(
-                verified_entry.get("dependencies") or [], deps_now or [])
-        if is_fresh and not dependency_changed:
-            # a callee's body provenance stored when this record was
-            # adjudicated against the callee's live one: a body that
-            # moved under the same form re-adjudicates too
-            from .koine.facts import provenance_change
-            stored_bodies = {d.get("key"): d.get("provenance") for d in
-                             verified_entry.get("dependencies") or []
-                             if d.get("kind") == "function" and d.get("key")}
-            dependency_changed = any(
-                d.get("key") in stored_bodies
-                and provenance_change(d.get("provenance"),
-                                      stored_bodies[d.get("key")]) is not None
-                for d in deps_now or [] if d.get("kind") == "function")
-        if is_fresh and not dependency_changed:
-            # a module-level constant is compared by VALUE against this
-            # record's own stored dependency entry, the form hash
-            # cannot see a global change, so this check is what keeps
-            # an inlined constant honest
-            stored_deps = {d.get("name"): d for d in
-                           verified_entry.get("dependencies") or []
-                           if d.get("kind") == "constant"}
-            live_consts = {d["name"]: d for d in deps_now or []
-                           if d.get("kind") == "constant"}
-            dependency_changed = (set(stored_deps) != set(live_consts)
-                                  or any(stored_deps[n].get("value")
-                                         != live_consts[n].get("value")
-                                         for n in stored_deps))
-        risk = _risk_state(verified_entry)
-
-        # a key the user NAMED is always re-adjudicated: freshness is
-        # an optimisation for a whole-store sweep, and silently
-        # skipping the one key someone asked about is what made the
-        # integrity warning's own remedy a no-op
-        if is_fresh and not dependency_changed and not all and not only:
-            out.fresh += 1
-            _heal_concepts(key, fn, facts_now, merged_entry, verified_info,
-                           root, write_yaml)
-            # a lock set through the library (no CLI stamp) still
-            # becomes tamper-evident at the next sweep: the record's
-            # reflection is healed to match the meta entry, so the
-            # fresh path cannot leave a lock invisible to the
-            # removed-outside check
-            # a record written before Python forms were namespaced is
-            # re-hashed once: its bare forms gain `py:`
-            if verified_info:
-                entry_now = verified_info["entry"]
-                healed = _namespace_python_forms(entry_now)
-                if state == "held":
+                msg = (f"{key}: locked at form {namespaced_form(lk.get('form'))} but the code "
+                       f"is now {facts_now.form}; the record is unchanged. "
+                       f"Restore the function, or a human runs: "
+                       f"mathema unlock {key}")
+                out.problems.append(msg)
+                lock_messages[key] = msg
+                stored = verified_entry.get("claims") or []
+                pending.append((key, "locked-changed", stored, None, None,
+                                _risk_state(verified_entry), (),
+                                verified_info))
+                continue
+            if state in ("removed-outside", "moved-outside"):
+                # the meta entry no longer matches the record's lock stamp
+                # without `mathema unlock` having run. The record, stamp
+                # included, is left exactly as it was, so the finding
+                # stands on every sweep until the lock is put right.
+                if state == "removed-outside":
+                    msg = (f"{key}: the verified record carries a lock stamp "
+                           f"but .mathema/meta/locks.yaml has no entry; a "
+                           f"lock is only removed by a human running "
+                           f"`mathema unlock {key}` (restore the entry, or "
+                           f"unlock properly)")
+                else:
+                    stamped = (verified_entry.get("locked") or {}).get("form")
                     lk = locks.get(key) or {}
-                    want = {k: lk[k] for k in ("form", "at", "by") if k in lk}
-                    if entry_now.get("locked") != want:
-                        entry_now["locked"] = want
-                        healed = True
-                if healed:
-                    if key not in integrity_warned:
-                        from .spec import integrity_checksum
-                        entry_now.setdefault("identity", {})["integrity"] = \
-                            integrity_checksum(entry_now)
-                    write_yaml(os.path.join(root, verified_info["source"]),
-                               {key: entry_now},
-                               header=f"machine record; binds to form "
-                                      f"{(entry_now.get('identity') or {}).get('form')}")
-            stored = verified_entry.get("claims") or []
-            pending.append((key, "fresh", stored, None, deps_now, risk,
-                            (), verified_info))
-            continue
+                    msg = (f"{key}: .mathema/meta/locks.yaml pins form "
+                           f"{namespaced_form(lk.get('form'))} but the record was locked at "
+                           f"{namespaced_form(stamped)}; the lock was moved without `mathema "
+                           f"unlock {key}`, and the record is unchanged "
+                           f"(restore the entry, or a human unlocks and "
+                           f"re-locks)")
+                out.problems.append(msg)
+                lock_messages[key] = msg
+                pending.append((key, "lock-" + state,
+                                verified_entry.get("claims") or [], None, None,
+                                _risk_state(verified_entry), (),
+                                verified_info))
+                continue
+            from .compendium import premise_state as _premise_state
+            premise_now = _premise_state(current_claims, stub_premises)
+            recorded_premises = (verified_entry.get("meta") or {}).get(
+                "mathema.premise_state")
+            defaults_moved = _defaults_moved(fn, merged_entry, verified_entry)
+            from .definitions import definition_state
+            try:
+                definitions_now = definition_state(fn, facts_now, root)
+            except TimeoutError:
+                raise
+            except Exception:
+                definitions_now = {}
+            definitions_moved = definitions_now != ((verified_entry.get("meta")
+                                                     or {}).get(
+                "mathema.definition_rows") or {})
+            pinf_moved = _pseudo_infinity_moved(fn, facts_now, merged_entry,
+                                                verified_entry)
+            version_moved = (_library_version_moved(merged_entry, verified_entry)
+                             if key in library else None)
+            body_moved = _provenance_moved(facts_now, verified_entry)
+            language_moved = _language_definition_moved(fn, merged_entry, verified_entry)
+            from .spec import recorded_claims_fingerprint
+            recorded_now = recorded_claims_fingerprint(verified_entry, fn)
+            # the record holds the claims as written, made under an
+            # earlier rules number, or differs from them only in a
+            # spelling an earlier release wrote: only the rules moved
+            spelled_earlier = any(k == key for k, _c in
+                                  release_moved + quoting_moved + negation_moved)
+            from .spec import recorded_claims
+            same_names = ({c.get("name") for c in recorded_claims(verified_entry)}
+                          == {c.get("name") for c in current_claims})
+            rules_moved = recorded_fp != current_fp and (
+                recorded_now == current_fp
+                or (spelled_earlier and same_names
+                    and not supersessions.get(key)))
+            is_fresh = (bool(recorded_form) and same_form(facts_now.form, recorded_form)
+                        and recorded_fp == current_fp and not defaults_moved
+                        and version_moved is None and body_moved is None
+                        and language_moved is None
+                        and not pinf_moved and not definitions_moved
+                        and not stale_rows.get(key)
+                        and (premise_now == (recorded_premises or {})
+                             if premise_now or recorded_premises else True))
+            deps_now = function_dependencies(fn, facts_now) if is_fresh else None
+            dependency_changed = is_fresh and any(
+                _dependency_state(d, verified) == "invalidated"
+                for d in deps_now or [])
+            if is_fresh and not dependency_changed:
+                # a callee's form stored when this record was adjudicated
+                # against the callee's live form: a change re-adjudicates
+                # whether or not the callee has a record of its own
+                stored_forms = {d.get("key"): d.get("form") for d in
+                                verified_entry.get("dependencies") or []
+                                if d.get("kind") == "function"
+                                and d.get("key") and d.get("form")}
+                dependency_changed = any(
+                    d.get("key") in stored_forms and d.get("form")
+                    and not same_form(d.get("form"), stored_forms[d.get("key")])
+                    for d in deps_now or [] if d.get("kind") == "function")
+            if is_fresh and not dependency_changed:
+                dependency_changed = chain_moved(
+                    verified_entry.get("dependencies") or [], deps_now or [])
+            if is_fresh and not dependency_changed:
+                # a callee's body provenance stored when this record was
+                # adjudicated against the callee's live one: a body that
+                # moved under the same form re-adjudicates too
+                from .koine.facts import provenance_change
+                stored_bodies = {d.get("key"): d.get("provenance") for d in
+                                 verified_entry.get("dependencies") or []
+                                 if d.get("kind") == "function" and d.get("key")}
+                dependency_changed = any(
+                    d.get("key") in stored_bodies
+                    and provenance_change(d.get("provenance"),
+                                          stored_bodies[d.get("key")]) is not None
+                    for d in deps_now or [] if d.get("kind") == "function")
+            if is_fresh and not dependency_changed:
+                # a module-level constant is compared by VALUE against this
+                # record's own stored dependency entry, the form hash
+                # cannot see a global change, so this check is what keeps
+                # an inlined constant honest
+                stored_deps = {d.get("name"): d for d in
+                               verified_entry.get("dependencies") or []
+                               if d.get("kind") == "constant"}
+                live_consts = {d["name"]: d for d in deps_now or []
+                               if d.get("kind") == "constant"}
+                dependency_changed = (set(stored_deps) != set(live_consts)
+                                      or any(stored_deps[n].get("value")
+                                             != live_consts[n].get("value")
+                                             for n in stored_deps))
+            risk = _risk_state(verified_entry)
 
-        claims = entry_claims(merged_entry)
-        # declared claims only: verify never adjudicates suggestions
-        # (an empty declared set means no claims, not "go conjecture")
-        from .spec import attach_recorded_pins
-        attach_recorded_pins(claims, verified_entry or None)
-        premises = stub_premises
-        if premise_cycles.get(key):
-            premises = {**stub_premises,
-                        **{ref: {"cycle": True}
-                           for ref in premise_cycles[key]}}
-        rec = check(fn, claims=claims if claims else [],
-                    trials_downscale=trials_scale,
-                    known_premises=premises,
-                    pseudo_infinity=merged_entry.get("pseudo_infinity"),
-                    runtime_types=merged_entry.get("runtime_types"))
-        rec.probes = [p for p in rec.probes
-                      if getattr(p, "name", None) not in withheld]
-        rec.probes, late_notes = _strip_retired_probes(
-            key, rec.probes, verified_entry or {}, retired_noted)
-        out.lines.extend(late_notes)
-        out.lines.extend(_initially_falsified_hint(key, rec.probes,
-                                              verified_entry or {},
-                                              library.get(key)))
-        _apply_declared_extras(rec, merged_entry)
-        moved = _grammar_changes(rec.probes, verified_entry or {})
-        if moved:
-            grammar_changes[key] = moved
-        rec.probes.append(dependencies_current_probe(rec.dependencies,
-                                                     root=root))
-        from .transitions import REVERIFY_CAUSE, predates_form_scheme
-        why = (REVERIFY_CAUSE if recorded_form
-               and predates_form_scheme(verified_entry or {})
-               else "dependency changed" if dependency_changed
-               else (f"library version changed ({version_moved[0]} to "
-                     f"{version_moved[1]})") if version_moved is not None
-               and recorded_form
-               else "defaults changed" if defaults_moved
-               and same_form(facts_now.form, recorded_form)
-               and recorded_fp == current_fp
-               else "pseudo-infinity changed" if pinf_moved
-               and same_form(facts_now.form, recorded_form)
-               and recorded_fp == current_fp
-               else "definition rows changed" if definitions_moved
-               and same_form(facts_now.form, recorded_form)
-               and recorded_fp == current_fp
-               else f"{body_moved} changed" if body_moved
-               and same_form(facts_now.form, recorded_form)
-               and recorded_fp == current_fp
-               else language_moved if language_moved
-               and same_form(facts_now.form, recorded_form)
-               and recorded_fp == current_fp
-               else "forced (--all)" if all and is_fresh
-               else "targeted re-verify" if only and is_fresh
-               else "no baseline record" if not recorded_form
-               else "claims changed" if same_form(facts_now.form, recorded_form)
-               else "form changed")
-        rec.meta = {**(getattr(rec, "meta", None) or {}),
-                    "mathema.premise_state": premise_now}
-        if recorded_form and predates_form_scheme(verified_entry or {}):
-            triggers = ["record-format"]
-            rec.meta["mathema.invalidated_by"] = triggers
-            invalidated_keys.add(key)
-        elif recorded_form:
-            triggers = _fired_triggers(
-                form=not same_form(facts_now.form, recorded_form),
-                claims=recorded_fp != current_fp, defaults=defaults_moved,
-                pseudo_infinity=pinf_moved, definitions=definitions_moved,
-                provenance=body_moved, library_version=version_moved,
-                premises=premise_now != (recorded_premises or {})
-                if premise_now or recorded_premises else False,
-                dependency=dependency_changed,
-                language_definition=language_moved)
-            rec.meta["mathema.invalidated_by"] = triggers
-            if triggers:
+            # a key the user NAMED is always re-adjudicated: freshness is
+            # an optimisation for a whole-store sweep, and silently
+            # skipping the one key someone asked about is what made the
+            # integrity warning's own remedy a no-op
+            if is_fresh and not dependency_changed and not all and not only:
+                out.fresh += 1
+                _heal_concepts(key, fn, facts_now, merged_entry, verified_info,
+                               root, write_yaml)
+                # a lock set through the library (no CLI stamp) still
+                # becomes tamper-evident at the next sweep: the record's
+                # reflection is healed to match the meta entry, so the
+                # fresh path cannot leave a lock invisible to the
+                # removed-outside check
+                # a record written before Python forms were namespaced is
+                # re-hashed once: its bare forms gain `py:`
+                if verified_info:
+                    entry_now = verified_info["entry"]
+                    healed = _namespace_python_forms(entry_now)
+                    if state == "held":
+                        lk = locks.get(key) or {}
+                        want = {k: lk[k] for k in ("form", "at", "by") if k in lk}
+                        if entry_now.get("locked") != want:
+                            entry_now["locked"] = want
+                            healed = True
+                    if healed:
+                        if key not in integrity_warned:
+                            from .spec import integrity_checksum
+                            entry_now.setdefault("identity", {})["integrity"] = \
+                                integrity_checksum(entry_now)
+                        write_yaml(os.path.join(root, verified_info["source"]),
+                                   {key: entry_now},
+                                   header=f"machine record; binds to form "
+                                          f"{(entry_now.get('identity') or {}).get('form')}")
+                stored = verified_entry.get("claims") or []
+                pending.append((key, "fresh", stored, None, deps_now, risk,
+                                (), verified_info))
+                continue
+
+            claims = entry_claims(merged_entry)
+            # declared claims only: verify never adjudicates suggestions
+            # (an empty declared set means no claims, not "go conjecture")
+            from .spec import attach_recorded_pins
+            attach_recorded_pins(claims, verified_entry or None)
+            premises = stub_premises
+            if premise_cycles.get(key):
+                premises = {**stub_premises,
+                            **{ref: {"cycle": True}
+                               for ref in premise_cycles[key]}}
+            rec = check(fn, claims=claims if claims else [],
+                        trials_downscale=trials_scale,
+                        known_premises=premises,
+                        pseudo_infinity=merged_entry.get("pseudo_infinity"),
+                        runtime_types=merged_entry.get("runtime_types"))
+            rec.probes = [p for p in rec.probes
+                          if getattr(p, "name", None) not in withheld]
+            rec.probes, late_notes = _strip_retired_probes(
+                key, rec.probes, verified_entry or {}, retired_noted)
+            out.lines.extend(late_notes)
+            out.lines.extend(_initially_falsified_hint(key, rec.probes,
+                                                  verified_entry or {},
+                                                  library.get(key)))
+            _apply_declared_extras(rec, merged_entry)
+            grammar_moved = _grammar_changes(rec.probes, verified_entry or {})
+            if grammar_moved:
+                grammar_changes[key] = grammar_moved
+            rec.probes.append(dependencies_current_probe(rec.dependencies,
+                                                         root=root))
+            from .transitions import REVERIFY_CAUSE, predates_form_scheme
+            # :draft
+            why = (REVERIFY_CAUSE if recorded_form
+                   and predates_form_scheme(verified_entry or {})
+                   else "dependency changed" if dependency_changed
+                   else (f"library version changed ({version_moved[0]} to "
+                         f"{version_moved[1]})") if version_moved is not None
+                   and recorded_form
+                   else "defaults changed" if defaults_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else "pseudo-infinity changed" if pinf_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else "definition rows changed" if definitions_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else f"{body_moved} changed" if body_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else language_moved if language_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else "forced (--all)" if all and is_fresh
+                   else "targeted re-verify" if only and is_fresh
+                   else "no baseline record" if not recorded_form
+                   else "stored text unreadable" if stale_rows.get(key)
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
+                   else "mathema's claim rules changed" if rules_moved
+                   and same_form(facts_now.form, recorded_form)
+                   else "claims changed" if same_form(facts_now.form, recorded_form)
+                   else "form changed")
+            rec.meta = {**(getattr(rec, "meta", None) or {}),
+                        "mathema.premise_state": premise_now}
+            if recorded_form and predates_form_scheme(verified_entry or {}):
+                triggers = ["record-format"]
+                rec.meta["mathema.invalidated_by"] = triggers
                 invalidated_keys.add(key)
-            roots = chain_moved(verified_entry.get("dependencies") or [],
-                                deps_now or []) if dependency_changed else []
-            if roots:
-                rec.meta["mathema.chain_moved"] = roots
-        else:
-            # a first record is current by construction, and says so,
-            # so a later run that finds nothing changed rewrites it
-            # unmoved
-            rec.meta["mathema.invalidated_by"] = []
-        if definitions_now:
-            rec.meta["mathema.definition_rows"] = definitions_now
-        written = write_record(rec, key=key, root=root,
-                               claims=current_claims,
-                               declared_intent=merged_entry.get("intent"),
-                               grammar=entry_grammar, fn=fn)
-        _carry_recorded_verdicts(rec.probes, written, key)
-        # the record just written carries each acceptance forward or
-        # marks it stale (a changed form), so the gate reads the
-        # accepted risk from it, never from the record it replaced
-        risk = _risk_state(_entry_at(written, key))
-        out.adjudicated += 1
-        if key in library or key in prerequisite_keys:
-            # this key's rows now resolve premises at their local verdict
-            stub_premises = _external_premises(
-                root, library_claims=library_claims)
-        pending.append((key, why, list(rec.probes), rec, rec.dependencies,
-                        risk, rec.facts.unresolved, verified_info))
+            elif recorded_form:
+                triggers = _fired_triggers(
+                    form=not same_form(facts_now.form, recorded_form),
+                    claims=recorded_fp != current_fp and not rules_moved,
+                    defaults=defaults_moved,
+                    pseudo_infinity=pinf_moved, definitions=definitions_moved,
+                    provenance=body_moved, library_version=version_moved,
+                    premises=premise_now != (recorded_premises or {})
+                    if premise_now or recorded_premises else False,
+                    dependency=dependency_changed,
+                    language_definition=language_moved)
+                rec.meta["mathema.invalidated_by"] = triggers
+                if triggers:
+                    invalidated_keys.add(key)
+                roots = chain_moved(verified_entry.get("dependencies") or [],
+                                    deps_now or []) if dependency_changed else []
+                if roots:
+                    rec.meta["mathema.chain_moved"] = roots
+            else:
+                # a first record is current by construction, and says so,
+                # so a later run that finds nothing changed rewrites it
+                # unmoved
+                rec.meta["mathema.invalidated_by"] = []
+            if definitions_now:
+                rec.meta["mathema.definition_rows"] = definitions_now
+            for probe in rec.probes:
+                earlier = ambiguous_rows.get(key, {}).get(getattr(probe, "name", None))
+                if earlier is not None:
+                    # the row's earlier reading rides on the claim as
+                    # written, for `mathema accept --as superseded`
+                    probe.meta = {**(probe.meta or {}),
+                                  "mathema.earlier_reading": earlier}
+            prior_records[key] = _record_before(root, key)
+            written = write_record(rec, key=key, root=root,
+                                   claims=current_claims + [
+                                       _unrewritten(r) for r in
+                                       unchecked_rows.get(key, [])],
+                                   declared_intent=merged_entry.get("intent"),
+                                   grammar=entry_grammar, fn=fn,
+                                   keep_rows=kept_rows)
+            record_written = True
+            _carry_recorded_verdicts(rec.probes, written, key)
+            # the record just written carries each acceptance forward or
+            # marks it stale (a changed form), so the gate reads the
+            # accepted risk from it, never from the record it replaced
+            risk = _risk_state(_entry_at(written, key))
+            if key in library or key in prerequisite_keys:
+                # this key's rows now resolve premises at their local verdict
+                stub_premises = _external_premises(
+                    root, library_claims=library_claims)
+            pending.append((key, why, list(rec.probes), rec, rec.dependencies,
+                            risk, rec.facts.unresolved, verified_info))
+            out.adjudicated += 1
+        except BaseException as exc:
+            if not isinstance(exc, Exception) or isinstance(exc, MemoryError):
+                # the sweep ends; the key's record is put back first
+                if key in prior_records:
+                    _put_back(prior_records[key])
+                raise
+            _drop_key_state(key)
+            restore_error = (_put_back(prior_records[key])
+                             if record_written else None)
+            msg = _key_crash_message(key, exc, "verifying it",
+                                     written=record_written,
+                                     restore_error=restore_error)
+            _fail(key, msg)
+            out.keys.append({"key": key, "why": "internal-error",
+                             "passed": False,
+                             "problems": list(key_problems[key]),
+                             "counts": {}, "claims": []})
 
     # phase 2: every record is on disk, settle each key's
     # dependencies_current against the completed store, patching the
@@ -2492,84 +2735,97 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     import datetime
     today = datetime.date.today().isoformat()
     for key, why, claims_for_gate, rec, deps, _accepted, _unres, vinfo in pending:
-        if deps is None:
-            continue
-        stored_dc = next(
-            (c for c in claims_for_gate
-             if _claim_fields(c)[0] == "dependencies_current"), None)
-        if stored_dc is None:
-            continue
-        dc_now = dependencies_current_probe(deps, root=root)
-        _, old_verdict, _, _ = _claim_fields(stored_dc)
-        target = (vinfo["entry"] if isinstance(stored_dc, dict) and vinfo
-                  else (settled.get(key) or {}).get("entry"))
-        stamps_moved = target is not None and _restamp_freshness(target, root)
-        if dc_now.verdict == old_verdict and not stamps_moved:
-            continue
-        if isinstance(stored_dc, dict):
-            entry = vinfo["entry"] if vinfo else None
-            if dc_now.verdict != old_verdict:
-                # a function the sweep left as it was, whose rung moved
-                # with the store: the move is from its stored verdict
-                resettle_history(
-                    stored_dc, dc_now.verdict, ["dependency"],
-                    before=old_verdict,
-                    commit=((entry or {}).get("lineage") or {}).get("commit"),
-                    at=today)
-            stored_dc["verdict"] = dc_now.verdict
-            stored_dc["note"] = dc_now.note
-            stored_dc["sketch"] = dc_now.sketch
-            stored_dc["counterexample"] = dc_now.counterexample
-            stored_dc["meta"] = {**(stored_dc.get("meta") or {}), **(dc_now.meta or {})}
-            if entry is not None:
-                recorded_form = (entry.get("identity") or {}).get("form")
-                if key not in integrity_warned:
-                    # restamp only a record that matched before this
-                    # write, so settling never clears a mismatch
-                    entry.setdefault("identity", {})["integrity"] = \
-                        integrity_checksum(entry)
-                write_yaml(os.path.join(root, vinfo["source"]), {key: entry},
-                           header=f"machine record; binds to form "
-                                  f"{recorded_form}")
-        else:
-            stored_dc.verdict = dc_now.verdict
-            stored_dc.note = dc_now.note
-            stored_dc.sketch = dc_now.sketch
-            stored_dc.counterexample = dc_now.counterexample
-            entry = settled.get(key)
-            if entry is not None:
-                for c in entry["entry"].get("claims") or []:
-                    if c.get("name") == "dependencies_current":
-                        if dc_now.verdict != old_verdict:
-                            # the record this sweep wrote holds the
-                            # rung's provisional move; the move is
-                            # from the verdict before the run
-                            resettle_history(
-                                c, dc_now.verdict,
-                                (rec.meta or {}).get("mathema.invalidated_by"),
-                                chain_moved=(rec.meta or {}).get("mathema.chain_moved"),
-                                before=(c.get("meta") or {}).get(
-                                    "mathema.previous_verdict") or old_verdict,
-                                commit=(entry["entry"].get("lineage") or {}).get("commit"),
-                                at=today)
-                            stored_dc.meta = {**(stored_dc.meta or {}), **{
-                                k: v for k, v in (c.get("meta") or {}).items()
-                                if k in ("mathema.previous_verdict",
-                                         "mathema.transitions")}}
-                            if "mathema.transitions" not in (c.get("meta") or {}):
-                                (stored_dc.meta or {}).pop("mathema.transitions", None)
-                        c["verdict"] = dc_now.verdict
-                        c["note"] = dc_now.note
-                        c["sketch"] = dc_now.sketch
-                        c["counterexample"] = dc_now.counterexample
-                        c["meta"] = {**(c.get("meta") or {}), **(dc_now.meta or {})}
-                recorded_form = (entry["entry"].get("identity") or {}).get("form")
-                entry["entry"].setdefault("identity", {})["integrity"] = \
-                    integrity_checksum(entry["entry"])
-                write_yaml(os.path.join(root, entry["source"]),
-                           {key: entry["entry"]},
-                           header=f"machine record; binds to form "
-                                  f"{recorded_form}")
+        try:
+            if deps is None:
+                continue
+            stored_dc = next(
+                (c for c in claims_for_gate
+                 if _claim_fields(c)[0] == "dependencies_current"), None)
+            if stored_dc is None:
+                continue
+            dc_now = dependencies_current_probe(deps, root=root)
+            _, old_verdict, _, _ = _claim_fields(stored_dc)
+            target = (vinfo["entry"] if isinstance(stored_dc, dict) and vinfo
+                      else (settled.get(key) or {}).get("entry"))
+            stamps_moved = target is not None and _restamp_freshness(target, root)
+            if dc_now.verdict == old_verdict and not stamps_moved:
+                continue
+            if isinstance(stored_dc, dict):
+                entry = vinfo["entry"] if vinfo else None
+                if dc_now.verdict != old_verdict:
+                    # a function the sweep left as it was, whose rung moved
+                    # with the store: the move is from its stored verdict
+                    resettle_history(
+                        stored_dc, dc_now.verdict, ["dependency"],
+                        before=old_verdict,
+                        commit=((entry or {}).get("lineage") or {}).get("commit"),
+                        at=today)
+                stored_dc["verdict"] = dc_now.verdict
+                stored_dc["note"] = dc_now.note
+                stored_dc["sketch"] = dc_now.sketch
+                stored_dc["counterexample"] = dc_now.counterexample
+                stored_dc["meta"] = {**(stored_dc.get("meta") or {}), **(dc_now.meta or {})}
+                if entry is not None:
+                    recorded_form = (entry.get("identity") or {}).get("form")
+                    if key not in integrity_warned:
+                        # restamp only a record that matched before this
+                        # write, so settling never clears a mismatch
+                        entry.setdefault("identity", {})["integrity"] = \
+                            integrity_checksum(entry)
+                    write_yaml(os.path.join(root, vinfo["source"]), {key: entry},
+                               header=f"machine record; binds to form "
+                                      f"{recorded_form}")
+            else:
+                stored_dc.verdict = dc_now.verdict
+                stored_dc.note = dc_now.note
+                stored_dc.sketch = dc_now.sketch
+                stored_dc.counterexample = dc_now.counterexample
+                entry = settled.get(key)
+                if entry is not None:
+                    for c in entry["entry"].get("claims") or []:
+                        if c.get("name") == "dependencies_current":
+                            if dc_now.verdict != old_verdict:
+                                # the record this sweep wrote holds the
+                                # rung's provisional move; the move is
+                                # from the verdict before the run
+                                resettle_history(
+                                    c, dc_now.verdict,
+                                    (rec.meta or {}).get("mathema.invalidated_by"),
+                                    chain_moved=(rec.meta or {}).get("mathema.chain_moved"),
+                                    before=(c.get("meta") or {}).get(
+                                        "mathema.previous_verdict") or old_verdict,
+                                    commit=(entry["entry"].get("lineage") or {}).get("commit"),
+                                    at=today)
+                                stored_dc.meta = {**(stored_dc.meta or {}), **{
+                                    k: v for k, v in (c.get("meta") or {}).items()
+                                    if k in ("mathema.previous_verdict",
+                                             "mathema.transitions")}}
+                                if "mathema.transitions" not in (c.get("meta") or {}):
+                                    (stored_dc.meta or {}).pop("mathema.transitions", None)
+                            c["verdict"] = dc_now.verdict
+                            c["note"] = dc_now.note
+                            c["sketch"] = dc_now.sketch
+                            c["counterexample"] = dc_now.counterexample
+                            c["meta"] = {**(c.get("meta") or {}), **(dc_now.meta or {})}
+                    recorded_form = (entry["entry"].get("identity") or {}).get("form")
+                    entry["entry"].setdefault("identity", {})["integrity"] = \
+                        integrity_checksum(entry["entry"])
+                    write_yaml(os.path.join(root, entry["source"]),
+                               {key: entry["entry"]},
+                               header=f"machine record; binds to form "
+                                      f"{recorded_form}")
+        except BaseException as exc:
+            if not isinstance(exc, Exception) or isinstance(exc, MemoryError):
+                # the sweep ends; the key's record is put back first
+                if key in prior_records:
+                    _put_back(prior_records[key])
+                raise
+            _drop_key_state(key)
+            restore_error = (_put_back(prior_records[key])
+                             if key in prior_records else None)
+            _fail(key, _key_crash_message(key, exc, "settling its dependencies",
+                                          written=key in prior_records,
+                                          restore_error=restore_error))
 
     # phase 3: gate every key through the one policy and render lines
     from .transitions import load_actions
@@ -2655,6 +2911,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             for found in ("mathema.computation_finding",
                           "mathema.conditioning_finding")
             if meta.get(found))
+        out.lines.extend(no_longer_applying_risk_notes(claims_for_gate, accepted))
         out.lines.extend(
             f"     warning: claim {name} of {key} was verified under "
             f"mathema; its grammar is now {grammar!r}, so mathema no "
@@ -2690,7 +2947,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                            claim_row(c, accepted_risk=accepted), key,
                            supersessions.get(key, {})),
                            grammar_changes.get(key, {}))
-                       for c in claims_for_gate],
+                       for c in claims_for_gate]
+                      + [_unchecked_row(r) for r in unchecked_rows.get(key, [])],
         })
     if release_moved:
         from .sync import IDENTITY_RELEASE
@@ -2701,7 +2959,302 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             f"earlier release {'are' if len(release_moved) != 1 else 'is'} "
             f"re-recorded under the new text; nothing the author wrote "
             f"changed")
+    if quoting_moved:
+        out.lines.append(quoting_moved_note(len(quoting_moved)))
+    if negation_moved:
+        out.lines.append(negation_moved_note(len(negation_moved)))
     return out
+
+
+def no_longer_applying_risk_notes(claims: list, accepted: frozenset) -> list:
+    """Intent:
+        One note per claim of `claims` whose accepted risk no longer
+        applies: the claim has a risk acceptance in `accepted`, and its
+        verdict now is proven or holds, so the acceptance stays in the
+        record as history and is not counted as an accepted risk.
+    """
+    out = []
+    for name, verdict, _meta, _n in map(_claim_fields, claims):
+        if name in accepted and classify_verdict(verdict or "") in ("proven", "holds"):
+            now = "holds" if classify_verdict(verdict) == "holds" else "is proven"
+            # :draft
+            out.append(f"     note: an earlier accepted risk on {name} no longer "
+                       f"applies: the claim now {now}")
+    return out
+
+
+def ambiguous_text_note(key: str, conflict: dict,
+                        command: str = "verify") -> str:
+    """Intent:
+        The warning for an `ambiguous-text` conflict of `key`: the
+        stored text, the claim this release reads it as, the claim as
+        written that an earlier release also wrote it for, what this
+        `command` run does with the claim, and the remedy when the
+        author edited the first claim into the second.
+    """
+    name = conflict["claim"]
+    # :draft
+    done = ("the claim is checked as written and re-recorded"
+            if command == "verify" else
+            "verify checks the claim as written and re-records it")
+    # :draft
+    return (f"warning {key}: claim {name!r}: the stored text "
+            f"{conflict.get('verified')} is ambiguous: this release reads it "
+            f"as {conflict.get('reads_as')}, and an earlier release wrote "
+            f"the same text for the claim as written, "
+            f"{conflict.get('authored')}. {done[0].upper()}{done[1:]}; if you "
+            f"edited the claim from the first to the second, record the "
+            f"edit with: mathema accept {key} {name} --as superseded; if you "
+            f"did not, nothing needs doing")
+
+
+#: the characters a domain escape most often names, by the words a
+#: note uses for them
+_CHARACTER_WORDS = {"\t": "a tab", "\n": "a newline",  # :draft
+                    "\r": "a carriage return", "\x00": "a null character",
+                    "\\": "a backslash", '"': "a double quote",
+                    "'": "a single quote", " ": "a space"}
+
+
+# :draft
+def _named_character(ch: str) -> str:
+    """Intent:
+        One character in words with its code point: `a tab (U+0009)`,
+        its Unicode name for another character that has one, else
+        `the character U+XXXX`.
+    """
+    import unicodedata
+    point = f"U+{ord(ch):04X}"
+    words = _CHARACTER_WORDS.get(ch)
+    if words is None:
+        name = unicodedata.name(ch, "")
+        if not name:
+            return f"the character {point}"
+        words = name.lower()
+    return f"{words} ({point})"
+
+
+# :draft
+def _value_in_words(value: str) -> str:
+    """Intent:
+        A string value as a note shows it, so that no escape stands in
+        for the character it names: a single printable character is
+        quoted with its code point (`'A' (U+0041)`); otherwise each run
+        of ordinary printable characters is quoted and every other
+        character named (`'a', a tab (U+0009), 'b'`).
+    """
+    if len(value) == 1 and value.isprintable() and value not in _CHARACTER_WORDS:
+        return f"{value!r} (U+{ord(value):04X})"
+    parts: list = []
+    run = ""
+    for ch in value:
+        if ch.isprintable() and ch not in _CHARACTER_WORDS:
+            run += ch
+            continue
+        if run:
+            parts.append(repr(run))
+            run = ""
+        parts.append(_named_character(ch))
+    if run:
+        parts.append(repr(run))
+    return ", ".join(parts) if parts else "the empty string"
+
+
+def _expression_reading(text: str) -> "str | None":
+    """Intent:
+        The value the text between a domain value's quotes, `text`, has
+        as a Python string literal (its backslash escapes decoded), or
+        None when no quoting of it reads as one.
+    """
+    import ast
+    for quote in ('"', "'"):
+        try:
+            value = ast.literal_eval(f"{quote}{text}{quote}")
+        except (ValueError, SyntaxError):
+            continue
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def domain_escape_notes(key: str, claims: list) -> list:
+    """Intent:
+        One note per string member of a domain set in `claims` (claim
+        dicts of `key`) that holds a backslash: the member is read as
+        the text between its quotes, written, and the note says how
+        that differs from the same text read as an expression literal.
+        A member that reads the same both ways gets no note.
+    """
+    from .spec import _declared_conjecture
+    from .sync import _set_strings
+    out = []
+    for c in claims:
+        statement = c.get("statement") or c.get("law") or ""
+        if "\\" not in statement:
+            continue
+        try:
+            members = _set_strings(_declared_conjecture(c).domain)
+        except Exception:
+            continue
+        for value in sorted({v for vs in members.values() for v in vs
+                             if "\\" in v}):
+            expression = _expression_reading(value)
+            if expression == value:
+                continue
+            out.append(domain_escape_note(key, c.get("name") or statement,
+                                          value, expression))
+    return out
+
+
+def domain_escape_note(key: str, claim_name: str, written: str,
+                       expression: "str | None") -> str:
+    """Intent:
+        The note for a domain set member of claim `claim_name` whose
+        text `written` holds a backslash: it is read as written, and as
+        an expression literal the same text reads as `expression` (None
+        when it does not read as one).
+    """
+    other = (f"as an expression literal the same text reads as "
+             f"{_value_in_words(expression)}" if expression is not None else
+             "the same text does not read as an expression literal")
+    # :draft
+    return (f"note {key}: claim {claim_name!r}: the domain value "
+            f"\"{written}\" is read as written, {_value_in_words(written)}; "
+            f"{other}")
+
+
+def quoting_moved_note(count: int) -> str:
+    """Intent:
+        The run's note for `count` claims whose record an earlier
+        release wrote with its literal quoting.
+    """
+    many = count != 1
+    # :draft
+    return (f"note: the stored text of a string literal is corrected in "
+            f"{count} claim{'s' if many else ''} recorded by an earlier "
+            f"release, which wrote its quotes in a spelling this release "
+            f"does not write; {'each is' if many else 'it is'} checked "
+            f"again and re-recorded under the corrected text; nothing the "
+            f"author wrote changed")
+
+
+def negation_moved_note(count: int) -> str:
+    """Intent:
+        The run's note for `count` claims whose record an earlier
+        release wrote with a negated relation out of its parentheses.
+    """
+    many = count != 1
+    # :draft
+    return (f"note: the stored text of a negated relation is rewritten in "
+            f"{count} claim{'s' if many else ''} recorded by an earlier "
+            f"release, which wrote a `not` over a relation without "
+            f"parentheses of its own; {'each is' if many else 'it is'} "
+            f"checked again and re-recorded under the text this release "
+            f"writes; nothing the author wrote changed")
+
+
+# :draft
+def _unrewritten(row: dict) -> dict:
+    """Intent:
+        A kept record row whose claim mathema could not write this run,
+        as a claim the fingerprint hashes verbatim (in no grammar it
+        parses), so the record's fingerprint never matches the claims
+        as written and the function is checked again on the next run.
+    """
+    return {"name": row.get("name"), "statement": row.get("statement") or "",
+            "grammar": "mathema-unwritten"}
+
+
+def _unchecked_row(row: dict) -> dict:
+    """Intent:
+        The report row of a claim whose earlier record row is kept as
+        it stands because mathema could not write the claim's stored
+        text this run: the row's `claim_row` with verdict `unchecked`
+        and stance `undecided`, the verdict the row was recorded with
+        as `recorded_verdict`, and a `reason` saying so.
+    """
+    out = claim_row(row)
+    out.pop("counterexample", None)
+    out.pop("blocked_by", None)
+    # :draft
+    out.update({"verdict": "unchecked", "stance": "undecided",
+                "recorded_verdict": row.get("verdict"),
+                "reason": "mathema could not write this claim's stored "
+                          "text, so it was not checked this run; its "
+                          "earlier record row is kept as it was"})
+    return out
+
+
+def _record_before(root: str, key: str) -> tuple:
+    """Intent:
+        `(path, bytes)`: the file the verify sweep writes `key`'s record
+        to, and its bytes now, or None for the bytes when there is no
+        such file.
+    """
+    from .spec import record_path, verified_dir
+    path = record_path(verified_dir(root), key)
+    try:
+        with open(path, "rb") as fh:
+            return path, fh.read()
+    except FileNotFoundError:
+        return path, None
+
+
+def _put_back(before: tuple) -> "str | None":
+    """Intent:
+        Return a record file to the bytes `_record_before` read, or
+        remove it when there was none, so that a read of the store
+        later in the same run scope sees what is on disk. None when
+        that worked, else the error that stopped it, as `<type>:
+        <message>`.
+    """
+    from . import _run_scope
+    from .spec import atomic_write_bytes
+    path, data = before
+    try:
+        if data is None:
+            if os.path.exists(path):
+                os.remove(path)
+            _run_scope.wrote(path)
+        else:
+            atomic_write_bytes(path, data)
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _key_crash_message(key: str, exc: Exception, doing: str, *,
+                       written: bool,
+                       restore_error: "str | None" = None) -> str:
+    """Intent:
+        The problem a sweep reports for a key whose adjudication raised
+        `exc` while `doing` (for example "verifying it"): the key, the
+        exception's type and message, the innermost frame it was raised
+        in, and what became of the key's record. `written` says whether
+        this run had already written the key's new record when the
+        exception was raised, in which case the sweep put back the
+        record the key had before the run (or removed the new one when
+        it had none) unless `restore_error` says why it could not;
+        otherwise the record on disk (or its absence) is what it was
+        before the run.
+    """
+    import traceback
+    frames = traceback.extract_tb(exc.__traceback__)
+    # :draft
+    where = (f" (raised at {os.path.basename(frames[-1].filename)}:"
+             f"{frames[-1].lineno} in {frames[-1].name})" if frames else "")
+    # :draft
+    record = ("its record was written before the error and could not be "
+              f"put back ({restore_error}), so it holds this run's verdicts "
+              "and the run that settles them did not finish; delete it and "
+              "re-run verify" if written and restore_error else
+              "its record was put back as it was before the run" if written else
+              "its record was left exactly as it was")
+    # :draft
+    return (f"{key}: internal error while {doing}: "
+            f"{type(exc).__name__}: {exc}{where}; {record}, and the sweep "
+            f"went on to the next key. This is most likely a defect in "
+            f"mathema, not in the claims")
 
 
 def _grammar_changes(probes, verified_entry: dict) -> dict:

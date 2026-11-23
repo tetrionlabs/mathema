@@ -13,6 +13,10 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
 - A claim whose every variable is a text has no `[float]` companion row.
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
+- Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 1 in this release: canonical statement text). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. The claim identity (`claims_fingerprint`) does not carry the rules number; it moves only for a claim whose stored text this release writes differently (a negated relation, a string literal an earlier release quoted ambiguously).
+- The stored statement text of a string literal is written from its value, and a negated relation keeps its parentheses. A domain set's string member is still read as the text between its quotes (`{"\t"}` is a backslash and a t); when that differs from the same text read as an expression literal, `mathema verify` says so in a note. A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
+- `lineage.statement_text` is no longer written.
+- A claim whose stored text 0.6.6.1 wrote and cannot read back (`= not (a < x and x < b)`) is checked again as written and re-recorded with a note, where 0.6.6.1 failed the whole function with "rebuild the record". An edit made to that claim since its record was written is adopted without `--as superseded`.
 
 ### Fixes
 - The check of a language's definition compares the strings the claim itself writes, and reports `assumed`, never `checked`, when the language's membership raised on a string; a proven line names each definition it assumed.
@@ -25,6 +29,12 @@ Notable changes to mathema are recorded here from its first public release onwar
 - Derive reads nothing of a generator, coroutine or async generator function, and reads a decorated function only when the name is bound to the function itself or to a wrapper whose call is read (`functools.lru_cache`, `functools.cache`, `staticmethod`, mathema's own guards, an instance whose `__call__` hands its arguments to the wrapped function with the default attribute lookup). Any other wrapper is named in the reason.
 - A missing-value policy is proven from a guard only when the path to the guard's raise is read, the guard's test is a real missing-value test, and calling the function runs the body the guard is in.
 - `"{²}".format(x)` in a raise message no longer stops `check_conjectures`.
+- Stored text an earlier release wrote for two different claims (`f(s, '}"', 's')` and `f(s, '}"", "s')`) is reported as ambiguous, naming both readings and `mathema accept ... --as superseded` for an edit; the claim is checked as written, never kept at its old verdict.
+- A key that raises after its record is written, while it is checked or while its dependencies are settled, gets the record it had before the run back, whatever stopped it (an exception, running out of memory, an interrupt or the wall-clock alarm), and a read of the store later in the same run sees what is on disk.
+- A claim whose stored text mathema cannot write fails its function's row and shows its kept row as `unchecked`; the function is checked again on every run until the text can be written.
+- A risk accepted on a claim that a later check proves or finds holding stays in the record as history, is no longer counted as accepted risk, and the sweep says so.
+- After an earlier key's release move, a moved key still names its rename remedy.
+- A note names each character it shows (`a tab (U+0009)`), a claim whose stored text moved in more than one way gets every note that applies, and docsync's diagnostics follow `--root`.
 
 ## 0.6.6.1
 
