@@ -571,7 +571,7 @@ def _compare_level(node: ast.Compare, kinds: dict, ns: _Namespace):
     return level, _BOOL
 
 
-def _never_holds(op: ast.AST, a: ValueKind, b: ValueKind) -> bool:
+def _never_holds(op: ast.AST, a: ValueKind, b: ValueKind) -> bool:  # :draft
     """Intent:
         Whether the ordering `a <op> b` of two numbers is false for every
         value the kinds admit, read from their signs: a value of sign 1 is
@@ -930,7 +930,7 @@ def _cause_is_read(node: ast.AST, ns: "_Namespace") -> bool:  # :draft
         and constructor_refusal(found, 0, []) is None
 
 
-def _group_is_read(call: ast.Call, kinds: dict, ns: "_Namespace") -> bool:
+def _group_is_read(call: ast.Call, kinds: dict, ns: "_Namespace") -> bool:  # :draft
     """Intent:
         Whether `ExceptionGroup(message, [E1(...), ...])` builds an
         `ExceptionGroup` and cannot fail: no keyword and no unpacking, a
