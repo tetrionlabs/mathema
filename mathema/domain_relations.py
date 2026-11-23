@@ -661,7 +661,7 @@ def defined_bound(bound) -> "_Defined | None":
         exclusion the strings it removes.
     """
     from . import regular
-    from .languages import resolve_language
+    from .languages import _term_of, resolve_language
     if isinstance(bound, LanguageRef):
         bound = Domain(base_type="L", pieces=(bound,))
     if not isinstance(bound, (frozenset, Domain)):
@@ -689,7 +689,7 @@ def defined_bound(bound) -> "_Defined | None":
         if not isinstance(piece, LanguageRef):
             return None
         try:
-            document = resolve_language(piece).to_json().get("definition")
+            document = _term_of(resolve_language(piece))
             language = resolve_language(piece)
             piece_most, piece_least = regular.bounds(document)
             alphabet.extend(regular.alphabet_of(document))

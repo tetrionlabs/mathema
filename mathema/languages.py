@@ -1102,6 +1102,29 @@ def _import_dotted(name: str):
     return None
 
 
+#: the key of a language's persisted form that holds its regular-language
+#: term
+TERM_KEY = "term"
+
+
+def _term_of(language) -> "dict | None":
+    """Intent:
+        The regular-language term a language's persisted form states
+        under `TERM_KEY`, or under the earlier key `definition` when the
+        form carries no `term`; None when it states neither or the form
+        cannot be read.
+    """
+    try:
+        form = language.to_json()
+    except Exception:
+        return None
+    if not isinstance(form, dict):
+        return None
+    if TERM_KEY in form:
+        return form[TERM_KEY]
+    return form.get("definition")  # :draft alias, remove when mathema-language writes term
+
+
 def language_vocabulary() -> tuple:
     """Every name `L[...]` resolves by name alone: the in-process
     registrations and the entry-point languages, sorted."""
