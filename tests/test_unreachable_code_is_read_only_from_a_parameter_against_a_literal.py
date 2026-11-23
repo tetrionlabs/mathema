@@ -369,3 +369,80 @@ def test_a_write_in_unreachable_code_is_proven(fn, text, shown):
     p = _row(fn, text)
     assert p.verdict == "proven", (p.verdict, p.sketch)
     assert "unreachable code" in p.sketch and shown in p.sketch, p.sketch
+
+
+# --- a negated safety claim is proven by a witness ---------------------------
+# `not is_state_safe(f)` and `not is_deterministic(f)` say a call exists
+# that writes, or that two calls with one input differ. A call that was
+# run and showed it proves the claim; a line read from the source does
+# not, and a wrong reading of unreachable code never falsifies it.
+
+def always_writes(x):
+    _log.append(x)
+    return x * 2.0
+
+
+def draws(x):
+    import random
+    return x + random.random()
+
+
+def writes_and_returns_the_same(x):
+    _log.append(x)
+    return x * 2.0
+
+
+def sets_the_environment(x):
+    import os
+    os.environ["MATHEMA_TEST_WITNESS_NOT_RUN"] = "1"
+    return x * 2.0
+
+
+def test_an_executed_write_proves_the_function_is_not_state_safe():
+    p = _row(always_writes, "for x in [0, 1], not is_state_safe(f)")
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "_log" in p.sketch and "x = " in p.sketch, p.sketch
+
+
+def test_an_executed_write_in_a_branch_the_domain_reaches_proves_it():
+    p = _row(past_ten, "for x in [0, 20], not is_state_safe(f)")
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "x = 20" in p.sketch, p.sketch
+
+
+def test_two_calls_that_differ_prove_the_function_is_not_deterministic():
+    p = _row(draws, "for x in [0, 1], not is_deterministic(f)")
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "two calls" in p.sketch and "x = " in p.sketch, p.sketch
+
+
+def test_a_write_after_a_rebinding_is_witnessed_not_read_as_unreachable():
+    p = _row(rebound_before_the_test, "for x in [0, 1], not is_state_safe(f)")
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+
+
+@pytest.mark.parametrize("fn, text", [
+    (never_writes, "for x in [0, 1], not is_state_safe(f)"),
+    (never_writes, "for x in [0, 1], not is_deterministic(f)"),
+    (past_ten, "for x in [0, 5], not is_state_safe(f)"),
+], ids=["constant", "constant-deterministic", "past-ten"])
+def test_a_proven_safety_claim_falsifies_its_negation(fn, text):
+    p = _row(fn, text)
+    assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
+
+
+def test_no_witness_leaves_the_negation_undecided():
+    # no call in [0, 5] writes, and the else is reachable only at nan
+    p = _row(else_a_nan_takes, "for x in [0, 5], not is_state_safe(f)")
+    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    # the result never reads what the call wrote: two calls agree
+    p = _row(writes_and_returns_the_same,
+             "for x in [0, 1], not is_deterministic(f)")
+    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+
+
+def test_a_function_that_writes_outside_its_module_is_not_run_for_a_witness():
+    import os
+    p = _row(sets_the_environment, "for x in [0, 1], not is_state_safe(f)")
+    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    assert "MATHEMA_TEST_WITNESS_NOT_RUN" not in os.environ

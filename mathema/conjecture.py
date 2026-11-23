@@ -10594,6 +10594,145 @@ def _unexecuted_negation(proof):
         meta=dict(proof.meta or {}))
 
 
+def _witness_points(facts, cj_domain: dict) -> list:
+    """Intent:
+        A few points of the claim's domain to look for a witness at:
+        every parameter at its bound's upper end, at its lower end, at
+        its midpoint, and at one ordinary value (`_an_ordinary_value`),
+        a parameter with no interval at its ordinary value throughout.
+        Empty when some parameter has no ordinary value.
+    """
+    from .domain import domain_contains
+    base = {p: _an_ordinary_value((cj_domain or {}).get(p))
+            for p in facts.params}
+    if any(v is _NO_VALUE for v in base.values()):
+        return []
+    points = []
+    for pick in (lambda lo, hi: hi, lambda lo, hi: lo,
+                 lambda lo, hi: (lo + hi) / 2):
+        point = dict(base)
+        for p in facts.params:
+            bound = (cj_domain or {}).get(p)
+            if not (isinstance(bound, (list, tuple)) and len(bound) == 2
+                    and all(isinstance(b, (int, float)) and math.isfinite(b)
+                            for b in bound)):
+                continue
+            value = pick(*bound)
+            try:
+                if domain_contains(value, bound):
+                    point[p] = value
+            except Exception:
+                pass
+        if point not in points:
+            points.append(point)
+    if base not in points:
+        points.append(base)
+    return points
+
+
+def _negation_witnessed(ctx, fn, facts):
+    """Intent:
+        The proof of `not is_state_safe(f)` or `not is_deterministic(f)`
+        by a witness that was run, or None when none was found. Each
+        says a call exists: one after which a module-level value the
+        examination names as written has changed, or two calls with the
+        same arguments whose results differ. The calls are made at a few
+        points of the claim's domain (`_witness_points`), and the sketch
+        names the point and what was seen.
+
+    Notes:
+        The function is run only when its examination read everything
+        and found no write other than to module-level values of its
+        project and draws from the shared random generator, so that the
+        calls change nothing else. A call that raises is no witness.
+    """
+    import copy
+    import sys
+
+    from ._examine import examine
+    from .claim_families import _generator_parameter
+    from .gates import _fmt_point
+    from .runtime_types import calling
+    from .symbolic._proof_support import ProofResult
+    kind = getattr(ctx.family, "_base_name", None)
+    if kind not in ("is_state_safe", "is_deterministic"):
+        return None
+    effects = examine(fn, _generator_parameter(fn, facts)
+                      if kind == "is_state_safe" else None)
+    if effects.unknowns or effects.unknown_writes or not all(
+            "module-level" in site.text
+            or "the shared random generator" in site.text
+            for site in effects.writes):
+        return None
+    cj_domain = ctx.cj_domain or {}
+    names = list(facts.params)
+
+    def held():
+        out = {}
+        for module, name in sorted(effects.module_writes):
+            try:
+                out[(module, name)] = copy.deepcopy(
+                    getattr(sys.modules[module], name))
+            except Exception:
+                return None
+        return out
+
+    run = calling(fn, facts, _declared_elements(cj_domain))
+    for point in _witness_points(facts, cj_domain):
+        args = [point[p] for p in names]
+        where = _fmt_point(point, names) or "the call with no arguments"
+        try:
+            if kind == "is_state_safe":
+                before = held()
+                if not before:
+                    return None
+                run(*copy.deepcopy(args))
+                after = held()
+                if after is None:
+                    return None
+                changed = [k for k in before if _differs(before[k], after[k])]
+                if not changed:
+                    continue
+                _module, name = changed[0]
+                seen = (f"the call at {where} was run, and the module-level "  # :draft
+                        f"{name} was {_short(before[changed[0]])} before it "
+                        f"and {_short(after[changed[0]])} after it")
+            else:
+                first = run(*copy.deepcopy(args))
+                second = run(*copy.deepcopy(args))
+                if not _differs(first, second):
+                    continue
+                seen = (f"two calls at {where} were run, and returned "  # :draft
+                        f"{_short(first)} and {_short(second)}")
+        except Exception:
+            continue
+        return ProofResult(
+            "proven",
+            sketch=f"proven by a witness: {seen}",  # :draft
+            meta={"mathema.corroboration": "reproduced",
+                  "mathema.witness_executed": True})
+    return None
+
+
+def _differs(a, b) -> bool:
+    """Whether two values are seen to differ: unequal, and not both the
+    same not-a-number. A comparison that raises or gives no plain truth
+    value shows no difference."""
+    try:
+        if isinstance(a, float) and isinstance(b, float) \
+                and a != a and b != b:
+            return False
+        return bool(a != b)
+    except Exception:
+        return False
+
+
+def _short(value, limit: int = 60) -> str:
+    """`repr(value)`, cut to `limit` characters."""
+    text = repr(value)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
 def _provenance_meta(proof) -> dict:
     """Intent:
         The proof-mechanism provenance worth carrying onto the output
@@ -10717,7 +10856,8 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
                                   "the positive claim is proven, so its "
                                   "negation is falsified: " + (proof.sketch or ""))
         elif proof.status == "disproven" and not _executed_disproof(proof):
-            proof = _unexecuted_negation(proof)
+            proof = (_negation_witnessed(ctx, fn, facts)
+                     or _unexecuted_negation(proof))
         elif proof.status == "disproven":
             proof = replace_proof(proof, "proven",
                                   "the positive claim is falsified, and that "
