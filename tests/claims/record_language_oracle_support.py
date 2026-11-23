@@ -424,7 +424,7 @@ def a_text_node_holds_the_texts_of_its_language(v: int) -> bool:
     """Whether value `v` is in each text node of the catalogue exactly
     when it is a text the regular term's own matcher holds."""
     rl, regular, value = _rl(), importlib.import_module("mathema.regular"), VALUES[int(v)]
-    return all(rl.member(text(n), value) == (isinstance(value, str) and regular.node_member(n, value))
+    return all(rl.member(text(n), value) == (isinstance(value, str) and regular.contains(n, value))
                for n in (_lit("a"), DOLLAR, SHALLOW, DEEP))
 
 
