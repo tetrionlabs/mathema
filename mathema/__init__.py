@@ -321,12 +321,12 @@ class Record:
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
-                # each definition the proof rests on, with its status
-                # as read
+                # a definition the proof rests on whose corroboration
+                # record does not show every value compared and agreeing
                 for assumed in ((p.meta or {}).get("mathema.assumptions") or {}).get(
                         "definitions") or ():
-                    if isinstance(assumed, dict):
-                        from .domain_relations import assumption_status
+                    from .domain_relations import agreed_on_every_value, assumption_status
+                    if isinstance(assumed, dict) and not agreed_on_every_value(assumed):
                         line += (f"\n           assuming {assumed.get('statement')} "  # :draft
                                  f"({assumption_status(assumed)})")
             else:

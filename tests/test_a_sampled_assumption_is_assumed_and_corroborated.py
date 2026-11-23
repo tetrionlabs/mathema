@@ -7,8 +7,9 @@ the status `assumed`, and carries a `corroboration` record: how many
 values were drawn, compared and skipped, how many disagreed, the seed
 and caps of the run, and its outcome, beside its `axiom`: the statement and a stable id.
 The proof outline of a row says `assuming <statement> (assumed)` for
-each definition, and the printed record says the same under a proven
-row. A stored assumption with the earlier status `checked` reads as
+each definition. The printed record says it under a proven row only for
+a definition whose corroboration record shows a skipped value or no
+value compared. A stored assumption with the earlier status `checked` reads as
 `assumed` with no corroboration record."""
 import pytest
 
@@ -125,13 +126,39 @@ def test_the_axiom_id_follows_the_statement_and_the_term():
     assert one != domain_relations.axiom_id("L[x] == its stated definition", other, other)
 
 
-def test_a_proven_row_prints_each_definition_it_assumes():
+def test_a_definition_that_agreed_on_every_value_prints_no_line():
+    record = mathema.check(_same, claims=["L[overab] subset L[overab]"])
+    (row,) = record.probes
+    (entry,) = row.meta["mathema.assumptions"]["definitions"]
+    assert entry["corroboration"]["values skipped"] == 0
+    assert domain_relations.agreed_on_every_value(entry)
+    assert str(record).split("\n")[1:] == [
+        "  proven    L_overab_subset_L_overab: L[overab] subset L[overab]"]
+
+
+def test_a_definition_with_a_skipped_value_prints_its_line():
     record = mathema.check(_same, claims=["L[overab] subset L[partial]"])
-    lines = str(record).split("\n")[1:]
-    assert lines == [
+    (row,) = record.probes
+    stated = {a["language"]: a for a in row.meta["mathema.assumptions"]["definitions"]}
+    assert stated["L[partial]"]["corroboration"]["values skipped"] > 0
+    assert not domain_relations.agreed_on_every_value(stated["L[partial]"])
+    assert str(record).split("\n")[1:] == [
         "  proven    L_overab_subset_L_partial: L[overab] subset L[partial]",
-        "           assuming L[overab] == its stated definition (assumed)",
-        "           assuming L[partial] == its stated definition (assumed)"], lines
+        "           assuming L[partial] == its stated definition (assumed)"]
+
+
+@pytest.mark.parametrize("record,agreed", [
+    ({"values compared": 5, "values skipped": 0, "disagreed": 0}, True),
+    ({"values compared": 5, "values skipped": 1, "disagreed": 0}, False),
+    ({"values compared": 0, "values skipped": 0, "disagreed": 0}, False),
+    ({"values compared": 5, "values skipped": 0, "disagreed": 1}, False),
+    (None, False)])
+def test_the_line_is_decided_by_the_corroboration_record(record, agreed):
+    entry = {"statement": "L[x] == its stated definition", "status": "assumed"}
+    if record is not None:
+        entry["corroboration"] = record
+    assert domain_relations.agreed_on_every_value(entry) is agreed
+    assert domain_relations.agreed_on_every_value({**entry, "status": "checked"}) is agreed
 
 
 def test_a_stored_assumption_with_the_status_checked_reads_as_assumed():

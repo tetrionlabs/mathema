@@ -910,6 +910,19 @@ def corroboration_record(compared: int, skipped: int, seed: "int | None", *,
 _STORED_AS_CHECKED = "checked"
 
 
+def agreed_on_every_value(assumption: dict) -> bool:
+    """Intent:
+        Whether an assumption's corroboration record shows a run in
+        which at least one value was compared, none disagreed and none
+        was skipped. False for an assumption with no corroboration
+        record. It says how the run went, and nothing about whether
+        the assumption holds.
+    """
+    record = assumption.get("corroboration")
+    return (isinstance(record, dict) and bool(record.get("values compared"))
+            and record.get("disagreed") == 0 and record.get("values skipped") == 0)
+
+
 def assumption_status(assumption: dict) -> "str | None":
     """Intent:
         The status of an assumption as it is read: `assumed` or
@@ -1234,7 +1247,7 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
-           "RELATION", "Relation", "Statement", "Term", "WORDS", "assuming_text",
+           "RELATION", "Relation", "Statement", "Term", "WORDS", "agreed_on_every_value", "assuming_text",
            "assumption_status", "axiom_id", "corroboration_record",
            "check_definition", "check_definitions", "check_holds_only_texts", "decide",
            "not_as_written",
