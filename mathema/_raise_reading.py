@@ -896,20 +896,37 @@ def _imported(node: ast.AST, ns: "_Namespace") -> "dict | None":
     return None
 
 
-def _cause_is_read(node: ast.AST, ns: "_Namespace") -> bool:
+def _real_mro(cls) -> tuple:
+    """Intent:
+        The classes the class `cls` really inherits from, itself first, read
+        from the type and never from an attribute the class or its metaclass
+        defines under the name `__mro__`.
+    """
+    return type.__dict__["__mro__"].__get__(cls)
+
+
+def _cause_is_read(node: ast.AST, ns: "_Namespace") -> bool:  # :draft
     """Intent:
         Whether evaluating the cause of `raise E from <node>` and attaching
         it cannot fail: `node` is a bare name or a module's attribute that
         resolves where the function is defined to an exception instance, or
         to an exception class that `raise` builds with no argument and whose
         construction from no argument is read (`constructor_refusal`).
+
+    Notes:
+        `raise ... from` accepts a cause by its real type, so the instance
+        and the class are each judged by `type(...)` and the classes that
+        type really inherits from. An object that only names an exception
+        class as its `__class__` is no exception, and Python refuses it
+        with a TypeError.
     """
     if not isinstance(node, (ast.Name, ast.Attribute)):
         return False
     found = ns.resolve(node)
-    if isinstance(found, BaseException):
+    kind = type(found)
+    if BaseException in _real_mro(kind):
         return True
-    return isinstance(found, type) and issubclass(found, BaseException) \
+    return type in _real_mro(kind) and BaseException in _real_mro(found) \
         and constructor_refusal(found, 0, []) is None
 
 
