@@ -6909,6 +6909,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             try:
                 raw = _adjudicate_probe(ctx, fn, facts, kinds, _sampling)
                 probed = _arbitrate_empirical_fallback(raw, ctx)
+                if probed.verdict == "holds":
+                    probed = _probe_with_listed_sentinels(
+                        probed, _listed_sentinels_fail(
+                            ctx, fn, facts, ctx.cj_domain, _bound_callables(ctx.cj),
+                            ctx.assumption or [], ctx.statement, ctx.note))
             except ReceiverRefused as refused:
                 probed = Probe(cj.name, ctx.statement, "skipped", route="probe",
                                note=f"{ctx.note}; no evaluable inputs: "
@@ -9812,6 +9817,31 @@ def _without_listed(bound, words: list):
         if not _is_enumerated(out):
             out = replace(out, excluded=out.excluded | {ABSENT})
     return out
+
+
+def _probe_with_listed_sentinels(probed: "Probe", listed: "Probe | None") -> "Probe":
+    """Intent:
+        A probe's holds with its named missing values judged
+        (`_listed_sentinels_fail`) as a proof's are: falsified, on the
+        probe route, at a listed point that fails or whose result its
+        return type does not admit; else the holds carrying the
+        outcome's meta (the values left out of the printed domain among
+        it) and its note. The verdict is never raised above holds.
+    """
+    if listed is None:
+        return probed
+    if listed.verdict == "falsified":
+        said = (listed.sketch or "").replace("the real members are proven, and ", "")
+        return Probe(probed.name, probed.statement, "falsified", route="probe",
+                     counterexample=listed.counterexample,
+                     note=f"{probed.note or ''}; {said}".lstrip("; "),
+                     meta={**(probed.meta or {}), **(listed.meta or {})})
+    probed.meta = {**(probed.meta or {}), **(listed.meta or {})}
+    note = (listed.note or "").replace("the real points were derived; ", "") \
+        .replace("the relation was derived over the real points; ", "")
+    if note:
+        probed.note = f"{probed.note or ''}; {note}"
+    return probed
 
 
 def _with_listed_sentinels(proven: "Probe", listed: "Probe | None") -> "Probe":

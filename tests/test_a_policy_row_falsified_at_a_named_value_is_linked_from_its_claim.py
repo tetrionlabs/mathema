@@ -8,6 +8,8 @@ restated domain, its note points at the policy row, the policy row is
 falsified, and the mathematics row carries a structured link to it."""
 from typing import Optional
 
+import pytest
+
 import mathema
 from mathema.conjecture import claim
 
@@ -18,6 +20,8 @@ def scaled(x: Optional[float], y: float) -> float:
     return (x - 1) * y
 
 
+@pytest.mark.needs_smt
+@pytest.mark.needs_full_proof_budget
 def test_an_uncovered_raise_links_the_claim_to_its_falsified_policy_row():
     rec = mathema.check(scaled, claims=[claim(TEXT, name="c")])
     rows = {p.name: p for p in rec.probes}

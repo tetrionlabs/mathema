@@ -9,6 +9,8 @@ it admits is left to the policy row."""
 import math
 from typing import Optional
 
+import pytest
+
 from mathema.conjecture import check_conjectures, claim
 
 TEXT = "for x in {1, None}, y in [0, 1], f(x, y) == 0"
@@ -41,6 +43,8 @@ def _row(fn, text):
     return row
 
 
+@pytest.mark.needs_smt
+@pytest.mark.needs_full_proof_budget
 def test_none_under_a_float_return_falsifies():
     row = _row(none_under_float, TEXT)
     assert row.verdict == "falsified", (row.verdict, row.route, row.note)
@@ -48,6 +52,8 @@ def test_none_under_a_float_return_falsifies():
     assert "return type float does not admit" in (row.sketch or ""), row.sketch
 
 
+@pytest.mark.needs_smt
+@pytest.mark.needs_full_proof_budget
 def test_none_under_an_optional_return_leaves_the_point_out():
     row = _row(none_under_optional, TEXT)
     assert row.verdict == "proven", (row.verdict, row.route, row.note)
@@ -56,6 +62,8 @@ def test_none_under_an_optional_return_leaves_the_point_out():
         row.note
 
 
+@pytest.mark.needs_smt
+@pytest.mark.needs_full_proof_budget
 def test_none_with_no_return_annotation_leaves_the_point_out():
     row = _row(none_unannotated, TEXT)
     assert row.verdict == "proven", (row.verdict, row.route, row.note)
