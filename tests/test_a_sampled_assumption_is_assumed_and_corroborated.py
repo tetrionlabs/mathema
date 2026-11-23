@@ -5,10 +5,11 @@ definition, a reading of a validator, or `holds only texts`, compared
 with a language's own membership on drawn and enumerated values, has
 the status `assumed`, and carries a `corroboration` record: how many
 values were drawn, compared and skipped, how many disagreed, the seed
-and caps of the run, and its outcome. A proven row prints each
-assumption it rests on with that corroboration beside it. A stored
-assumption with the earlier status `checked` reads as `assumed` with no
-corroboration record."""
+and caps of the run, and its outcome, beside its `axiom`: the statement and a stable id.
+The proof outline of a row says `assuming <statement> (assumed)` for
+each definition, and the printed record says the same under a proven
+row. A stored assumption with the earlier status `checked` reads as
+`assumed` with no corroboration record."""
 import pytest
 
 import _text_validators as T
@@ -102,23 +103,35 @@ def test_no_assumption_of_a_proven_row_is_checked():
     assert row.sketch.endswith("proven, assuming L[overab] == its stated definition (assumed)")
 
 
-def test_a_proven_row_prints_each_sampled_assumption_it_rests_on():
-    record = mathema.check(_same, claims=["L[overab] subset L[overab]"])
-    printed = str(record)
-    assert "proven" in printed, printed
-    compared = _checked("overab")["corroboration"]["values compared"]
-    assert (f"assuming L[overab] == its stated definition (assumed); corroborated: "
-            f"{compared} draws against contains, none disagreed") in printed, printed
-    assert "assuming L[overab] holds only texts (assumed); corroborated: " in printed, printed
-    assert "(checked)" not in printed, printed
+def test_each_assumption_carries_its_axiom():
+    (row,) = mathema.check(_same, claims=["L[overab] subset L[partial]"]).probes
+    assumptions = row.meta["mathema.assumptions"]
+    entries = [*assumptions["definitions"], *assumptions["texts"]]
+    assert len(entries) == 4
+    for entry in entries:
+        assert entry["axiom"]["statement"] == entry["statement"]
+        assert entry["axiom"]["id"] == domain_relations.axiom_id(
+            entry["statement"], S.AB_STAR["language"], S.AB_STAR["language"])
+        assert entry["axiom"]["id"].startswith("ax-") and len(entry["axiom"]["id"]) == 19
+    assert len({entry["axiom"]["id"] for entry in entries}) == 4
 
 
-def test_the_printed_corroboration_says_what_was_skipped():
-    printed = str(mathema.check(_same, claims=["L[overab] subset L[partial]"]))
-    record = _checked("partial")["corroboration"]
-    assert (f"assuming L[partial] == its stated definition (assumed); corroborated: "
-            f"{record['values compared']} draws against contains, none disagreed, "
-            f"{record['values skipped']} skipped where contains raised") in printed, printed
+def test_the_axiom_id_follows_the_statement_and_the_term():
+    star = S.AB_STAR["language"]
+    other = S.LOWER_UP_TO_SIX["language"]
+    one = domain_relations.axiom_id("L[x] == its stated definition", star, star)
+    assert one == domain_relations.axiom_id("L[x] == its stated definition", star, star)
+    assert one != domain_relations.axiom_id("L[y] == its stated definition", star, star)
+    assert one != domain_relations.axiom_id("L[x] == its stated definition", other, other)
+
+
+def test_a_proven_row_prints_each_definition_it_assumes():
+    record = mathema.check(_same, claims=["L[overab] subset L[partial]"])
+    lines = str(record).split("\n")[1:]
+    assert lines == [
+        "  proven    L_overab_subset_L_partial: L[overab] subset L[partial]",
+        "           assuming L[overab] == its stated definition (assumed)",
+        "           assuming L[partial] == its stated definition (assumed)"], lines
 
 
 def test_a_stored_assumption_with_the_status_checked_reads_as_assumed():
@@ -130,9 +143,8 @@ def test_a_stored_assumption_with_the_status_checked_reads_as_assumed():
                                                     "texts": []}}
     printed = str(record)
     assert "assuming L[overab] == its stated definition (assumed)" in printed, printed
-    assert "corroborated" not in printed and "(checked)" not in printed, printed
+    assert "(checked)" not in printed, printed
     assert domain_relations.assumption_status(stored) == "assumed"
     assert domain_relations.assuming_text([stored]) == \
         "proven, assuming L[overab] == its stated definition (assumed)"
-    assert domain_relations.corroboration_text(stored) is None
-    assert stored["status"] == "checked"
+    assert stored["status"] == "checked" and "corroboration" not in stored

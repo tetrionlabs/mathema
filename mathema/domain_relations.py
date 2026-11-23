@@ -752,7 +752,7 @@ def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
     import random
 
     from . import regular
-    atoms = regular.representatives([at_most, at_least], alphabet or None)
+    atoms = regular._representatives([at_most, at_least], alphabet or None)
     bound, total = 0, 1
     while atoms and bound < 6 and total + len(atoms) ** (bound + 1) <= GUARD_ENUMERATED:
         bound += 1
@@ -803,7 +803,8 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
         term, so the term and `contains` must agree on every string;
         for a pair the membership must lie between them. Returns the
         assumption a verdict rests on: the `statement` (`<text> == its
-        stated definition`), its `status`, the `corroboration` record
+        stated definition`), its `axiom` (the statement and its id,
+        `axiom_id`), its `status`, the `corroboration` record
         (`corroboration_record`), and the `artefact` to run it
         again (the seed, the members drawn, the length bound, the
         number of atoms, the number of strings compared and skipped,
@@ -821,8 +822,9 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
     """
     from . import regular
     seed = _guard_seed(text)
-    out = {"language": text, "statement": f"{text} == its stated definition",  # :draft
-           "status": "assumed", "artefact": {"seed": seed}}
+    out = _with_axiom(
+        {"language": text, "statement": f"{text} == its stated definition",  # :draft
+         "status": "assumed", "artefact": {"seed": seed}}, at_most, at_least)
     strings, drawn, bound, atoms = _guard_strings(language, at_most, at_least, alphabet,
                                                   seed, literals)
     in_most, in_least = regular.matcher(at_most), regular.matcher(at_least)
@@ -853,6 +855,33 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
         compared, len(skipped), seed, draws=GUARD_DRAWS,
         **{"enumerated cap": GUARD_ENUMERATED, "near misses cap": GUARD_NEAR_MISSES})
     return out
+
+
+def axiom_id(statement: str, *terms) -> str:
+    """Intent:
+        A stable id for an assumption a verdict rests on: `ax-` and the
+        first sixteen hex digits of the SHA-256 of the assumption's
+        statement and, each after a line break, the canonical text of
+        every regular-language node in `terms` it is about
+        (`regular.canonical`, as JSON with sorted keys and no white
+        space). The same
+        statement about the same terms has the same id on any machine.
+    """
+    import hashlib
+    import json
+
+    from . import regular
+    parts = [statement, *(json.dumps(regular.canonical(t), sort_keys=True, ensure_ascii=True,
+                                     separators=(",", ":"))
+                          for t in terms)]
+    return "ax-" + hashlib.sha256("\n".join(parts).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def _with_axiom(entry: dict, *terms) -> dict:
+    """The assumption `entry` carrying its `axiom`: the statement and
+    its id over `terms` (`axiom_id`)."""
+    return {**entry, "axiom": {"statement": entry["statement"],  # :draft
+                               "id": axiom_id(entry["statement"], *terms)}}
 
 
 def corroboration_record(compared: int, skipped: int, seed: "int | None", *,
@@ -889,26 +918,6 @@ def assumption_status(assumption: dict) -> "str | None":
     """
     status = assumption.get("status")
     return "assumed" if status == _STORED_AS_CHECKED else status
-
-
-def corroboration_text(assumption: dict) -> "str | None":
-    """Intent:
-        The corroboration of one assumption in words: how many values
-        were compared against the language's own `contains`, that none
-        disagreed, and how many were skipped because it raised. None
-        for an assumption that carries no corroboration record.
-    """
-    record = assumption.get("corroboration")
-    if not isinstance(record, dict):
-        return None
-    if not record.get("values compared"):
-        said = "not corroborated: no value was compared"  # :draft
-    else:
-        said = (f"corroborated: {record['values compared']} draws "  # :draft
-                f"against contains, none disagreed")
-    if record.get("values skipped"):
-        said += f", {record['values skipped']} skipped where contains raised"  # :draft
-    return said
 
 
 def _is_member(language, value) -> bool:
@@ -951,14 +960,14 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
         that is not a text is not what its definition states. Each
         language is asked about its own hazard values that are not
         texts and about `NOT_TEXTS`. An assumption is `<text> holds only
-        texts`, `assumed` with the corroboration record of the values
+        texts`, with its `axiom`, `assumed` with the corroboration record of the values
         run (`corroboration_record`), or `refuted`; the disagreement
         names the first value admitted, or is None.
     """
     seen: dict = {}
     refuted = None
     for domain in defined:
-        for text, language, _, _ in domain.read:
+        for text, language, most, least in domain.read:
             if text in seen:
                 continue
             values: list = []
@@ -975,8 +984,9 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
                         admitted.append(value)
                 except Exception:
                     raised += 1
-            entry = {"language": text, "statement": f"{text} holds only texts",  # :draft
-                     "status": "assumed", "artefact": {"values run": len(values)}}
+            entry = _with_axiom(
+                {"language": text, "statement": f"{text} holds only texts",  # :draft
+                 "status": "assumed", "artefact": {"values run": len(values)}}, most, least)
             if admitted:
                 entry["status"] = "refuted"
                 entry["disagreement"] = (f"{admitted[0]!r} is a member of {text}, and a "
@@ -1064,7 +1074,7 @@ def _decide_languages(rel: Relation) -> Decision:
             if found.status != "member":
                 continue
             member = found.member
-            if not regular.places(member, *question):
+            if not regular._places(member, *question):
                 # the matcher reads the solver's string otherwise than
                 # the solver did, so the string settles nothing
                 why = why or UNCONFIRMED
@@ -1225,7 +1235,7 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
            "RELATION", "Relation", "Statement", "Term", "WORDS", "assuming_text",
-           "assumption_status", "corroboration_record", "corroboration_text",
+           "assumption_status", "axiom_id", "corroboration_record",
            "check_definition", "check_definitions", "check_holds_only_texts", "decide",
            "not_as_written",
            "standard_assumptions",

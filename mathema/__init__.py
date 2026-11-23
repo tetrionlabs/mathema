@@ -321,19 +321,14 @@ class Record:
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
-                # each assumption the proof rests on, with the
-                # corroboration of it when values were compared
-                rests_on = (p.meta or {}).get("mathema.assumptions") or {}
-                for assumed in (*(rests_on.get("definitions") or ()),
-                                *(rests_on.get("texts") or ())):
-                    if not isinstance(assumed, dict):
-                        continue
-                    from .domain_relations import assumption_status, corroboration_text
-                    line += (f"\n           assuming {assumed.get('statement')} "  # :draft
-                             f"({assumption_status(assumed)})")
-                    corroborated = corroboration_text(assumed)
-                    if corroborated:
-                        line += f"; {corroborated}"  # :draft
+                # each definition the proof rests on, with its status
+                # as read
+                for assumed in ((p.meta or {}).get("mathema.assumptions") or {}).get(
+                        "definitions") or ():
+                    if isinstance(assumed, dict):
+                        from .domain_relations import assumption_status
+                        line += (f"\n           assuming {assumed.get('statement')} "  # :draft
+                                 f"({assumption_status(assumed)})")
             else:
                 shown = p.statement
                 if (p.condition or "").startswith("let |inf| be ") \

@@ -11084,7 +11084,9 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
         (returned unchanged, or True,
         for an accepted text; the validator's own exception, or False,
         for a refused one). Returns the assumption the proof rests on,
-        as `domain_relations.check_definition` does: `assumed`, with
+        as `domain_relations.check_definition` does, with its `axiom`
+        (the id taken over the definitions of the parameter's
+        languages): `assumed`, with
         the corroboration record of the texts run and of those skipped
         because a language's `contains` raised on them (the artefact
         names the skipped texts), or `refuted` with the
@@ -11098,10 +11100,12 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
     text = stated if isinstance(stated, str) else repr(stated)
     seed = domain_relations._guard_seed(f"reading of {text}")
     rng = random.Random(seed)
-    out = {"language": text,
-           "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "  # :draft
-                        f"is in {text}",
-           "status": "assumed", "artefact": {"seed": seed, "texts run": 0}}
+    out = domain_relations._with_axiom(
+        {"language": text,
+         "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "  # :draft
+                      f"is in {text}",
+         "status": "assumed", "artefact": {"seed": seed, "texts run": 0}},
+        *(node for _, _, most, least in domain.read for node in (most, least)))
     try:
         accepted_language = over if over is not None else resolve_language(stated)
     except Exception:
@@ -11336,7 +11340,7 @@ def _validator_proof(cj, fn, cj_domain):
             why = why or "the definitions do not settle where the function is defined"  # :draft
             continue
         text = found.member
-        if not regular.places(text, inside, outside):
+        if not regular._places(text, inside, outside):
             why = why or domain_relations.UNCONFIRMED
             continue
         value = text[len(prefix):len(text) - len(suffix)]
