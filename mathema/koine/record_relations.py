@@ -117,7 +117,8 @@ def decide(word: str, left, right, *, timeout_ms: int = 5000) -> Decision:
         if narrowest != widest:
             found = solver_question.find_member(*narrowest, timeout_ms=timeout_ms)
         if found.status == "member":
-            return Decision(breaks, f"a value breaks {universal}", {"value": found.member})
+            said = f"a value breaks {universal}" + (f"; {found.reason}" if found.reason else "")
+            return Decision(breaks, said, {"value": found.member})
         why = why or found.reason or ("the bounds of a definition that is not exact leave "
                                       "the relation open")
     if none_breaks:
