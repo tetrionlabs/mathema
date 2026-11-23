@@ -149,11 +149,10 @@ def test_a_write_in_a_branch_the_domain_reaches_carries_no_dead_branch_note():
     assert "cannot run" not in p.counterexample, p.counterexample
 
 
-def test_the_else_of_a_branch_the_domain_always_takes_is_named_as_dead():
+def test_the_else_a_missing_value_takes_is_reachable():
     p = _row(ex.dead_else, "for x in [0, 5], is_state_safe(f)")
     assert p.verdict == "falsified"
-    assert "not (x < 10) never holds there" in p.counterexample, \
-        p.counterexample
+    assert "unreachable" not in p.counterexample, p.counterexample
 
 
 def test_a_helper_filling_a_list_the_call_made_is_no_write():
