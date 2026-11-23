@@ -100,7 +100,7 @@ def _holds(node: dict, value) -> bool:
     if op == "choice":
         return _scalar_key(value) in [_scalar_key(v) for v in node["values"]]
     if op == "text":
-        return isinstance(value, str) and regular.node_member(node["language"], value)
+        return isinstance(value, str) and regular.contains(node["language"], value)
     if op == "complement":
         return not _holds(node["arg"], value)
     if op == "union":
