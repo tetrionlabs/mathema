@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright 2026 Tetrion Ltd
 """The canonical text of a claim keeps a missing value its author named.
-A union beside an interval stays a union (`[0.0, 1.0] | {None}`,
+A union beside an interval stays a union (`[0.0, 1.0] | {absent}`,
 `[0.0, 1.0] | {nan}`), a named type keeps only what was written beside
 it (`R|absent`), a set keeps its members and a type clause that differs
 from the default stays as written. Read back, from the text or from a
@@ -82,19 +82,19 @@ def _fingerprint(domain: str, fn=None) -> str:
 
 # what the author wrote, and its canonical text read without a function
 NAMED = [
-    ("[0, 1] | {None}", "[0.0, 1.0] | {None}"),
-    ("[0, 1] | {absent}", "[0.0, 1.0] | {None}"),
-    ("[0,1]|None", "[0.0, 1.0] | {None}"),
+    ("[0, 1] | {None}", "[0.0, 1.0] | {absent}"),
+    ("[0, 1] | {absent}", "[0.0, 1.0] | {absent}"),
+    ("[0,1]|None", "[0.0, 1.0] | {absent}"),
     ("[0, 1] | {nan}", "[0.0, 1.0] | {nan}"),
     ("[0,1]|nan", "[0.0, 1.0] | {nan}"),
     ("[0, 1] | {missing}", "[0.0, 1.0] | {missing}"),
-    ("[0, 1] | {None, nan}", "[0.0, 1.0] | {None, nan}"),
-    ("[0, 1] | {None, missing}", "[0.0, 1.0] | {None, missing}"),
-    ("(0, 1] | {None}", "(0.0, 1.0] | {None}"),
-    ("[0, inf) | {None}", "[0.0, inf) | {None}"),
+    ("[0, 1] | {None, nan}", "[0.0, 1.0] | {absent, nan}"),
+    ("[0, 1] | {None, missing}", "[0.0, 1.0] | {absent, missing}"),
+    ("(0, 1] | {None}", "(0.0, 1.0] | {absent}"),
+    ("[0, inf) | {None}", "[0.0, inf) | {absent}"),
     ("[0, 1] | [2, 3] | {nan}", "[0.0, 1.0] | [2.0, 3.0] | {nan}"),
-    ("[0, 1] \\ {0.5} | {None}", "[0.0, 1.0] \\ {0.5} | {None}"),
-    ("[0, 1] | {0.5, None}", "[0.0, 1.0] | {0.5} | {None}"),
+    ("[0, 1] \\ {0.5} | {None}", "[0.0, 1.0] \\ {0.5} | {absent}"),
+    ("[0, 1] | {0.5, None}", "[0.0, 1.0] | {0.5} | {absent}"),
     ("[0, 1] : float|absent", "[0.0, 1.0] : float|absent"),
     ("[0, 1] : float|nan", "[0.0, 1.0] : float|nan"),
     ("[0, 1] : float|absent|nan", "[0.0, 1.0] : float|absent|nan"),
@@ -134,6 +134,16 @@ def test_a_displayed_claim_reads_back_as_the_domain_that_was_written(
     shown = render_claim_text(cj, unicode=unicode)
     assert claim(shown).domain == cj.domain, shown
     assert canonical_claim_text(claim(shown)) == canonical_claim_text(cj)
+
+
+@pytest.mark.parametrize("written, text, digest", [
+    ("[0, 1] | {None}", "[0.0, 1.0] | {absent}", "a87ea5985529"),
+    ("[0, 1] | {nan}", "[0.0, 1.0] | {nan}", "c3d97f2d0b76"),
+    ("[0, 1] | {missing}", "[0.0, 1.0] | {missing}", "e251b751d124"),
+    ("[0, 1]", "[0.0, 1.0] : float|absent|missing", "bc746253295f"),
+])
+def test_a_named_value_has_the_text_and_fingerprint_pinned_here(written, text, digest):
+    assert (_canonical(written), _fingerprint(written)) == (text, digest)
 
 
 @pytest.mark.parametrize("fn", FUNCTIONS, ids=FUNCTION_IDS)

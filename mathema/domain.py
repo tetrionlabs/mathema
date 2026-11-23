@@ -2216,15 +2216,6 @@ def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> 
     return s.member
 
 
-def _named_word(s: "_Sentinel", *, ascii_mode: bool) -> str:  # :draft
-    """A missing value in a union beside an interval (`[0.0, 1.0] |
-    {None}`): the object's absence as `None`, a hole as the grammar
-    spells it."""
-    if s == ABSENT:
-        return "None"
-    return _sentinel_word(s, ascii_mode=ascii_mode)
-
-
 def _ordered_sentinels(absent: bool, holes) -> list:
     """Admitted sentinels in the fixed rendering order: absence, the
     class, then members alphabetically."""
@@ -2322,7 +2313,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     language's member does. `defaults` fills a kind the domain does not
     state (`NO_ANNOTATION` when not given). A missing value the text
     named beside an interval or a named type (`named_beside`) renders as
-    written, `[0.0, 1.0] | {None}`, `R|nan`, with no type clause and
+    written, `[0.0, 1.0] | {absent}`, `R|nan`, with no type clause and
     nothing filled in for a kind the text left unstated, so the text
     reads back as the domain that was written.
 
@@ -2391,7 +2382,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
         return (union_op.join(_render_piece(p, ascii_mode=ascii_mode, as_int=as_int)
                               for p in value_pieces)
                 + excluded_text() + union_op
-                + "{" + ", ".join(_named_word(s, ascii_mode=ascii_mode)
+                + "{" + ", ".join(_sentinel_word(s, ascii_mode=ascii_mode)
                                   for s in named) + "}")
     if named:
         ordered = list(named)
