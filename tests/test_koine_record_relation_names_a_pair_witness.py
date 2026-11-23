@@ -19,7 +19,7 @@ def _text(*codes):
 def test_a_witness_every_breaking_value_forces_to_hold_a_pair_is_said_to():
     decided = record_relations.decide("subset", _text(0xD83D, 0xDE00), _text(0x1F600))
     assert decided.verdict == "falsified"
-    assert decided.witness == {"value": "😀"}
+    assert decided.witness == {"value": "\ud83d\ude00"}
     assert solver_question.ONLY_PAIRS in decided.reason
 
 
