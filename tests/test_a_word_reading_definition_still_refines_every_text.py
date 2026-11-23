@@ -32,10 +32,15 @@ def _lower(s):
     return isinstance(s, str) and s != "" and all("a" <= c <= "z" for c in s)
 
 
-BY_OLD = StringLanguage("byold", level="predicate", accepts=_lower, pool="abc",
-                        generate=lambda rng: "".join(rng.choice("abc")
-                                                     for _ in range(rng.randint(1, 4))),
-                        schema={"definition": _exact(LOWER_NODE)})
+def _stating(name, key):
+    return StringLanguage(name, level="predicate", accepts=_lower, pool="abc",
+                          generate=lambda rng: "".join(rng.choice("abc")
+                                                       for _ in range(rng.randint(1, 4))),
+                          schema={key: _exact(LOWER_NODE)})
+
+
+#: the same language, stating its term under each key
+BASES = {"definition": _stating("byold", "definition"), "term": _stating("byterm", "term")}
 
 PAT = re.compile(r"[a-z]+")
 
@@ -66,25 +71,38 @@ def _refining(key):
 
 @pytest.fixture(params=["definition", "term"])
 def key(request):
-    register_language(BY_OLD.name, BY_OLD)
+    base = BASES[request.param]
+    register_language(base.name, base)
     register_predicate(PredicateWord("lowercase", _refining(request.param), reads_call=_reads))
     try:
         yield request.param
     finally:
         unregister_predicate("lowercase")
-        unregister_language(BY_OLD.name)
+        unregister_language(base.name)
 
 
-CLAIM = 'for s in L[byold], raises(f(s + "1"), ValueError)'
-_HASHES: dict = {}
+def _proven(key):
+    text = f'for s in L[{BASES[key].name}], raises(f(s + "1"), ValueError)'
+    (row,) = check_conjectures(check, [claim(text, route="derive")])
+    assert row.verdict == "proven", (key, row.verdict, row.note, row.sketch)
+    return sorted(row.meta["mathema.smt"]["definitions"].values())
 
 
 def test_text_added_around_the_variable_is_proven_through_either_key(key):
-    (row,) = check_conjectures(check, [claim(CLAIM, route="derive")])
-    assert row.verdict == "proven", (key, row.verdict, row.note, row.sketch)
-    _HASHES[key] = row.meta["mathema.smt"]["definitions"]
-    if len(_HASHES) == 2:
-        assert _HASHES["definition"] == _HASHES["term"]
+    assert _proven(key)
+
+
+def test_both_keys_prove_from_definitions_with_the_same_hashes():
+    hashes = {}
+    for key, base in BASES.items():
+        register_language(base.name, base)
+        register_predicate(PredicateWord("lowercase", _refining(key), reads_call=_reads))
+        try:
+            hashes[key] = _proven(key)
+        finally:
+            unregister_predicate("lowercase")
+            unregister_language(base.name)
+    assert hashes["definition"] == hashes["term"]
 
 
 def test_the_language_of_every_text_states_one_term_under_both_keys():
