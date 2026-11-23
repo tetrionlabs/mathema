@@ -36,20 +36,35 @@ def _row(fn, text):
     return next(r for r in rows if not r.name.endswith("[float]"))
 
 
-@pytest.mark.parametrize("fn", [never_writes, writes_past_ten,
-                                writes_past_a_half])
-@pytest.mark.parametrize("text", [
-    "for x in [0, 1], not is_state_safe(f)",
-    "for x in [0, 1], not is_deterministic(f)",
-    "not is_state_safe(f)",
-])
+WITNESSED = [
+    (writes_past_a_half, "for x in [0, 1], not is_state_safe(f)"),
+    (writes_past_a_half, "not is_state_safe(f)"),
+    (writes_past_ten, "not is_state_safe(f)"),
+]
+UNEXECUTED = [(fn, text)
+              for fn in (never_writes, writes_past_ten, writes_past_a_half)
+              for text in ("for x in [0, 1], not is_state_safe(f)",
+                           "for x in [0, 1], not is_deterministic(f)",
+                           "not is_state_safe(f)")
+              if (fn, text) not in WITNESSED]
+
+
+@pytest.mark.parametrize("fn, text", UNEXECUTED)
 def test_a_negation_read_from_an_unexecuted_line_is_not_proven(fn, text):
     p = _row(fn, text)
     assert p.verdict != "proven", (p.verdict, p.route, p.sketch)
 
 
+@pytest.mark.parametrize("fn, text", WITNESSED)
+def test_a_negation_is_proven_by_a_call_that_ran_and_wrote(fn, text):
+    p = _row(fn, text)
+    assert p.verdict == "proven", (p.verdict, p.route, p.sketch)
+    assert "proven by a witness: the call at x = " in p.sketch, p.sketch
+    assert "was run" in p.sketch and "_log" in p.sketch, p.sketch
+
+
 def test_the_negation_says_why_it_is_not_decided():
-    p = _row(writes_past_a_half, "for x in [0, 1], not is_state_safe(f)")
+    p = _row(writes_past_a_half, "for x in [0, 1], not is_deterministic(f)")
     assert p.verdict == "unknown", (p.verdict, p.route, p.sketch)
     assert "not executed" in (p.note or ""), p.note
 
