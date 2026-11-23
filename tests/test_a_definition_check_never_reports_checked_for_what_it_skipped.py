@@ -110,11 +110,13 @@ def test_a_definition_whose_membership_raised_on_a_string_is_not_checked(served)
 
 def test_a_proof_resting_on_a_skipping_check_does_not_say_checked(served):
     row = _row("L[overab] subset L[partial]")
-    if row.verdict == "proven":
-        stated = _definitions(row)
-        assert stated["L[partial]"]["status"] != "checked", stated
-        assert "L[partial] == its stated definition (checked)" not in row.sketch
-        assert stated["L[overab]"]["status"] == "assumed"
+    assert row.verdict == "proven", (row.verdict, row.note, row.sketch)
+    stated = _definitions(row)
+    assert stated["L[partial]"]["status"] == "assumed", stated
+    assert stated["L[partial]"]["corroboration"]["values skipped"] > 0, stated
+    assert "L[partial] == its stated definition (assumed)" not in row.sketch, row.sketch
+    assert "L[partial] == its stated definition (assumed, " in row.sketch, row.sketch
+    assert stated["L[overab]"]["status"] == "assumed"
     assert stated["L[overab]"]["corroboration"]["disagreed"] == 0
 
 
