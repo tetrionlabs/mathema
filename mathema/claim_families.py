@@ -1625,20 +1625,25 @@ def _examined_verdict(found: list, unread: list, clean: str,
                       effects=None, domain: dict | None = None):
     """Intent:
         The ProofResult of an examination: disproven at the first site
-        found (its sentence is the witness), undecided naming what could
-        not be read, proven otherwise, saying what the examination
-        established (`clean`). A site whose enclosing branch cannot run
-        anywhere in `domain` still disproves, and its witness says so.
+        found that is not in unreachable code (its sentence is the
+        witness), undecided naming what could not be read, proven
+        otherwise, saying what the examination established (`clean`)
+        and naming each site found in a branch proven unreachable over
+        `domain` (`_branch_unreachable_over`), with how it was shown.
     """
     from .symbolic import ProofResult
-    if found:
-        witness = found[0].text
-        guard = (effects.guards.get(found[0], ()) if effects is not None
+    reachable: list = []
+    unreachable: list = []
+    for site in found:
+        guard = (effects.guards.get(site, ()) if effects is not None
                  else ())
-        dead = _branch_dead_over(guard, domain)
-        if dead:
-            witness += (f"; the branch it sits in cannot run over the "
-                        f"domain ({dead} never holds there)")
+        why = _branch_unreachable_over(guard, domain)
+        if why is None:
+            reachable.append(site)
+        else:
+            unreachable.append((site, why))
+    if reachable:
+        witness = reachable[0].text
         return ProofResult("disproven", sketch=witness,
                            counterexample=witness)
     if unread:
@@ -1647,28 +1652,46 @@ def _examined_verdict(found: list, unread: list, clean: str,
     assumes = sorted(getattr(effects, "assumes", ()) or ())
     return ProofResult("proven", sketch=f"examined from its source: the "
                                         f"function {clean}" + "".join(
-                                            f"; it assumes {a}"
-                                            for a in assumes))
+                                            f"; the line where {site.text} "  # :draft
+                                            f"is unreachable code over the "
+                                            f"domain ({why})"
+                                            for site, why in unreachable)
+                       + "".join(f"; it assumes {a}" for a in assumes))
 
 
-def _branch_dead_over(guard: tuple, domain: dict | None) -> "str | None":
+def _branch_unreachable_over(guard: tuple, domain: dict | None) -> "str | None":
     """Intent:
-        The branch condition, of those in `guard` (pairs of a condition's
-        source and whether the branch is its body or its else), that no
-        point of `domain` satisfies, or None when none is shown to fail
-        everywhere. A condition counts only when it reads a single
-        parameter the domain bounds by an interval; any other is taken
-        as possibly true.
+        How the branch around a site is shown unreachable over `domain`,
+        or None when it is not. `guard` holds pairs of a condition's
+        source and whether the site is in its body (True) or its else
+        (False). The branch is unreachable when one condition is the
+        constant that never takes it, or when the condition reads a
+        single parameter the domain bounds by an interval, solved
+        exactly (`sympy.solveset`) to take it nowhere in the interval,
+        and evaluated at each missing value the bound admits without
+        taking it there either.
     Raises:
         Nothing: a condition sympy cannot read, or one whose solving
-        runs past the fast cap, is taken as possibly true.
+        runs past the fast cap, is not shown unreachable.
     """
-    if not guard or not domain:
-        return None
+    import ast as _ast
+
     import sympy
+
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    for source, taken in guard:
+    for source, taken in guard or ():
         shown = source if taken else f"not ({source})"
+        try:
+            constant = _ast.literal_eval(source)
+        except (ValueError, SyntaxError, TypeError):
+            pass
+        else:
+            if bool(constant) != taken:
+                return (f"its test `{source}` is the constant "  # :draft
+                        f"{constant!r}, so the branch never runs")
+            continue
+        if not domain:
+            continue
         try:
             condition = sympy.sympify(
                 source, locals={name: sympy.Symbol(name, real=True)
@@ -1694,9 +1717,41 @@ def _branch_dead_over(guard: tuple, domain: dict | None) -> "str | None":
                     c, x, sympy.Interval(a, b)), FAST_TIMEOUT_SECONDS)
         except Exception:
             continue
-        if found is sympy.S.EmptySet:
-            return shown
+        if found is not sympy.S.EmptySet:
+            continue
+        if _taken_at_a_missing_value(source, taken, name, bounds):
+            continue
+        return (f"`{shown}` holds nowhere in [{bounds[0]:g}, {bounds[1]:g}], "  # :draft
+                f"solved exactly, nor at a missing value the domain admits")
     return None
+
+
+def _taken_at_a_missing_value(source: str, taken: bool, name: str,
+                              bounds) -> bool:
+    """Intent:
+        Whether the branch condition `source` takes the branch (its
+        truth equal to `taken`) when `name` is one of the missing values
+        `bounds` admits (`domain.admitted`, each realised): `nan < 10`
+        is False, so the else of `x < 10` runs at nan. A condition that
+        raises at a value does not take the branch there; one whose
+        source cannot be compiled is taken.
+    """
+    from .domain import ABSENT, admitted, realise_sentinel
+    absent, holes = admitted(bounds)
+    values = [v for s in ([ABSENT] if absent else []) + list(holes)
+              for v in realise_sentinel(s)]
+    try:
+        code = compile(source, "<guard>", "eval")
+    except SyntaxError:
+        return True
+    for value in values:
+        try:
+            outcome = bool(eval(code, {"__builtins__": {}}, {name: value}))
+        except Exception:
+            continue
+        if outcome == taken:
+            return True
+    return False
 
 
 def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,

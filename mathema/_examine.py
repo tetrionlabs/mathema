@@ -130,10 +130,15 @@ class Effects:
         hidden read: the next call sees what this one left there."""
         for module, name, text in sorted(self.module_reads):
             if (module, name) in self.module_writes:
+                read = [u for u in self.unknowns if u.text == text]
                 self.unknowns = [u for u in self.unknowns if u.text != text]
+                # the hidden read sits where the value is read
+                around, self.branch = self.branch, (
+                    self.guards.get(read[0], ()) if read else ())
                 self.add(Site("hidden_read", text.replace(
                     ", a value other code can change",
                     ", which the call also changes")))
+                self.branch = around
 
 
 # --- the purity table --------------------------------------------------------

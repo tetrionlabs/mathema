@@ -25,6 +25,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `excluded_outside_domain(x)` is proven by construction only for a wrapper `enforce_domain` or `enforce_dimensions` built; a function that merely carries their attribute is decided by calls outside the domain.
 - A division by zero on the claim's own side that only the float evaluation makes (`exp(f(x)) / exp(f(x))` at x = -1e6, where exp underflows to 0.0) is no counterexample: read exactly the side has a value there, so the point is left undecided; a division by zero the claim states exactly still falsifies.
 - The safety gate (`is_missing_safe(f)`, `is_absent_safe(f)`) is no stronger than its weakest row: a stated policy row that only holds leaves the gate at holds; every row proven, from a stated row or a guard the body reads, still proves it.
+- A write or hidden read that sits only in unreachable code over the claim's domain (a constant-false test, or a test solved exactly to hold nowhere in the domain, missing values included) leaves `is_state_safe(f)` and `is_deterministic(f)` proven, the row naming the unreachable code; a write anywhere else falsifies as before.
 
 ## 0.6.6.1
 
