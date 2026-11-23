@@ -11910,8 +11910,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     exact_law = False
     cj_domain, family = ctx.cj_domain, ctx.family
+    from .symbolic._base import call_keywords
     from .symbolic._prove import suspended_call_refusal
-    suspended = suspended_call_refusal(fn)
+    with call_keywords(cj.lhs if cj.relation == "raises" else None):
+        suspended = suspended_call_refusal(fn)
     if suspended is not None:
         ctx.derive_undecided = Probe(
             cj.name, statement, "unknown", route="derive",
@@ -12335,7 +12337,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # unliftable from try_prove_raises itself, same as any
         # other undecidable derive claim.
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
-                                 domain=cj_domain)
+                                 domain=cj_domain,
+                                 bound_names=frozenset(bound_funcs or ()))
     else:
         exact_law = True
         with _lengths_scope(cj, family, facts):

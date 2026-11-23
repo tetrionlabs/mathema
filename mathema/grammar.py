@@ -2929,9 +2929,14 @@ def _node_to_sympy(node: ast.AST, funcs: frozenset = frozenset({"f"}),
                          _operand(node.right, node, funcs, matrix_names),
                          node)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
-        return _BINOPS[type(node.op)](
-            _operand(node.left, node, funcs, matrix_names),
-            _operand(node.right, node, funcs, matrix_names))
+        left = _operand(node.left, node, funcs, matrix_names)
+        right = _operand(node.right, node, funcs, matrix_names)
+        try:
+            return _BINOPS[type(node.op)](left, right)
+        except ZeroDivisionError:
+            # a remainder of numbers by zero (`1 % 0`) has no value to
+            # print: the operation is one atom, rendered as written
+            return _verbatim_atom(node)  # :draft
     if isinstance(node, ast.Call):
         fname = node.func.id if isinstance(node.func, ast.Name) else None
         arg_nodes = node.args

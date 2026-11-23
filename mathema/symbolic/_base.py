@@ -18,6 +18,7 @@ import contextlib
 import contextvars
 import inspect
 import dataclasses
+import types
 from dataclasses import dataclass, field
 
 import sympy
@@ -1433,6 +1434,34 @@ def call_suspends(fn) -> "str | None":
     return None
 
 
+_CALL_KEYWORDS: "contextvars.ContextVar[frozenset | None]" = contextvars.ContextVar(
+    "mathema_call_keywords", default=None)
+
+
+@contextlib.contextmanager
+def call_keywords(call_src: "str | None"):  # :draft
+    """Intent:
+        While the block runs, the wrapper readings know which keywords the
+        call `call_src` passes (`f(x, y=y)` passes `y`), so a wrapper that
+        keeps a keyword of its own is read for a call that does not pass
+        it. Nothing is known for None, for text that is not one call, and
+        for a call that unpacks a mapping (`f(**k)`).
+    """
+    known = None
+    if call_src is not None:
+        try:
+            call = ast.parse(call_src, mode="eval").body
+        except SyntaxError:
+            call = None
+        if isinstance(call, ast.Call) and all(k.arg is not None for k in call.keywords):
+            known = frozenset(k.arg for k in call.keywords)
+    token = _CALL_KEYWORDS.set(known)
+    try:
+        yield
+    finally:
+        _CALL_KEYWORDS.reset(token)
+
+
 def _wrapper_is_read(fn) -> bool:  # :draft
     """Intent:
         Whether `fn` is a wrapper whose call is read as calling the function it
@@ -1477,6 +1506,12 @@ def _passes_through(fn) -> bool:  # :draft
         wrapped function is a plain Python function taking at most one
         positional argument: a call with two or more is refused by that
         function with a TypeError in either order.
+
+        A wrapper that also takes keyword-only parameters, each with a
+        default (`def w(*args, _log=print, **kwargs)`), keeps a keyword of
+        that name for itself and hands on every other argument. It is read
+        only for a call known to pass none of those keywords
+        (`call_keywords`).
     """
     import textwrap
     import types
@@ -1501,8 +1536,17 @@ def _passes_through(fn) -> bool:  # :draft
         if len(body) != 1 or not isinstance(body[0], ast.Return):
             return False
         args, call = fdef.args, body[0].value
-    if args.posonlyargs or args.args or args.kwonlyargs or args.vararg is None \
-            or args.kwarg is None or args.defaults or fn.__defaults__ or fn.__kwdefaults__:
+    kept = tuple(a.arg for a in args.kwonlyargs)
+    if kept:
+        passed = _CALL_KEYWORDS.get()
+        if passed is None or passed & set(kept) \
+                or any(default is None for default in args.kw_defaults) \
+                or set(fn.__kwdefaults__ or ()) != set(kept):
+            return False
+    elif fn.__kwdefaults__:
+        return False
+    if args.posonlyargs or args.args or args.vararg is None \
+            or args.kwarg is None or args.defaults or fn.__defaults__:
         return False
     if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
             and len(call.args) == 1 and isinstance(call.args[0], ast.Starred)
@@ -1531,7 +1575,7 @@ def _passes_through(fn) -> bool:  # :draft
             and isinstance(keywords, ast.Name) and keywords.id == args.kwarg.arg):
         return False
     held = call.func.id
-    if code.co_varnames != (args.vararg.arg, args.kwarg.arg) \
+    if code.co_varnames != (*kept, args.vararg.arg, args.kwarg.arg) \
             or held not in code.co_freevars or fn.__closure__ is None:
         return False
     try:
@@ -1541,46 +1585,147 @@ def _passes_through(fn) -> bool:  # :draft
     return wrapped is not None and cell is wrapped
 
 
-def _domain_guard_covers(fn) -> "frozenset | None":  # :draft
+def _guard_code(factory) -> "types.CodeType | None":
     """Intent:
-        The parameters the wrapper `fn` checks before it calls the function
-        it wraps, when `fn` is the wrapper `enforce_domain` builds with no
-        missing-value policy: the keys of the domain it enforces. It binds
-        the arguments to the wrapped function's signature and judges only
-        the ones that domain names; every other argument is handed on
-        unread. None for any other object.
-
-    Notes:
-        The wrapper is recognised by its code, defined in mathema's
-        authoring module, and its own closure: `_check` is the check it
-        runs, `policies` is empty, and the domain is the one `_check`'s
-        `_violation` looks each name up in.
+        The code object of the `wrapper` function that the decorator a
+        mathema guard factory returns defines (`enforce_domain` and its
+        siblings each define `decorator`, which defines `wrapper`). Every
+        wrapper such a guard builds runs this one code object.
     """
-    import os
-    import types
+    def nested(code, name):
+        found = [c for c in code.co_consts
+                 if isinstance(c, types.CodeType) and c.co_name == name]
+        return found[0] if len(found) == 1 else None
+    decorator = nested(factory.__code__, "decorator")
+    return None if decorator is None else nested(decorator, "wrapper")
+
+
+def _cell(function, name):
+    """Intent:
+        What the variable `name` of an enclosing function holds for
+        `function`.
+
+    Raises:
+        ValueError: `function` closes over no variable of that name, or
+            the variable is not set.
+    """
+    return function.__closure__[function.__code__.co_freevars.index(name)].cell_contents
+
+
+@dataclass(frozen=True)
+class _GuardReading:
+    """Intent:
+        The arguments a mathema guard wrapper reads before it calls the
+        function it wraps: `covered`, the parameters whose argument it
+        judges (None when it may judge any of them); `judged_by_domain`,
+        the ones among them an `enforce_domain` guard judges against its
+        domain and nothing else; and `violation`, that guard's own
+        judgement `violation(name, value)`, None for a value it lets
+        through.
+    """
+    covered: "frozenset | None"
+    judged_by_domain: frozenset = frozenset()
+    violation: object = None
+
+
+def _guard_reading(fn) -> "_GuardReading | None":  # :draft
+    """Intent:
+        What the wrapper `fn` reads of its arguments, when it is one a
+        mathema guard built; None for any other object. Each guard is
+        recognised by the code object its wrapper runs (`_guard_code`) and
+        read from that wrapper's own closure.
+
+        `enforce_domain` binds the arguments to the wrapped function's
+        signature and judges the ones its domain names; with missing-value
+        policies it also reads the parameter each `raises` policy names,
+        and every parameter when such a policy names none or carries a
+        premise. `enforce_dimensions` judges the parameters its plan gives
+        a shape, and every parameter when a declared premise is enforced.
+        `enforce_structure` judges the parameters a structure is declared
+        on. `enforce_range` reads no argument. Each hands the same
+        arguments on.
+    """
     from .. import authoring
-    if type(fn) is not types.FunctionType or fn.__closure__ is None \
-            or os.path.abspath(fn.__code__.co_filename) != os.path.abspath(authoring.__file__):
+    from ..policy import Policy
+    if type(fn) is not types.FunctionType or fn.__closure__ is None:
         return None
-
-    def cell(function, name):
-        return function.__closure__[function.__code__.co_freevars.index(name)].cell_contents
-
+    code = fn.__code__
     try:
-        if fn.__code__.co_freevars != ("_check", "fn", "policies") or cell(fn, "policies"):
-            return None
-        check = cell(fn, "_check")
-        if vars(fn).get("__mathema_domain_check__") is not check:
-            return None
-        merged = cell(cell(check, "_violation"), "merged_domain")
+        if code is _guard_code(authoring.enforce_domain):
+            check, policies = _cell(fn, "_check"), _cell(fn, "policies")
+            if not policies and vars(fn).get("__mathema_domain_check__") is not check:
+                return None
+            violation = _cell(check, "_violation")
+            merged = _cell(violation, "merged_domain")
+            if type(merged) is not dict or not all(type(k) is str for k in merged) \
+                    or type(policies) is not list:
+                return None
+            by_policy: set = set()
+            for policy in policies:
+                if type(policy) is not Policy:
+                    return _GuardReading(None)
+                if policy.behaviour != "raises":
+                    continue
+                if policy.premise or not policy.parameter:
+                    return _GuardReading(None)
+                by_policy.add(policy.parameter)
+            return _GuardReading(frozenset(merged) | by_policy,
+                                 frozenset(merged) - by_policy, violation)
+        if code is _guard_code(authoring.enforce_dimensions):
+            entry = _cell(fn, "entry")
+            if vars(fn).get("__mathema_dimension_check__") != (entry, _cell(fn, "leave")):
+                return None
+            plan, premises = _cell(entry, "plan"), _cell(entry, "premises")
+            if premises or type(plan.params) is not dict \
+                    or not set(plan.elements) <= set(plan.params):
+                return _GuardReading(None)
+            return _GuardReading(frozenset(plan.params))
+        if code is _guard_code(authoring.enforce_structure):
+            declared = _cell(fn, "declared")
+            if type(declared) is not dict:
+                return _GuardReading(None)
+            return _GuardReading(frozenset(declared))
+        if code is _guard_code(authoring.enforce_range):
+            return _GuardReading(frozenset())
     except (ValueError, AttributeError, TypeError, IndexError):
         return None
-    if type(merged) is not dict or not all(type(k) is str for k in merged):
-        return None
-    return frozenset(merged)
+    return None
 
 
-def parameters_no_wrapper_reads(fn, params) -> frozenset:  # :draft
+def _guard_admits(violation, param: str, bound) -> bool:  # :draft
+    """Intent:
+        Whether an `enforce_domain` guard lets through every value the
+        finite set `bound` gives the parameter: the guard's own judgement
+        (`violation`) is None for each member, a missing value the set
+        lists being judged at every value it can stand for (each known
+        spelling of a hole, each known spelling of absence). False for a
+        domain that is not a finite set, and for a listed missing value
+        none of whose values can be built here.
+    """
+    from ..domain import (_ABSENCE_VALUES, _SPELLING_VALUES, ABSENT, Domain, _as_domain,
+                          _is_enumerated, _Sentinel, realise_sentinel)
+    try:
+        dom = _as_domain(bound)
+        if not _is_enumerated(dom):
+            return False
+        members = [v for piece in dom.pieces for v in piece]
+        if isinstance(dom, Domain) and dom.absent:
+            members.append(ABSENT)
+        for member in members:
+            values = [member]
+            if isinstance(member, _Sentinel):
+                values = realise_sentinel(member, tuple(_SPELLING_VALUES),
+                                          tuple(_ABSENCE_VALUES))
+                if not values:
+                    return False
+            if any(violation(param, value) is not None for value in values):
+                return False
+    except Exception:
+        return False
+    return True
+
+
+def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None) -> frozenset:  # :draft
     """Intent:
         The parameters among `params` whose argument reaches the function's
         body untouched by anything between the call of `fn` and that body:
@@ -1590,18 +1735,25 @@ def parameters_no_wrapper_reads(fn, params) -> frozenset:  # :draft
         is one whose own definition is read as leaving it alone: a wrapper
         that hands its arguments on unchanged (`_passes_through`, a
         `staticmethod`, an instance whose `__call__` hands over), the
-        `functools.lru_cache` wrapper, and the `enforce_domain` guard for
-        the parameters its domain does not name (`_domain_guard_covers`).
-        Any other wrapper, mathema's other guards among them, may read
-        every argument, and none stays.
+        `functools.lru_cache` wrapper, and a mathema guard for the
+        parameters it does not judge (`_guard_reading`). Any other wrapper
+        may read every argument, and none stays.
+
+        With `domain`, the sets a claim binds parameters to, a parameter an
+        `enforce_domain` guard judges against its domain also stays when
+        the guard lets through every member of the parameter's finite set
+        (`_guard_admits`): the guard reads each value and hands it on.
 
     Notes:
         `lru_cache` hashes each argument. The missing values a domain lists
         are realised as `None`, a float nan and the scalar markers of the
         array libraries, each of which hashes.
+
+        The `enforce_dimensions` guard is read where the function it wraps
+        is a plain Python function.
     """
     import functools
-    import types
+    from .. import authoring
     from .._instance_callable import hands_over_to_wrapped
     left = frozenset(params)
     for _ in range(16):
@@ -1616,9 +1768,19 @@ def parameters_no_wrapper_reads(fn, params) -> frozenset:  # :draft
         if inner is None:
             return left if type(fn) is types.FunctionType else frozenset()
         if type(fn) is types.FunctionType:
-            covered = _domain_guard_covers(fn)
-            if covered is not None:
-                left -= covered
+            reading = _guard_reading(fn)
+            if reading is not None:
+                if reading.covered is None:
+                    return frozenset()
+                if fn.__code__ is _guard_code(authoring.enforce_dimensions) \
+                        and not (type(inner) is types.FunctionType
+                                 and "__wrapped__" not in vars(inner)):
+                    return frozenset()
+                admitted = frozenset(
+                    p for p in reading.judged_by_domain & left
+                    if domain is not None and p in domain
+                    and _guard_admits(reading.violation, p, domain[p]))
+                left -= reading.covered - admitted
             elif not _passes_through(fn):
                 return frozenset()
         elif type(fn) is not getattr(functools, "_lru_cache_wrapper", None) \
@@ -1626,6 +1788,30 @@ def parameters_no_wrapper_reads(fn, params) -> frozenset:  # :draft
             return frozenset()
         fn = inner
     return frozenset()
+
+
+def hashes_its_arguments(fn) -> bool:  # :draft
+    """Intent:
+        Whether something between the call of `fn` and the function's body
+        hashes the arguments: a `functools.lru_cache` wrapper among the
+        wrappers `fn` links as `__wrapped__`, which raises TypeError for an
+        argument that does not hash (a list). True as well when the
+        wrappers cannot be followed to the function.
+    """
+    import functools
+    cache = getattr(functools, "_lru_cache_wrapper", None)
+    for _ in range(16):
+        if type(fn) is cache:
+            return True
+        try:
+            inner = fn.__func__ if type(fn) is types.MethodType \
+                else getattr(fn, "__wrapped__", None)
+        except Exception:
+            return True
+        if inner is None:
+            return False
+        fn = inner
+    return True
 
 
 def _wrapper_name(fn) -> str:
