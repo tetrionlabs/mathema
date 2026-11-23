@@ -3566,9 +3566,14 @@ def _render_constant(bound, unicode: bool, show_missing: bool) -> str:
     import math
 
     from .domain import MissingDefaults, _as_domain, admitted, complete, render_domain
+    from dataclasses import replace
     dom = _as_domain(bound)
     if dom.policy is None:
         dom = complete(dom, MissingDefaults(False, (), "constant", annotated=False))
+    # a constant is no parameter, so nothing is judged at a missing
+    # value written beside it: its bound states the whole of what it
+    # admits in a type clause
+    dom = replace(dom, named=())
     absent, holes = admitted(dom)
     if not absent and not holes and not dom.explicit_type and dom.base_type == "R":
         point = _single_value(dom)

@@ -1214,6 +1214,10 @@ class Domain:
     # a `⊂ T` / `: T` clause stated the whole missing-value policy: what
     # it does not admit it excludes
     clause: bool = False
+    # the missing values the binding's text named beside an interval or
+    # a named type (`named_beside`), kept by `complete()` so the
+    # completed domain renders what was written
+    named: tuple = field(default=(), compare=False)  # :draft
 
 
 # the closed vocabulary of base types a Domain may carry. Every
@@ -1422,6 +1426,34 @@ def admits(bound, sentinel) -> bool:
     return sentinel == MISSING and bool(holes)
 
 
+def named_beside(bound) -> tuple:  # :draft
+    """Intent:
+        The missing values a binding's text names beside an interval or
+        a named type (`[0, 1] | {None}`, `R | {nan}`, `Z|absent`), in
+        the order absence, the hole class, then members. Empty for a
+        domain that names none this way: a plain interval or type, a
+        type clause (which states its whole policy), an enumerated set
+        (which lists its own members), a language or text domain, a
+        vector or matrix space, and a domain that excludes a sentinel.
+        A completed domain answers with what its text named before
+        `complete()` filled the rest, less anything since removed.
+    """
+    dom = _as_domain(bound)
+    listed = _set_sentinels(dom)
+    if dom.policy is not None:
+        return tuple(s for s in dom.named
+                     if (dom.absent if s == ABSENT else s in listed))
+    if (dom.clause or dom.dims or dom.base_type in ("L", "S") or _is_enumerated(dom)
+            or any(isinstance(v, _Sentinel) for v in dom.excluded)
+            or any(s.kind != "missing" for s in listed)):
+        return ()
+    values = any(not _sentinel_piece(p) for p in dom.pieces)
+    if values and (dom.explicit_type or dom.base_type != "R"):
+        # a typed interval states its missing values in its type clause
+        return ()
+    return tuple(_ordered_sentinels(dom.absent, listed))
+
+
 def numeric_excluded(dom: Domain) -> frozenset:
     """The values a domain excludes, its sentinels left out."""
     return frozenset(v for v in dom.excluded if not isinstance(v, _Sentinel))
@@ -1436,7 +1468,8 @@ def complete(bound, defaults: MissingDefaults):
         `members`, and `defaults` itself on `policy`, which the rendering
         reads to state an exclusion that narrows them. A stated domain
         keeps its own policy; an enumerated set is exactly its members.
-        `None` stays `None`.
+        The missing values the text named beside an interval or a named
+        type stay on `named`. `None` stays `None`.
     """
     from dataclasses import replace
     if bound is None:
@@ -1462,7 +1495,7 @@ def complete(bound, defaults: MissingDefaults):
     return Domain(base_type=dom.base_type, pieces=tuple(pieces),
                   excluded=frozenset(excluded), explicit_type=dom.explicit_type,
                   dims=dom.dims, absent=absent, members=members, policy=defaults,
-                  clause=dom.clause)
+                  clause=dom.clause, named=named_beside(dom))
 
 
 def _piece_contains(value, piece) -> bool:
@@ -2183,6 +2216,15 @@ def _sentinel_word(s: "_Sentinel", *, ascii_mode: bool, words: bool = False) -> 
     return s.member
 
 
+def _named_word(s: "_Sentinel", *, ascii_mode: bool) -> str:  # :draft
+    """A missing value in a union beside an interval (`[0.0, 1.0] |
+    {None}`): the object's absence as `None`, a hole as the grammar
+    spells it."""
+    if s == ABSENT:
+        return "None"
+    return _sentinel_word(s, ascii_mode=ascii_mode)
+
+
 def _ordered_sentinels(absent: bool, holes) -> list:
     """Admitted sentinels in the fixed rendering order: absence, the
     class, then members alphabetically."""
@@ -2278,7 +2320,11 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     leaves the policy unstated (a hand-editable bound); `words` spells
     the hole class as the word in unicode too, as a path into a
     language's member does. `defaults` fills a kind the domain does not
-    state (`NO_ANNOTATION` when not given).
+    state (`NO_ANNOTATION` when not given). A missing value the text
+    named beside an interval or a named type (`named_beside`) renders as
+    written, `[0.0, 1.0] | {None}`, `R|nan`, with no type clause and
+    nothing filled in for a kind the text left unstated, so the text
+    reads back as the domain that was written.
 
     `ascii_mode` renders `R`/`Z`/`N` plain rather than as `ℝ`/`ℤ`/`ℕ`
     and prefers a Python-style annotation for the type clause (`[1,
@@ -2337,13 +2383,25 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     ordered = _ordered_sentinels(absent, holes)
     value_pieces = [p for p in dom.pieces if not _sentinel_piece(p)]
     policy = dom.policy or defaults or NO_ANNOTATION
+    # a missing value the text named stays as written, and a kind the
+    # text left unstated stays unstated
+    named = (named_beside(dom) if show_missing and not words and defaults is None
+             else ())  # :draft
+    if named and value_pieces:
+        return (union_op.join(_render_piece(p, ascii_mode=ascii_mode, as_int=as_int)
+                              for p in value_pieces)
+                + excluded_text() + union_op
+                + "{" + ", ".join(_named_word(s, ascii_mode=ascii_mode)
+                                  for s in named) + "}")
+    if named:
+        ordered = list(named)
     if show_missing and language:
         # a language states its exclusions as written, words in both
         # modes
         narrowed.extend(sorted((v for v in dom.excluded if isinstance(v, _Sentinel)),
                                key=_member_sort_key))
-    elif show_missing and not _states_by_type(dom, value_pieces, num_excl,
-                                              always_show_type):
+    elif show_missing and not named and not _states_by_type(
+            dom, value_pieces, num_excl, always_show_type):
         # an exclusion is stated where it narrows what the parameter's
         # annotation would admit and no type clause states it already,
         # so the text reads back to the same domain given the same

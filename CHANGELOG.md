@@ -13,6 +13,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
 - A claim whose every variable is a text has no `[float]` companion row.
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
+- A claim's stored text keeps a missing value its author named beside an interval or a named type: `x in [0, 1] | {None}` is stored as `[0.0, 1.0] | {None}`, `[0, 1] | {nan}` as `[0.0, 1.0] | {nan}`, `R | {None}` as `R|absent`. Read back from its record, such a claim is judged at the values it names and no others. Its text and fingerprint differ from those of the same claim naming nothing, so a record of a claim that names a missing value this way is checked again once. A claim that names none keeps its text and fingerprint. A type clause that spells out exactly the default (`: float|absent|missing`) names nothing.
 
 ### Fixes
 - The check of a language's definition compares the strings the claim itself writes, and reports `assumed`, never `checked`, when the language's membership raised on a string; a proven line names each definition it assumed.
