@@ -285,7 +285,7 @@ def _meaning(term: Term):
         if not isinstance(x, str):
             raise _Signal(InterpretError(f"{head} of a value that is no text"))
         try:
-            return regular.node_member(node, x)
+            return regular.contains(node, x)
         except regular.MatchBudget as e:
             raise _Signal(InterpretError(f"{head}: the matcher's budget is spent")) from e
     return in_language

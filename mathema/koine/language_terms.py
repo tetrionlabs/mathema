@@ -32,7 +32,7 @@ it through its node.
 
 `operator::membership::in_language(e, language::regular::exact(n,
 alphabet::codepoints))` is true exactly when the text `e` is in the
-language of `n`, read over all code points as `regular.node_member`
+language of `n`, read over all code points as `regular.contains`
 reads a bare node.
 """
 from __future__ import annotations
