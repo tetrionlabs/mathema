@@ -910,17 +910,83 @@ def corroboration_record(compared: int, skipped: int, seed: "int | None", *,
 _STORED_AS_CHECKED = "checked"
 
 
+def agreed_on_counts(compared: int, disagreed: int, skipped: int) -> bool:
+    """Intent:
+        Whether a comparison run with these counts agreed on every
+        value: at least one value compared, none disagreeing and none
+        skipped.
+    """
+    return compared > 0 and disagreed == 0 and skipped == 0
+
+
+def corroboration_shortfall(compared: int, disagreed: int, skipped: int) -> str:
+    """Intent:
+        What a comparison run with these counts fell short of, in
+        words, and the empty text exactly when it agreed on every value
+        (`agreed_on_counts`): the number that disagreed; else that no
+        value was compared; else how many of the values put to the
+        comparison (`compared + skipped`) were skipped.
+    """
+    if disagreed > 0:
+        return f"{disagreed} of {compared} values disagreed"  # :draft
+    if compared <= 0:
+        return "no value compared"  # :draft
+    if skipped != 0:
+        return f"{skipped} of {compared + skipped} values skipped"  # :draft
+    return ""
+
+
+def _counts(assumption: dict) -> "tuple | None":
+    """`(compared, disagreed, skipped)` of an assumption's corroboration
+    record, or None when it carries no record or a count is not a whole
+    number."""
+    record = assumption.get("corroboration")
+    if not isinstance(record, dict):
+        return None
+    counts = (record.get("values compared"), record.get("disagreed"),
+              record.get("values skipped"))
+    if not all(type(n) is int for n in counts):
+        return None
+    return counts
+
+
 def agreed_on_every_value(assumption: dict) -> bool:
     """Intent:
         Whether an assumption's corroboration record shows a run in
         which at least one value was compared, none disagreed and none
-        was skipped. False for an assumption with no corroboration
-        record. It says how the run went, and nothing about whether
-        the assumption holds.
+        was skipped (`agreed_on_counts`). False for an assumption with
+        no corroboration record. It says how the run went, and nothing
+        about whether the assumption holds.
     """
-    record = assumption.get("corroboration")
-    return (isinstance(record, dict) and bool(record.get("values compared"))
-            and record.get("disagreed") == 0 and record.get("values skipped") == 0)
+    counts = _counts(assumption)
+    return counts is not None and agreed_on_counts(*counts)
+
+
+def assumption_entry_text(assumption: dict) -> str:
+    """Intent:
+        One assumption as the proof outline states it: `<statement>
+        (<status as read>)`, and for an assumed one whose corroboration
+        did not agree on every value, what fell short after the status:
+        `(assumed, 3 of 14 values skipped)`, `(assumed, no value
+        compared)`, `(assumed, the comparison did not finish)`, or
+        `(assumed, no corroboration record)`. An entry with a record
+        reads `(assumed)` alone exactly when `agreed_on_every_value`
+        holds of it. An entry stored with the earlier status `checked`
+        carries no record and reads `(assumed)`: that status said every
+        value compared agreed and none was skipped.
+    """
+    status = assumption_status(assumption)
+    fell_short = ""
+    if status == "assumed":
+        counts = _counts(assumption)
+        if assumption.get("unfinished"):
+            fell_short = "the comparison did not finish"  # :draft
+        elif counts is not None:
+            fell_short = corroboration_shortfall(*counts)
+        elif assumption.get("status") != _STORED_AS_CHECKED:
+            fell_short = "no corroboration record"  # :draft
+    return (f"{assumption['statement']} ({status}"  # :draft
+            + (f", {fell_short}" if fell_short else "") + ")")
 
 
 def assumption_status(assumption: dict) -> "str | None":
@@ -1034,15 +1100,16 @@ def standard_assumptions() -> dict:
 
 def assuming_text(assumptions: list, verdict: str = "proven") -> str:
     """Intent:
-        `proven, assuming A (assumed), B (assumed)` for the definitions
-        a verdict rests on (`falsified, assuming ...` for a falsified
-        one), each with its status as read (`assumption_status`); the
-        verdict word alone when it read none.
+        `proven, assuming A (assumed), B (assumed, 3 of 14 values
+        skipped)` for the definitions a verdict rests on (`falsified,
+        assuming ...` for a falsified one), each as
+        `assumption_entry_text` states it; the verdict word alone when
+        it read none.
     """
     if not assumptions:
         return verdict
     return f"{verdict}, assuming " + ", ".join(  # :draft
-        f"{a['statement']} ({assumption_status(a)})" for a in assumptions)
+        assumption_entry_text(a) for a in assumptions)
 
 
 def _decide_languages(rel: Relation) -> Decision:
@@ -1247,7 +1314,8 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
-           "RELATION", "Relation", "Statement", "Term", "WORDS", "agreed_on_every_value", "assuming_text",
+           "RELATION", "Relation", "Statement", "Term", "WORDS", "agreed_on_counts", "agreed_on_every_value",
+           "assumption_entry_text", "assuming_text", "corroboration_shortfall",
            "assumption_status", "axiom_id", "corroboration_record",
            "check_definition", "check_definitions", "check_holds_only_texts", "decide",
            "not_as_written",

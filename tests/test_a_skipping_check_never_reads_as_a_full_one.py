@@ -5,7 +5,9 @@ and one on which some value was skipped are both `assumed`, and they
 never read alike. The proof outline says `<statement> (assumed)` only
 for a definition whose corroboration record shows at least one value
 compared, none disagreeing and none skipped; any other says what fell
-short inside the brackets. The printed record names the second and not
+short inside the brackets (an entry stored with the earlier status
+`checked`, which said every value compared agreed and none was skipped,
+has no record and reads `(assumed)`). The printed record names the second and not
 the first, and the record's own counts tell them apart."""
 import itertools
 
@@ -100,7 +102,6 @@ def test_agreement_is_every_value_compared_and_none_against(compared, disagreed,
 
 @pytest.mark.parametrize("entry,said", [
     ({"statement": "A", "status": "assumed"}, "A (assumed, no corroboration record)"),
-    ({"statement": "A", "status": "checked"}, "A (assumed, no corroboration record)"),
     ({"statement": "A", "status": "assumed", "unfinished": "the check did not finish"},
      "A (assumed, the comparison did not finish)"),
     ({"statement": "A", "status": "assumed", "corroboration": {
@@ -116,3 +117,8 @@ def test_an_entry_says_what_fell_short(entry, said):
     assert domain_relations.assumption_entry_text(entry) == said
     assert domain_relations.assuming_text([entry]) == f"proven, assuming {said}"
     assert (said == "A (assumed)") is domain_relations.agreed_on_every_value(entry)
+
+
+def test_an_entry_stored_as_checked_keeps_what_that_status_said():
+    stored = {"statement": "A", "status": "checked"}
+    assert domain_relations.assumption_entry_text(stored) == "A (assumed)"
