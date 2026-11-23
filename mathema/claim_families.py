@@ -1889,6 +1889,10 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
         return None
     enforced = getattr(fn, "__mathema_enforced_domain__", None)
     if enforced is not None and param in enforced:
+        if not _enforced_inside(enforced[param], (domain or {}).get(param)):
+            # the wrapper admits values outside the claim's domain, or
+            # the two cannot be compared: the trials decide
+            return None
         return ProofResult(
             "proven",
             sketch=f"rejection by construction: the enforce_domain "
@@ -1903,6 +1907,35 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
                    f"wrapper checks {param}'s shape ({expected(shaped[param])}) "
                    f"before the body ever runs")
     return None
+
+
+def _enforced_inside(enforced, stated) -> bool:
+    """Intent:
+        Whether every number the enforced domain admits is in the
+        claim's stated domain for the parameter, so that the wrapper
+        refuses every number outside the claim's: the claim states none
+        (the enforced domain is then the declared one), the two are
+        equal, or both are sets of reals (`conjecture._real_set`) and
+        the enforced one is a subset. False when they cannot be
+        compared.
+    """
+    if stated is None:
+        return True
+    try:
+        if stated == enforced:
+            return True
+    except Exception:
+        pass
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .conjecture import _real_set
+    try:
+        inner, outer = _real_set(enforced), _real_set(stated)
+        if inner is None or outer is None:
+            return False
+        return _with_timeout(lambda: inner.is_subset(outer),
+                             FAST_TIMEOUT_SECONDS) is True
+    except Exception:
+        return False
 
 
 def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -2443,11 +2476,14 @@ def _empty_values(fn, facts, target: str, cj=None) -> list:
     """Intent:
         Every `(value, shown)` empty input `target` admits: the empty
         container `_empty_value` builds, and, for a parameter that takes
-        a plain sequence of any kind (no annotation, a tuple, or an
-        abstract `Sequence`, `Collection`, `Iterable`), the empty tuple
-        beside the empty list.
+        a plain sequence of any kind (no annotation, a tuple, an
+        abstract `Sequence`, `Collection`, `Iterable`, `Any`, or a union
+        or optional with such a member), the empty tuple beside the
+        empty list.
     """
     import collections.abc as _abc
+    import re
+    import types
     import typing
     first = _empty_value(fn, facts, target, cj)
     if not isinstance(first[0], list) or first[0] != [] \
@@ -2461,11 +2497,23 @@ def _empty_values(fn, facts, target: str, cj=None) -> list:
             annotation = inspect.signature(fn).parameters[target].annotation
         except (KeyError, TypeError, ValueError):
             return [first]
-    origin = typing.get_origin(annotation) or annotation
-    takes_tuples = (annotation is inspect.Parameter.empty or origin is tuple
-                    or origin in (_abc.Sequence, _abc.Collection,
-                                  _abc.Iterable, _abc.Reversible,
-                                  _abc.Container, _abc.Sized))
+    def admits_a_tuple(note) -> bool:
+        if isinstance(note, str):
+            # an annotation left as text: read by the words it names
+            return bool(re.search(r"\b(tuple|Tuple|Sequence|Collection|"
+                                  r"Iterable|Reversible|Container|Sized|"
+                                  r"Any|object)\b", note))
+        origin = typing.get_origin(note) or note
+        if origin is typing.Union or isinstance(note, types.UnionType):
+            return any(admits_a_tuple(member)
+                       for member in typing.get_args(note))
+        return (note is inspect.Parameter.empty or origin is tuple
+                or origin in (typing.Any, object)
+                or origin in (_abc.Sequence, _abc.Collection,
+                              _abc.Iterable, _abc.Reversible,
+                              _abc.Container, _abc.Sized))
+
+    takes_tuples = admits_a_tuple(annotation)
     if not takes_tuples:
         return [first]
     return [first, ((), f"{target} = () (an empty tuple)")]  # :draft

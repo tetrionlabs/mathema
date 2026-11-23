@@ -122,10 +122,64 @@ def _inferred_literal_domain(text: str, sig_params: list) -> dict:
     return inferred
 
 
+def _constant_float(node) -> "float | None":
+    """Intent:
+        The float an argument written without any variable holds: a
+        number, `nan`, `inf` (bare or as `math.nan`, `np.inf`),
+        `float("nan")`, and `+`, `-`, `*`, `/` of these in float
+        arithmetic (`inf - inf` is nan). None for anything else.
+    """
+    if isinstance(node, ast.Constant):
+        if type(node.value) in (int, float):
+            try:
+                return float(node.value)
+            except OverflowError:
+                return None
+        return None
+    if isinstance(node, ast.Name) and node.id in ("nan", "inf"):
+        return float(node.id)
+    if isinstance(node, ast.Attribute) and node.attr in ("nan", "inf") \
+            and isinstance(node.value, ast.Name):
+        return float(node.attr)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == "float" and len(node.args) == 1 \
+            and not node.keywords and isinstance(node.args[0], ast.Constant) \
+            and isinstance(node.args[0].value, str):
+        try:
+            return float(node.args[0].value)
+        except ValueError:
+            return None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op,
+                                                    (ast.USub, ast.UAdd)):
+        inner = _constant_float(node.operand)
+        if inner is None:
+            return None
+        return -inner if isinstance(node.op, ast.USub) else inner
+    if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+        left, right = _constant_float(node.left), _constant_float(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            return {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+                    ast.Mult: lambda a, b: a * b,
+                    ast.Div: lambda a, b: a / b}[type(node.op)](left, right)
+        except (ZeroDivisionError, OverflowError):
+            return None
+    return None
+
+
+def _passes_nan(node) -> bool:
+    """Whether an argument written without any variable is nan."""
+    value = _constant_float(node)
+    return value is not None and value != value
+
+
 def _non_real_literal_args(text: str) -> list:
     """Intent:
         The source of every argument of an `f(...)` call in `text`, by
-        position or keyword, that is the literal `None` or `...`. Derive
+        position or keyword, that is the literal `None` or `...`, or is
+        nan as written (`nan`, `float("nan")`, `inf - inf`). Derive
         reads each argument as a real symbol, so a call passing one of
         these is a call derive does not model.
     """
@@ -141,6 +195,8 @@ def _non_real_literal_args(text: str) -> list:
         for arg in [*node.args, *(k.value for k in node.keywords)]:
             if isinstance(arg, ast.Constant) and (
                     arg.value is None or arg.value is Ellipsis):
+                found.append(ast.unparse(arg))
+            elif _passes_nan(arg):
                 found.append(ast.unparse(arg))
     return found
 
@@ -160,8 +216,9 @@ def _names_in_text(text: str) -> set:
 
 def _literal_call_args(text: str, sig_params: list,
                        varied: "set | None" = None) -> dict:
-    """`{param: value}` for every `f(...)` call argument that is a plain
-    literal at a real parameter's position: the call passes that value
+    """`{param: value}` for every `f(...)` call argument, by position or
+    keyword, that is a plain literal (or nan as written) for a real
+    parameter: the call passes that value
     verbatim, so the parameter is FIXED to it, not synthesized. Unlike
     `_inferred_literal_domain` (numeric only, for branch pruning), this
     keeps every literal kind (a string `"nope"`, a `True`, a number, a
@@ -181,9 +238,13 @@ def _literal_call_args(text: str, sig_params: list,
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "f"):
             continue
-        for p, arg in zip(sig_params, node.args):
+        for p, arg in [*zip(sig_params, node.args),
+                       *((k.arg, k.value) for k in node.keywords
+                         if k.arg in sig_params)]:
             if isinstance(arg, ast.Constant):
                 fixed[p] = arg.value
+            elif _passes_nan(arg):
+                fixed[p] = math.nan
             elif isinstance(arg, (ast.List, ast.Tuple)):
                 # a literal container (`f([])`, `f([1.0, 2.0])`) passes
                 # that container verbatim
@@ -8185,10 +8246,11 @@ def _claim_side_has_exact_value(code_l, code_r, env: dict,
         Whether the claim's sides have a value at the point `env` when
         read exactly: every number of the point and every result of a
         callee in `callees` read as the exact rational it holds, and the
-        claim's own functions (`exp`, `log`, ...) as sympy's. True when
-        each side is a finite number there; False when a side divides by
-        zero or is not finite in that reading; None when it cannot be
-        read so (a value or function with no exact reading).
+        claim's own functions (`exp`, `log`, ...) as sympy's over the
+        reals. True when each side is a finite real number there; False
+        when a side divides by zero, leaves the reals at any step or is
+        not finite in that reading; None when it cannot be read so (a
+        value or function with no exact reading).
     """
     import sympy
 
@@ -8196,6 +8258,22 @@ def _claim_side_has_exact_value(code_l, code_r, env: dict,
 
     class _NoReading(Exception):
         pass
+
+    class _NotReal(Exception):
+        pass
+
+    def real_only(function):
+        # the claim's functions are the real ones: `log(-1)`, `sqrt(-1)`
+        # and a negative number to a fractional power have no value
+        def call(*args):
+            out = function(*args)
+            if isinstance(out, sympy.Basic):
+                if out.is_extended_real is False:
+                    raise _NotReal
+                if out.is_extended_real is None:
+                    raise _NoReading
+            return out
+        return call
 
     def exact(value):
         if isinstance(value, bool):
@@ -8222,7 +8300,7 @@ def _claim_side_has_exact_value(code_l, code_r, env: dict,
         if name in callees:
             continue
         if name in _SYMPY_FUNCS:
-            scope[name] = _SYMPY_FUNCS[name]
+            scope[name] = real_only(_SYMPY_FUNCS[name])
         elif name in _MATH_ATTRS:
             scope[name] = _MATH_ATTRS[name]
         elif callable(value) or (isinstance(value, float)
@@ -8235,17 +8313,17 @@ def _claim_side_has_exact_value(code_l, code_r, env: dict,
             except _NoReading:
                 return None
     for name, fn_ in _SYMPY_FUNCS.items():
-        scope.setdefault(name, fn_)
+        scope.setdefault(name, real_only(fn_))
     from ._linalg_eval import _OPERATORS, ARITH
     # the claim's own arithmetic (`a / b` compiles to this word) on the
     # exact values
-    scope[ARITH] = lambda op, a, b: _OPERATORS[op](a, b)
+    scope[ARITH] = real_only(lambda op, a, b: _OPERATORS[op](a, b))
     for name, callee in callees.items():
         scope[name] = read_callee(callee)
     try:
         sides = [eval(code, {"__builtins__": {}}, scope)
                  for code in (code_l, code_r) if code is not None]
-    except ZeroDivisionError:
+    except (ZeroDivisionError, _NotReal):
         return False
     except Exception:
         return None
@@ -8256,7 +8334,9 @@ def _claim_side_has_exact_value(code_l, code_r, env: dict,
             return None
         if side.has(sympy.zoo, sympy.nan, sympy.oo, -sympy.oo):
             return False
-        if side.is_finite is not True:
+        if side.is_real is False:
+            return False
+        if side.is_finite is not True or side.is_real is not True:
             return None
     return True
 
@@ -9410,14 +9490,16 @@ _NO_VALUE = object()
 
 def _definedness_at_listed_missing(ctx, fn, facts, cj_domain: dict, proof):
     """Intent:
-        A proven `is_defined` checked at every missing value its domain
-        lists (`{1, None}`, `[0, 1] | absent`, `{nan}`): the body's raise
-        region is read over the real numbers, so each listed value is
-        run, every other parameter at one ordinary value of its domain.
-        `proof` back unchanged when every call returns or nothing is
-        listed; `disproven` with the first raising call as an executed
-        witness; `undecided` when a listed value cannot be run because
-        some other parameter has no ordinary value to call it with.
+        A proven or undecided `is_defined` checked at every missing
+        value its domain lists (`{1, None}`, `[0, 1] | absent`, `{nan}`):
+        the body's raise region is read over the real numbers, so each
+        listed value is run, every other parameter at one ordinary value
+        of its domain. `disproven` with the first raising call as an
+        executed witness. Otherwise an undecided `proof` comes back
+        unchanged, and a proven one unchanged when nothing is listed,
+        saying each listed value returned when every call returns, and
+        `undecided` when a listed value cannot be run because some other
+        parameter has no ordinary value to call it with.
     """
     from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _member_sort_key,
                          _set_sentinels, realise_sentinel)
@@ -9445,6 +9527,8 @@ def _definedness_at_listed_missing(ctx, fn, facts, cj_domain: dict, proof):
     from ._brute_force import _raised_at
     for p, values in listed.items():
         others = [q for q in facts.params if q != p and base[q] is _NO_VALUE]
+        if others and proof.status != "proven":
+            return proof
         if others:
             return ProofResult(
                 "undecided",
@@ -9463,6 +9547,8 @@ def _definedness_at_listed_missing(ctx, fn, facts, cj_domain: dict, proof):
                     counterexample=f"{where}: raised {raised}",
                     meta={"mathema.corroboration": "reproduced",
                           "mathema.witness_executed": True})
+    if proof.status != "proven":
+        return proof
     shown = ", ".join(f"{p} = {v!r}" for p, vs in listed.items() for v in vs)
     return ProofResult(
         proof.status,
@@ -12296,7 +12382,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                                 tolerance=cj.tolerance,
                                                 assumption=assumption)
                             if family_derive is not None else None)
-    if (family_proof is not None and family_proof.status == "proven"
+    if (family_proof is not None
+            and family_proof.status in ("proven", "undecided")
             and "is_defined" in (region_row_kind(cj.name), cj.relation)):
         family_proof = _definedness_at_listed_missing(ctx, fn, facts,
                                                       cj_domain, family_proof)
@@ -14367,7 +14454,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a witness names each argument the claim reads or passes, by name,
     # and each parameter held at its default or pin, the value it ran at
     arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
-    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins}
+    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins,
+                                              **literal_args}
                                   if p in kinds}
                    if shown_names is not None else None)
     table_columns = {p: _table_columns(p, cj, facts)
@@ -14862,20 +14950,26 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     cx = (f"{_point_text(args)}: the claim is false here, "
                           f"its own side read exactly as written")
                     break
-            if not call_raised[0] and isinstance(e, ZeroDivisionError) \
+            if not call_raised[0] and claim_side_has_no_value(e) \
                     and _claim_side_valued_exactly(
                         code_l, code_r, env, {"f": fn_call, **bound_funcs}):
-                # the division by zero is the float evaluation's alone
-                # (an underflow to 0.0): read exactly, the claim's side
-                # has a value here, so the point is no counterexample
-                # and is left undecided
+                # the division by zero, or the argument outside a
+                # function's real domain, is the float evaluation's
+                # alone (an underflow to 0.0): read exactly, the claim's
+                # side has a value here, so the point is no
+                # counterexample and is left undecided
                 call_raised[0] = call_nan[0] = call_inf[0] = None
                 call_hole[0] = None
                 if undecided_at is None:
-                    undecided_at = (f"{_point_text(args)}: the claim's own "  # :draft
-                                    f"side divided by a float that rounded "
-                                    f"to zero, while read exactly it has a "
-                                    f"value")
+                    undecided_at = (
+                        f"{_point_text(args)}: the claim's own "  # :draft
+                        f"side divided by a float that rounded "
+                        f"to zero, while read exactly it has a "
+                        f"value" if isinstance(e, ZeroDivisionError) else
+                        f"{_point_text(args)}: the claim's own "  # :draft
+                        f"side has no float value ({e}) because a float "
+                        f"before it rounded, while read exactly it has a "
+                        f"value")
                 undecided += 1
                 continue
             if not call_raised[0]:
