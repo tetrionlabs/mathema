@@ -5002,10 +5002,10 @@ def _constant_call(node: ast.Call, taken: frozenset):  # :draft
         read as constants (`_constant_value`): `abs`, `sqrt`, `exp`, the
         logarithms, `sin`, `cos`, `tan`, `floor` or `ceil` of one, `min` or
         `max` of two or more. The claim language's own function is run on
-        the constants here, so one that raises (`sqrt` of a number too
-        large, `log(0)`) or gives anything but an integer or a float
-        (`sqrt(-1)`) leaves the call unread. `_UNREAD` as well for a name
-        the claim binds and for any other call.
+        the constants here, so one that raises (`exp(1000)`, `log(0)`,
+        `sqrt(-1)`) or gives anything but an integer or a float leaves the
+        call unread. `_UNREAD` as well for a name the claim binds and for
+        any other call.
     """
     from ..conjecture import _SAFE_FUNCS
     if not isinstance(node.func, ast.Name) or node.keywords or node.func.id in taken:
