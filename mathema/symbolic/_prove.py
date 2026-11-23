@@ -4883,7 +4883,10 @@ def _folded_number(node: ast.AST) -> "int | float | None":  # :draft
         large for a float.
     """
     if isinstance(node, ast.Constant):
-        return node.value if type(node.value) in (int, float) else None
+        value = node.value
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
+        return None
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         value = _folded_number(node.operand)
         if value is None:
