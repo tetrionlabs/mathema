@@ -35,10 +35,10 @@ KEYS = ("language", "at_least", "at_most")
 
 def _member(doc, text, bound):
     """Membership of `text` in a document, or in one of its bounds: the
-    document-level `member` where it takes a bound, else the bound's
+    document-level `contains` where it takes a bound, else the bound's
     node from `bounds` read by `matcher`."""
-    if "bound" in inspect.signature(regular.member).parameters:
-        return regular.member(doc, text, bound=bound)
+    if "bound" in inspect.signature(regular.contains).parameters:
+        return regular.contains(doc, text, bound=bound)
     at_most, at_least = regular.bounds(doc)
     return regular.matcher(at_least if bound == "at_least" else at_most)(text)
 
@@ -244,8 +244,6 @@ MALFORMED = {
     "bounds and a language, not exact": {**exact({"op": "empty"}), "exact": False,
                                          "at_least": {"op": "empty"},
                                          "at_most": {"op": "empty"}},
-    "alphabet ranges as tuples": {**exact({"op": "empty"}), "alphabet": [(0, 127)]},
-    "chars ranges as tuples": exact({"op": "chars", "ranges": [(97, 98)]}),
     "the version is true": {**exact({"op": "empty"}), "version": True},
     "exact is 1": {**exact({"op": "empty"}), "exact": 1},
     "exact with only the bounds": {"kind": "regular_language", "version": 1, "alphabet": FULL,

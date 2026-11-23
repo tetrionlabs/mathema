@@ -32,7 +32,7 @@ def lowerdef():
     register_language("lowerdef", StringLanguage(
         "lowerdef", level="predicate", accepts=_lower, pool="abc",
         generate=lambda rng: "".join(rng.choice("abc") for _ in range(rng.randint(1, 4))),
-        schema={"definition": LOWER}))
+        schema={"term": LOWER}))
     try:
         yield
     finally:
@@ -108,7 +108,7 @@ def _accepts(s):
 register_language("lowerdef", StringLanguage(
     "lowerdef", level="predicate", accepts=_accepts, pool="abc",
     generate=lambda rng: "".join(rng.choice("abc") for _ in range(rng.randint(1, 4))),
-    schema={{"definition": LOWER}}))
+    schema={{"term": LOWER}}))
 '''
 
 
