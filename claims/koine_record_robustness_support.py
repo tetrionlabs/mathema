@@ -31,7 +31,7 @@ def _load(name: str):
 R = _load("koine_record_reading_support")
 REF = R.REF
 EMPTY = {"op": "empty"}
-HIGH, LOW, PAIR = "\ud800", "\udc00", "😀"
+HIGH, LOW, PAIR = "\ud800", "\udc00", "\ud83d\ude00"
 #: texts holding surrogates on their own, a pair, and an astral
 #: character written as one code point
 TEXTS = [HIGH, LOW, "a" + HIGH, LOW + HIGH, PAIR, "a" + PAIR, "\U0001f600", ""]
