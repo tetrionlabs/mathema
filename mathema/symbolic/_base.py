@@ -1458,18 +1458,28 @@ def _wrapper_is_read(fn) -> bool:  # :draft
         or _passes_through(fn)  # :draft
 
 
-def _passes_through(fn) -> bool:
+def _passes_through(fn) -> bool:  # :draft
     """Intent:
         Whether the Python function `fn` is a wrapper whose definition is,
         after its docstring, the single statement `return g(*args,
+        **kwargs)`, or the lambda `lambda *args, **kwargs: g(*args,
         **kwargs)`, taking nothing but `*args` and `**kwargs` and handing
         both on unchanged, where `g` is a variable of an enclosing function
         that holds the function `fn` links as `__wrapped__`: the call runs
         that function on the same arguments and returns or raises what it
         does. The definition is read from the source of `fn`'s own code
         object, whose names must match it.
+
+    Notes:
+        Two more spellings hand on the same arguments. `**{**kwargs}` is a
+        new dict of the same keywords. `*args[::-1]` is the same positional
+        arguments when there is at most one, so it is read only where the
+        wrapped function is a plain Python function taking at most one
+        positional argument: a call with two or more is refused by that
+        function with a TypeError in either order.
     """
     import textwrap
+    import types
     code = fn.__code__
     if code.co_flags & (inspect.CO_GENERATOR | inspect.CO_COROUTINE
                         | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE):
@@ -1478,24 +1488,47 @@ def _passes_through(fn) -> bool:
         tree = ast.parse(textwrap.dedent(inspect.getsource(code)))
     except (OSError, TypeError, SyntaxError, IndentationError):
         return False
-    fdef = tree.body[0] if tree.body else None
-    if not isinstance(fdef, ast.FunctionDef) or fdef.name != code.co_name:
-        return False
-    args = fdef.args
+    if code.co_name == "<lambda>":
+        lambdas = [n for n in ast.walk(tree) if isinstance(n, ast.Lambda)]
+        if len(lambdas) != 1 or lambdas[0].lineno != 1:
+            return False
+        args, call = lambdas[0].args, lambdas[0].body
+    else:
+        fdef = tree.body[0] if tree.body else None
+        if not isinstance(fdef, ast.FunctionDef) or fdef.name != code.co_name:
+            return False
+        body = strip_docstring(fdef.body)
+        if len(body) != 1 or not isinstance(body[0], ast.Return):
+            return False
+        args, call = fdef.args, body[0].value
     if args.posonlyargs or args.args or args.kwonlyargs or args.vararg is None \
             or args.kwarg is None or args.defaults or fn.__defaults__ or fn.__kwdefaults__:
         return False
-    body = strip_docstring(fdef.body)
-    if len(body) != 1 or not isinstance(body[0], ast.Return):
-        return False
-    call = body[0].value
     if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
             and len(call.args) == 1 and isinstance(call.args[0], ast.Starred)
-            and isinstance(call.args[0].value, ast.Name)
-            and call.args[0].value.id == args.vararg.arg
-            and len(call.keywords) == 1 and call.keywords[0].arg is None
-            and isinstance(call.keywords[0].value, ast.Name)
-            and call.keywords[0].value.id == args.kwarg.arg):
+            and len(call.keywords) == 1 and call.keywords[0].arg is None):
+        return False
+    positional, keywords = call.args[0].value, call.keywords[0].value
+    wrapped = getattr(fn, "__wrapped__", None)
+    reversed_ = isinstance(positional, ast.Subscript) \
+        and isinstance(positional.slice, ast.Slice) \
+        and positional.slice.lower is None and positional.slice.upper is None \
+        and isinstance(positional.slice.step, ast.UnaryOp) \
+        and isinstance(positional.slice.step.op, ast.USub) \
+        and isinstance(positional.slice.step.operand, ast.Constant) \
+        and type(positional.slice.step.operand.value) is int \
+        and positional.slice.step.operand.value == 1
+    if reversed_:
+        if type(wrapped) is not types.FunctionType or "__wrapped__" in vars(wrapped) \
+                or wrapped.__code__.co_argcount > 1 \
+                or wrapped.__code__.co_flags & inspect.CO_VARARGS:
+            return False
+        positional = positional.value
+    if isinstance(keywords, ast.Dict) and keywords.keys == [None] \
+            and len(keywords.values) == 1:
+        keywords = keywords.values[0]
+    if not (isinstance(positional, ast.Name) and positional.id == args.vararg.arg
+            and isinstance(keywords, ast.Name) and keywords.id == args.kwarg.arg):
         return False
     held = call.func.id
     if code.co_varnames != (args.vararg.arg, args.kwarg.arg) \
@@ -1505,7 +1538,94 @@ def _passes_through(fn) -> bool:
         cell = fn.__closure__[code.co_freevars.index(held)].cell_contents
     except ValueError:
         return False
-    return cell is getattr(fn, "__wrapped__", None)
+    return wrapped is not None and cell is wrapped
+
+
+def _domain_guard_covers(fn) -> "frozenset | None":  # :draft
+    """Intent:
+        The parameters the wrapper `fn` checks before it calls the function
+        it wraps, when `fn` is the wrapper `enforce_domain` builds with no
+        missing-value policy: the keys of the domain it enforces. It binds
+        the arguments to the wrapped function's signature and judges only
+        the ones that domain names; every other argument is handed on
+        unread. None for any other object.
+
+    Notes:
+        The wrapper is recognised by its code, defined in mathema's
+        authoring module, and its own closure: `_check` is the check it
+        runs, `policies` is empty, and the domain is the one `_check`'s
+        `_violation` looks each name up in.
+    """
+    import os
+    import types
+    from .. import authoring
+    if type(fn) is not types.FunctionType or fn.__closure__ is None \
+            or os.path.abspath(fn.__code__.co_filename) != os.path.abspath(authoring.__file__):
+        return None
+
+    def cell(function, name):
+        return function.__closure__[function.__code__.co_freevars.index(name)].cell_contents
+
+    try:
+        if fn.__code__.co_freevars != ("_check", "fn", "policies") or cell(fn, "policies"):
+            return None
+        check = cell(fn, "_check")
+        if vars(fn).get("__mathema_domain_check__") is not check:
+            return None
+        merged = cell(cell(check, "_violation"), "merged_domain")
+    except (ValueError, AttributeError, TypeError, IndexError):
+        return None
+    if type(merged) is not dict or not all(type(k) is str for k in merged):
+        return None
+    return frozenset(merged)
+
+
+def parameters_no_wrapper_reads(fn, params) -> frozenset:  # :draft
+    """Intent:
+        The parameters among `params` whose argument reaches the function's
+        body untouched by anything between the call of `fn` and that body:
+        all of them when `fn` is a plain Python function, or a method bound
+        to an instance of one. Under wrappers that link the function as
+        `__wrapped__`, a parameter stays only when every wrapper on the way
+        is one whose own definition is read as leaving it alone: a wrapper
+        that hands its arguments on unchanged (`_passes_through`, a
+        `staticmethod`, an instance whose `__call__` hands over), the
+        `functools.lru_cache` wrapper, and the `enforce_domain` guard for
+        the parameters its domain does not name (`_domain_guard_covers`).
+        Any other wrapper, mathema's other guards among them, may read
+        every argument, and none stays.
+
+    Notes:
+        `lru_cache` hashes each argument. The missing values a domain lists
+        are realised as `None`, a float nan and the scalar markers of the
+        array libraries, each of which hashes.
+    """
+    import functools
+    import types
+    from .._instance_callable import hands_over_to_wrapped
+    left = frozenset(params)
+    for _ in range(16):
+        if type(fn) is types.MethodType:
+            fn = fn.__func__
+            continue
+        try:
+            inner = vars(fn).get("__wrapped__") if type(fn) is types.FunctionType \
+                else getattr(fn, "__wrapped__", None)
+        except Exception:
+            return frozenset()
+        if inner is None:
+            return left if type(fn) is types.FunctionType else frozenset()
+        if type(fn) is types.FunctionType:
+            covered = _domain_guard_covers(fn)
+            if covered is not None:
+                left -= covered
+            elif not _passes_through(fn):
+                return frozenset()
+        elif type(fn) is not getattr(functools, "_lru_cache_wrapper", None) \
+                and type(fn) is not staticmethod and not hands_over_to_wrapped(fn):
+            return frozenset()
+        fn = inner
+    return frozenset()
 
 
 def _wrapper_name(fn) -> str:
