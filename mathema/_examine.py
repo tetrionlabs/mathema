@@ -86,6 +86,13 @@ class Effects:
     guards: dict = field(default_factory=dict)
     #: the branch conditions around the statement being examined
     branch: tuple = ()
+    #: the source of each `if` test in the function's own body, and of
+    #: each inside a function defined in it
+    own_tests: set = field(default_factory=set)
+    nested_tests: set = field(default_factory=set)
+    #: the parameters whose name holds the argument throughout the
+    #: call: nothing in the function, at any depth, binds it again
+    fixed_params: set = field(default_factory=set)
     #: writes the function makes to one of its own parameters, as
     #: (parameter, site): a caller decides whether what it passes there
     #: is its own object or one from outside the call
@@ -112,9 +119,15 @@ class Effects:
         if site not in bucket:
             bucket.append(site)
             self.guards[site] = self.branch
-        elif not self.branch:
-            # reached outside every branch as well
-            self.guards[site] = ()
+        else:
+            # reached under other conditions as well: the conditions
+            # every way to it shares still enclose it
+            seen = self.guards.get(site, ())
+            shared = 0
+            while (shared < min(len(seen), len(self.branch))
+                   and seen[shared] == self.branch[shared]):
+                shared += 1
+            self.guards[site] = seen[:shared]
 
     def merge(self, other: "Effects") -> None:
         for site in (*other.writes, *other.hidden_reads,
@@ -711,6 +724,43 @@ def _own_statements(tree):
             stack.extend(ast.iter_child_nodes(node))
 
 
+def _names_bound_in(tree) -> set:
+    """Intent:
+        Every name a statement or expression inside the function `tree`
+        binds, at any depth: assignment, augmented assignment, `:=`,
+        `for`, `with`, `except ... as`, `del`, `global` and `nonlocal`,
+        import, a pattern capture, a function or class defined in it and
+        the parameters of each such function or lambda. The function's
+        own parameters are not among them unless bound again.
+    """
+    bound: set = set()
+    own = tree.args
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(
+                node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update((a.asname or a.name).split(".")[0]
+                         for a in node.names)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)) and node is not tree:
+            bound.add(node.name)
+        elif isinstance(node, ast.arguments) and node is not own:
+            bound.update(a.arg for a in (
+                *node.posonlyargs, *node.args, *node.kwonlyargs,
+                *([node.vararg] if node.vararg else []),
+                *([node.kwarg] if node.kwarg else [])))
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound
+
+
 def _own_returns(tree) -> list:
     return [n for n in _own_statements(tree) if isinstance(n, ast.Return)]
 
@@ -781,6 +831,9 @@ class _Examiner:
                                   if isinstance(node, ast.Nonlocal)
                                   for n in node.names}
         self.params = params
+        self.effects.fixed_params = set(params) - _names_bound_in(tree)
+        #: how many functions defined in the body enclose the statement
+        self.nesting = 0
         #: names the body assigns to, anywhere
         self.rebound = {t.id for node in ast.walk(tree)
                         if isinstance(node, (ast.Assign, ast.AugAssign,
@@ -1137,6 +1190,8 @@ class _Examiner:
         if isinstance(node, ast.If):
             self.expr(node.test)
             test = ast.unparse(node.test)
+            (self.effects.nested_tests if self.nesting
+             else self.effects.own_tests).add(test)
             outer = self.effects.branch
             before = dict(self.origin)
             after = []
@@ -1221,11 +1276,13 @@ class _Examiner:
         for default in (*args.defaults, *args.kw_defaults):
             if default is not None:
                 self.expr(default)
+        self.nesting += 1
         if isinstance(body, list):
             for stmt in body:
                 self.visit(stmt)
         else:
             self.expr(body)
+        self.nesting -= 1
         self.origin = before
 
     def _entered(self, node):

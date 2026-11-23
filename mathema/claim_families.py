@@ -1637,7 +1637,7 @@ def _examined_verdict(found: list, unread: list, clean: str,
     for site in found:
         guard = (effects.guards.get(site, ()) if effects is not None
                  else ())
-        why = _branch_unreachable_over(guard, domain)
+        why = _branch_unreachable_over(guard, domain, effects)
         if why is None:
             reachable.append(site)
         else:
@@ -1659,26 +1659,33 @@ def _examined_verdict(found: list, unread: list, clean: str,
                        + "".join(f"; it assumes {a}" for a in assumes))
 
 
-def _branch_unreachable_over(guard: tuple, domain: dict | None) -> "str | None":
+def _branch_unreachable_over(guard: tuple, domain: dict | None,
+                             effects=None) -> "str | None":
     """Intent:
         How the branch around a site is shown unreachable over `domain`,
         or None when it is not. `guard` holds pairs of a condition's
         source and whether the site is in its body (True) or its else
         (False). The branch is unreachable when one condition is the
-        constant that never takes it, or when the condition reads a
-        single parameter the domain bounds by an interval, solved
-        exactly (`sympy.solveset`) to take it nowhere in the interval,
-        and evaluated at each missing value the bound admits without
-        taking it there either.
-    Raises:
-        Nothing: a condition sympy cannot read, or one whose solving
-        runs past the fast cap, is not shown unreachable.
+        constant that never takes it, or when one condition compares a
+        single parameter with numeric literals (`_literal_test_region`),
+        the reals where it takes the branch miss the interval the domain
+        gives that parameter, and it does not take the branch at a
+        missing value the bound admits either.
+
+    Notes:
+        The comparison is read from the condition's text, so it is
+        about the argument only where the name holds the argument when
+        the test runs: the parameter is one nothing in the function
+        binds again (`Effects.fixed_params`), and the test stands in
+        the function's own body, not in a function defined there
+        (`Effects.own_tests`, `Effects.nested_tests`). A comparison of
+        a float or an integer with a literal is exact in Python, so the
+        reals decide it; a condition with arithmetic, another operator,
+        a call or a second name is not read.
     """
     import ast as _ast
 
     import sympy
-
-    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
     for source, taken in guard or ():
         shown = source if taken else f"not ({source})"
         try:
@@ -1690,40 +1697,115 @@ def _branch_unreachable_over(guard: tuple, domain: dict | None) -> "str | None":
                 return (f"its test `{source}` is the constant "  # :draft
                         f"{constant!r}, so the branch never runs")
             continue
-        if not domain:
+        if not domain or effects is None:
             continue
-        try:
-            condition = sympy.sympify(
-                source, locals={name: sympy.Symbol(name, real=True)
-                                for name in domain})
-        except Exception:
+        # :draft the rule: one parameter against numeric literals only
+        if (source not in effects.own_tests
+                or source in effects.nested_tests):
             continue
-        if not taken:
-            condition = sympy.Not(condition)
-        names = {str(sym) for sym in getattr(condition, "free_symbols", ())}
-        if len(names) != 1:
+        read = _literal_test_region(source)
+        if read is None:
             continue
-        (name,) = names
+        name, region = read
+        if name not in effects.fixed_params:
+            continue
         bounds = domain.get(name)
         if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2
-                and all(isinstance(b, (int, float)) for b in bounds)):
+                and all(isinstance(b, (int, float))
+                        and not isinstance(b, bool) and b == b
+                        for b in bounds)):
             continue
         lo, hi = (sympy.oo if b == math.inf else -sympy.oo if b == -math.inf
-                  else sympy.nsimplify(b) for b in bounds)
-        symbol = next(iter(condition.free_symbols))
-        try:
-            found = _with_timeout(
-                lambda c=condition, x=symbol, a=lo, b=hi: sympy.solveset(
-                    c, x, sympy.Interval(a, b)), FAST_TIMEOUT_SECONDS)
-        except Exception:
-            continue
-        if found is not sympy.S.EmptySet:
+                  else sympy.Rational(b) for b in bounds)
+        if not taken:
+            region = sympy.Complement(sympy.S.Reals, region)
+        if sympy.Intersection(region, sympy.Interval(lo, hi)) \
+                is not sympy.S.EmptySet:
             continue
         if _taken_at_a_missing_value(source, taken, name, bounds):
             continue
         return (f"`{shown}` holds nowhere in [{bounds[0]:g}, {bounds[1]:g}], "  # :draft
                 f"solved exactly, nor at a missing value the domain admits")
     return None
+
+
+def _literal_test_region(source: str) -> "tuple | None":
+    """Intent:
+        `(name, region)` for a condition built only from comparisons
+        (`<`, `<=`, `>`, `>=`, `==`, `!=`) between the one bare name
+        `name` and a numeric literal on either side, joined by `and`,
+        `or` and `not`: `region` is the set of reals at which the
+        condition is true, each literal taken at its exact value. None
+        for any other condition.
+
+    Notes:
+        A literal is an integer or a finite float, with an optional
+        sign; a chained comparison is not read.
+    """
+    import ast as _ast
+
+    import sympy
+    try:
+        tree = _ast.parse(source, mode="eval").body
+    except SyntaxError:
+        return None
+    names: set = set()
+
+    def literal(node):
+        sign = 1
+        if isinstance(node, _ast.UnaryOp) and isinstance(
+                node.op, (_ast.USub, _ast.UAdd)):
+            sign = -1 if isinstance(node.op, _ast.USub) else 1
+            node = node.operand
+        if not (isinstance(node, _ast.Constant)
+                and type(node.value) in (int, float)
+                and math.isfinite(node.value)):
+            return None
+        return sign * sympy.Rational(node.value)
+
+    def region(node):
+        if isinstance(node, _ast.BoolOp):
+            parts = [region(v) for v in node.values]
+            if any(p is None for p in parts):
+                return None
+            return (sympy.Intersection if isinstance(node.op, _ast.And)
+                    else sympy.Union)(*parts)
+        if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.Not):
+            inner = region(node.operand)
+            return None if inner is None else sympy.Complement(
+                sympy.S.Reals, inner)
+        if not (isinstance(node, _ast.Compare) and len(node.ops) == 1):
+            return None
+        left, op, right = node.left, node.ops[0], node.comparators[0]
+        flipped = not isinstance(left, _ast.Name)
+        if flipped:
+            left, right = right, left
+        value = literal(right)
+        if not isinstance(left, _ast.Name) or value is None:
+            return None
+        names.add(left.id)
+        kind = type(op)
+        if flipped:
+            kind = {_ast.Lt: _ast.Gt, _ast.LtE: _ast.GtE, _ast.Gt: _ast.Lt,
+                    _ast.GtE: _ast.LtE}.get(kind, kind)
+        if kind is _ast.Lt:
+            return sympy.Interval.open(-sympy.oo, value)
+        if kind is _ast.LtE:
+            return sympy.Interval(-sympy.oo, value)
+        if kind is _ast.Gt:
+            return sympy.Interval.open(value, sympy.oo)
+        if kind is _ast.GtE:
+            return sympy.Interval(value, sympy.oo)
+        if kind is _ast.Eq:
+            return sympy.FiniteSet(value)
+        if kind is _ast.NotEq:
+            return sympy.Complement(sympy.S.Reals, sympy.FiniteSet(value))
+        return None
+
+    found = region(tree)
+    if found is None or len(names) != 1:
+        return None
+    return names.pop(), found
 
 
 def _taken_at_a_missing_value(source: str, taken: bool, name: str,
