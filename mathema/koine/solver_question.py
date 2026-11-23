@@ -158,6 +158,10 @@ _PAIR = {"op": "concat", "args": [
     {"op": "chars", "ranges": [[0xD800, 0xDBFF]]}, {"op": "chars", "ranges": [[0xDC00, 0xDFFF]]},
     {"op": "repeat", "arg": {"op": "chars", "ranges": [[0, regular.MAX_CODE_POINT]]},
      "min": 0, "max": None}]}
+#: what a member holding a surrogate pair is returned with when the
+#: search for a member holding none gets no answer
+NO_PAIR_FREE_ANSWER = ("the member holds a surrogate pair, and no member without a surrogate "
+                       "pair was found")
 #: what a member holding a surrogate pair is returned with
 ONLY_PAIRS = ("every value the question has holds a surrogate pair, which JSON text reads back "
               "as the one character beyond the basic plane it encodes")
@@ -489,8 +493,9 @@ def find_member(inside, outside, *, valued_only: bool = False,
         not place the solver's value as asked, or when the solver gives
         no answer in time or is not installed. A member holding no
         surrogate pair is given where one exists; a member holding one is
-        given only when every member does, with `ONLY_PAIRS` as its
-        reason.
+        given with `ONLY_PAIRS` as its reason when every member does, and
+        with `NO_PAIR_FREE_ANSWER` when the search for one with no pair
+        gets no answer.
     """
     inside, outside = list(inside), list(outside)
     try:
@@ -520,8 +525,11 @@ def find_member(inside, outside, *, valued_only: bool = False,
         again = _checked(z3, solver, timeout_ms)
         if again == z3.sat:
             value = reading.read(solver.model())
-        else:
+        elif again == z3.unsat:
             note = ONLY_PAIRS
+        else:
+            note = (f"{NO_PAIR_FREE_ANSWER} within {timeout_ms} ms "
+                    f"({solver.reason_unknown()})")
     got = [_outcome(d, value) for d in inside + outside]
     if None in got:
         return Found("unknown", reason=f"a document has no value at {value!r}, so it is "
@@ -599,5 +607,6 @@ def derived_truth_at(document, value, *, timeout_ms: int = 5000) -> "bool | None
     return true
 
 
-__all__ = ["Found", "NoReading", "derived_truth_at", "find_member",
+__all__ = ["Found", "NO_PAIR_FREE_ANSWER", "NoReading", "ONLY_PAIRS", "derived_truth_at",
+           "find_member",
            "find_point_without_value"]
