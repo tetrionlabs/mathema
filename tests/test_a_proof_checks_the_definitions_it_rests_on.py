@@ -42,7 +42,7 @@ def _over(letters, definition, name):
     return StringLanguage(
         name, level="predicate", accepts=lambda s: set(s) <= set(letters), pool=letters,
         generate=lambda rng: "".join(rng.choice(letters) for _ in range(rng.randint(0, 3))),
-        schema={"definition": definition})
+        schema={"term": definition})
 
 
 #: accepts every string over a and b and states a*: the definition misses members
@@ -77,12 +77,12 @@ def _reads_wrongly(callee):
 def _refine(language, arguments, negated):
     pattern = re.compile(json.loads(arguments[0]))
     letter = {"a*": 97, "b*": 98}[pattern.pattern]
-    base = language.to_json()["definition"]["language"]
+    base = language.to_json()["term"]["language"]
     return StringLanguage(
         f"{language.name}, spelled ({arguments[0]})", level="predicate",
         accepts=lambda s: language.contains(s) and pattern.fullmatch(s) is not None,
         pool="ab", generate=lambda rng: "",
-        schema={"definition": _exact({"op": "inter", "args": [base, _star((letter, letter))]})})
+        schema={"term": _exact({"op": "inter", "args": [base, _star((letter, letter))]})})
 
 
 SPELLED = PredicateWord("spelled", _refine, reads_call=_reads)
@@ -190,7 +190,7 @@ def _line_accepts(s):
 LINE = StringLanguage(
     "line", level="predicate", accepts=_line_accepts, pool="abcdefghijklmnopqrstuvwxyz",
     generate=lambda rng: "".join(rng.choice("abcxyz") for _ in range(rng.randint(0, 6))),
-    schema={"definition": LOWER_UP_TO_SIX})
+    schema={"term": LOWER_UP_TO_SIX})
 
 
 @pytest.fixture
