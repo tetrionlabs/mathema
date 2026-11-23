@@ -51,7 +51,7 @@ class Defined:
     def to_json(self):
         out = {"name": self.name}
         if self.definition is not None:
-            out["definition"] = self.definition
+            out["term"] = self.definition
         return out
 
 
@@ -181,7 +181,7 @@ class Defined:
         return isinstance(value, str) and bool(self._accepts(value))
 
     def to_json(self):
-        return {"name": self.name, "definition": self._definition}
+        return {"name": self.name, "term": self._definition}
 
 
 def _class_plus(pattern):
@@ -199,7 +199,7 @@ def _reads(callee):
 
 def _refine(language, arguments, negated):
     pattern = re.compile(json.loads(arguments[0]))
-    node = {"op": "inter", "args": [language.to_json()["definition"]["language"],
+    node = {"op": "inter", "args": [language.to_json()["term"]["language"],
                                     _class_plus(pattern.pattern)]}
     return Defined(f"{language.name}, reads as ({arguments[0]})",
                    lambda s: language.contains(s) and pattern.fullmatch(s) is not None,
