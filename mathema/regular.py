@@ -838,6 +838,9 @@ class _Lowering:
         for node in nodes:
             _char_sets(node, sets)
         self.alphabet = alphabet
+        #: the character sets the atoms were cut by: a node is lowered
+        #: only when each of its sets is one of these
+        self.cut_by = [list(map(list, s)) for s in sets]
         self.starts, self.atom_of, self.members = _atoms(alphabet, sets)
         self.sort = z3.ReSort(z3.StringSort())
         if self.members:
@@ -867,9 +870,23 @@ class _Lowering:
         return self.atom_of[bisect_right(self.starts, code) - 1]
 
     def regex(self, node: dict):
-        """The z3 regular expression for a canonical node."""
+        """Intent:
+            The z3 regular expression for a node, made canonical first.
+
+        Raises:
+            InvalidTerm: the node is not of the schema, or a character
+                set in it is not one the atoms were cut by, so the atoms
+                may not tell its characters apart.
+        """
         key = json.dumps(node, sort_keys=True)
         if key not in self._seen:
+            node = canonical(node)
+            sets: list = []
+            _char_sets(node, sets)
+            unknown = [ranges for ranges in sets if ranges not in self.cut_by]
+            if unknown:
+                raise InvalidTerm(f"the character set {unknown[0]!r} was not lowered with this "
+                                  f"question, so its atoms may not tell its characters apart")
             self._seen[key] = self._regex(node)
         return self._seen[key]
 
@@ -912,10 +929,21 @@ class _Lowering:
         return build(*parts)
 
     def decode(self, text: str) -> str:
-        """A solver string as a string over the alphabet, each symbol
-        read as its atom's member."""
+        """Intent:
+            A solver string as a string over the alphabet, each symbol
+            read as its atom's member.
+
+        Raises:
+            InvalidTerm: a character of `text` is no atom's symbol.
+        """
         plain = re.sub(r"\\u\{([0-9a-fA-F]+)\}", lambda m: chr(int(m.group(1), 16)), text)
-        return "".join(chr(self.members[ord(ch) - _SYMBOL_BASE]) for ch in plain)
+        out = []
+        for ch in plain:
+            atom = ord(ch) - _SYMBOL_BASE
+            if not 0 <= atom < len(self.members):
+                raise InvalidTerm(f"{ch!r} is no atom's symbol in this lowering")
+            out.append(chr(self.members[atom]))
+        return "".join(out)
 
 
 
@@ -930,7 +958,10 @@ def lower_into(nodes, z3, alphabet=None):  # :draft
         over the atoms, and `decode(text)` a string the solver gives,
         each symbol read as a character of its atom. The nodes are
         lowered together because the atoms are shared: two nodes lowered
-        apart could cut the alphabet two ways.
+        apart could cut the alphabet two ways. `regex` makes its node
+        canonical and refuses one with a character set the atoms were
+        not cut by; `decode` refuses a character that is no atom's
+        symbol.
 
     Raises:
         InvalidTerm: a node or the alphabet is not of the schema.
