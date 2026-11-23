@@ -385,7 +385,7 @@ def a_text_is_in_its_language(i: int, t: int) -> bool:
     lt, s = _lt(), _syntax()
     node, text = REGULAR[int(i)], TEXTS[int(t)]
     term = s.Term(lt.IN_LANGUAGE, (_present(), lt.exact(lt.from_node(node))))
-    return _at(term, text) == Value(regular.node_member(node, text))
+    return _at(term, text) == Value(regular.contains(node, text))
 
 
 def _malformed_expressions() -> list:
