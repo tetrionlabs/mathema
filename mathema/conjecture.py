@@ -9534,6 +9534,40 @@ def _corners_and_draws(run: int, corners: int) -> str:
     return " and ".join(parts)
 
 
+def _stated_policies(conjectures) -> tuple:
+    """Intent:
+        The policy each policy claim among `conjectures` states.
+    """
+    from .policy import parse_policy
+    found = []
+    for c in conjectures:
+        if getattr(c, "relation", None) != "policy":
+            continue
+        stated = parse_policy(f"{c.lhs} {c.rhs}".strip())
+        if stated is not None:
+            found.append(stated)
+    return tuple(found)
+
+
+def _stated_raise(p: str, what: str, member, raised: str):
+    """Intent:
+        The stated policy row that says f raises `raised` (or any
+        exception, when the row names none) for the `what` kind of `p`
+        (`absent`, `missing`, with `member`), or None. A row with a
+        premise covers only part of the inputs and is not read here. The
+        rows are those of the claims being checked
+        (`_empty_input.STATED`).
+    """
+    from ._empty_input import STATED
+    for stated in _stated_policies(STATED.get()):
+        if stated.kind == what and stated.parameter in (None, p) \
+                and stated.member in (None, member) \
+                and stated.behaviour == "raises" and not stated.premise \
+                and stated.exception in (None, raised):
+            return stated
+    return None
+
+
 class _ListedOutcome:
     """What the function did at a named missing value no run decided:
     `text` says it; `wrong` is the point where the result breaks the
@@ -9550,9 +9584,10 @@ def _listed_value_judged(fn, facts, p: str, sentinel, shown: str,
     """Intent:
         Judge a named missing value at `points`, the points where the
         relation was not decided, by what the function did there. A
-        raise at every point behind the function's own raising guard
-        leaves the value out of the printed domain, the note naming the
-        guard and the policy row that shows it. None (or nan) at every
+        raise at every point behind the function's own raising guard, or
+        one a stated policy row says f raises, leaves the value out of
+        the printed domain, the note naming the guard and the policy row
+        that shows it, or the stated row. None (or nan) at every
         point is judged against the return annotation: one that does
         not admit it gives the first point as `wrong`; None where the
         annotation admits it, or there is none, leaves the value out of
@@ -9597,6 +9632,13 @@ def _listed_value_judged(fn, facts, p: str, sentinel, shown: str,
                 # :draft
                 f"{shown} {kind.replace('raised', 'raises')}, from the guard on "
                 f"line {guard[2]} ({what}[{p}])", left_out=True)
+        stated = _stated_raise(p, what, sentinel.member, kind.split(" ", 1)[1])
+        if stated is not None:
+            from .policy import policy_text
+            return _ListedOutcome(
+                # :draft
+                f"{shown} {kind.replace('raised', 'raises')}, as the stated row "
+                f"{policy_text(stated)} says", left_out=True)
         return _ListedOutcome(f"{kind} at each")  # :draft
     if kind == "gave no value":
         return _ListedOutcome("gave no value at each")  # :draft
