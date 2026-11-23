@@ -15,7 +15,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
 
 ### Fixes
-- The check of a language's definition compares the strings the claim itself writes. Agreement on the values tried is no proof: the definition, the reading of a validator and `<L> holds only texts` each stand as `assumed`, with a `corroboration` record of the values drawn, compared and skipped, the seed and the outcome. A proven line names each assumption it rests on and its corroboration.
+- The check of a language's definition compares the strings the claim itself writes. Agreement on the values tried is no proof: the definition, the reading of a validator and `<L> holds only texts` each stand as `assumed`, with an `axiom` id and a `corroboration` record of the values drawn, compared and skipped, the seed and the outcome. A proven line names each definition it assumes.
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
