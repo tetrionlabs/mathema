@@ -94,7 +94,7 @@ def only_deletes(x, y):
 
 def deletes_twice(x, y):
     del y
-    del y
+    del y  # noqa: F821
     if x < 0:
         raise ValueError("n")
     return x
@@ -103,7 +103,7 @@ def deletes_twice(x, y):
 def deletes_then_reads(x, y):
     del y
     if x < 0:
-        raise ValueError(y)
+        raise ValueError(y)  # noqa: F821
     return x
 
 
