@@ -410,6 +410,12 @@ def test_an_executed_write_in_a_branch_the_domain_reaches_proves_it():
     assert "x = 20" in p.sketch, p.sketch
 
 
+def test_a_write_past_a_number_the_test_names_is_witnessed_beside_it():
+    p = _row(past_ten, "not is_state_safe(f)")
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "x = 10.0000" in p.sketch, p.sketch
+
+
 def test_two_calls_that_differ_prove_the_function_is_not_deterministic():
     p = _row(draws, "for x in [0, 1], not is_deterministic(f)")
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)

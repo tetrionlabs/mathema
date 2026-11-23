@@ -9488,10 +9488,28 @@ def _an_ordinary_value(bound):
 _NO_VALUE = object()
 
 
+def _all_plain_scalars(facts, cj_domain: dict) -> bool:
+    """Whether every parameter is a single value: none is read as a
+    sequence, a table or a matrix, and no bound gives one a shape."""
+    from .domain import _as_domain
+    kinds = getattr(facts, "param_kinds", None) or {}
+    for p in facts.params:
+        if kinds.get(p, "scalar") not in ("scalar", "unknown"):
+            return False
+        bound = (cj_domain or {}).get(p)
+        try:
+            if bound is not None and getattr(_as_domain(bound), "dims", ()):
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def _definedness_at_listed_missing(ctx, fn, facts, cj_domain: dict, proof):
     """Intent:
-        A proven or undecided `is_defined` checked at every missing
-        value its domain lists (`{1, None}`, `[0, 1] | absent`, `{nan}`):
+        A proven `is_defined`, or an undecided one with no premise over
+        single-valued parameters, checked at every missing value its
+        domain lists (`{1, None}`, `[0, 1] | absent`, `{nan}`):
         the body's raise region is read over the real numbers, so each
         listed value is run, every other parameter at one ordinary value
         of its domain. `disproven` with the first raising call as an
@@ -10680,13 +10698,16 @@ def _unexecuted_negation(proof):
         meta=dict(proof.meta or {}))
 
 
-def _witness_points(facts, cj_domain: dict) -> list:
+def _witness_points(facts, cj_domain: dict, tests=()) -> list:
     """Intent:
         A few points of the claim's domain to look for a witness at:
         every parameter at its bound's upper end, at its lower end, at
         its midpoint, and at one ordinary value (`_an_ordinary_value`),
-        a parameter with no interval at its ordinary value throughout.
-        Empty when some parameter has no ordinary value.
+        a parameter with no interval at its ordinary value throughout;
+        then, for each number an `if` test in `tests` (sources) compares
+        a parameter with, that parameter at the number and at the float
+        on each side of it, where its bound admits them. Empty when some
+        parameter has no ordinary value.
     """
     from .domain import domain_contains
     base = {p: _an_ordinary_value((cj_domain or {}).get(p))
@@ -10713,7 +10734,33 @@ def _witness_points(facts, cj_domain: dict) -> list:
             points.append(point)
     if base not in points:
         points.append(base)
-    return points
+    for source in sorted(tests):
+        try:
+            tree = ast.parse(source, mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
+                continue
+            sides = [node.left, node.comparators[0]]
+            for name, number in (sides, sides[::-1]):
+                if not (isinstance(name, ast.Name) and name.id in base
+                        and isinstance(number, ast.Constant)
+                        and type(number.value) in (int, float)
+                        and math.isfinite(number.value)):
+                    continue
+                at = float(number.value)
+                for value in (math.nextafter(at, math.inf), at,
+                              math.nextafter(at, -math.inf)):
+                    bound = (cj_domain or {}).get(name.id)
+                    try:
+                        inside = bound is None or domain_contains(value, bound)
+                    except Exception:
+                        inside = False
+                    point = {**base, name.id: value}
+                    if inside and point not in points:
+                        points.append(point)
+    return points[:24]
 
 
 def _negation_witnessed(ctx, fn, facts):
@@ -10735,7 +10782,7 @@ def _negation_witnessed(ctx, fn, facts):
     import copy
     import sys
 
-    from ._examine import examine
+    from ._examine import _unwrapped, examine
     from .claim_families import _generator_parameter
     from .gates import _fmt_point
     from .runtime_types import calling
@@ -10753,18 +10800,21 @@ def _negation_witnessed(ctx, fn, facts):
     cj_domain = ctx.cj_domain or {}
     names = list(facts.params)
 
+    own = getattr(_unwrapped(fn), "__globals__", None) or {}
+
     def held():
         out = {}
         for module, name in sorted(effects.module_writes):
             try:
-                out[(module, name)] = copy.deepcopy(
-                    getattr(sys.modules[module], name))
+                scope = (own if own.get("__name__") == module
+                         else vars(sys.modules[module]))
+                out[(module, name)] = copy.deepcopy(scope[name])
             except Exception:
                 return None
         return out
 
     run = calling(fn, facts, _declared_elements(cj_domain))
-    for point in _witness_points(facts, cj_domain):
+    for point in _witness_points(facts, cj_domain, effects.own_tests):
         args = [point[p] for p in names]
         where = _fmt_point(point, names) or "the call with no arguments"
         try:
@@ -12383,7 +12433,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                                 assumption=assumption)
                             if family_derive is not None else None)
     if (family_proof is not None
-            and family_proof.status in ("proven", "undecided")
+            and (family_proof.status == "proven"
+                 or family_proof.status == "undecided" and not assumption
+                 and _all_plain_scalars(facts, cj_domain))
             and "is_defined" in (region_row_kind(cj.name), cj.relation)):
         family_proof = _definedness_at_listed_missing(ctx, fn, facts,
                                                       cj_domain, family_proof)
