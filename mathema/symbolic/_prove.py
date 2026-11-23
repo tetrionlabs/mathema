@@ -4828,56 +4828,131 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
     proof = _raises_read(fn, facts, exc_name, domain, max_callee_depth)
-    if proof.status == "proven" and _call_departs_from_domain(tree.body, facts.params,
-                                                               domain or {}):  # :draft
+    if proof.status != "proven":
+        return proof
+    params = _call_parameters(fn, facts.params)
+    if _call_departs_from_domain(tree.body, params, domain or {}):  # :draft
         return ProofResult("unliftable", sketch=(
             # :draft
-            f"derive reads raises(...) at f({', '.join(facts.params)}) over the "
+            f"derive reads raises(...) at f({', '.join(params)}) over the "
             f"claim's domain, and the call written is {call_src}"))
+    unread = _unread_argument(tree.body)
+    if unread is not None:
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"the call's argument `{unread}` is evaluated before the function runs, "
+            f"and is not read as unable to raise"))
     return proof
+
+
+def _call_parameters(fn, params: list) -> list:  # :draft
+    """Intent:
+        The parameters a call of `fn` fills, in order: `params` without
+        its first when `fn` is a method bound to an instance of a plain
+        Python function whose first parameter that is, since the call
+        `f(a, b)` runs the function at `(instance, a, b)`; `params`
+        itself for anything else.
+    """
+    import types
+    held = getattr(fn, "__func__", None)
+    if type(fn) is types.MethodType and type(held) is types.FunctionType \
+            and "__wrapped__" not in vars(held) and params \
+            and held.__code__.co_argcount >= 1 \
+            and held.__code__.co_varnames[0] == params[0]:
+        return list(params[1:])
+    return list(params)
+
+
+def _folded_number(node: ast.AST) -> "int | float | None":  # :draft
+    """Intent:
+        The number an expression of numeric literals evaluates to when
+        every operation in it is defined: an integer or float literal,
+        `+a`, `-a`, `a + b`, `a - b`, `a * b`, and `a / b`, `a // b`,
+        `a % b` with `b` not zero. None for anything else: a name, a
+        call, a power, a division or remainder by zero, a result too
+        large for a float.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) in (int, float) else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _folded_number(node.operand)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if not isinstance(node, ast.BinOp):
+        return None
+    a, b = _folded_number(node.left), _folded_number(node.right)
+    if a is None or b is None:
+        return None
+    try:
+        if isinstance(node.op, ast.Add):
+            return a + b
+        if isinstance(node.op, ast.Sub):
+            return a - b
+        if isinstance(node.op, ast.Mult):
+            return a * b
+        if b == 0:
+            return None
+        if isinstance(node.op, ast.Div):
+            return a / b
+        if isinstance(node.op, ast.FloorDiv):
+            return a // b
+        if isinstance(node.op, ast.Mod):
+            return a % b
+    except (OverflowError, ZeroDivisionError):
+        return None
+    return None
+
+
+def _unread_argument(call: ast.Call) -> "str | None":  # :draft
+    """Intent:
+        The source of the first argument of the call whose evaluation is
+        not read as unable to raise, None when every one is read: a
+        literal, a bare name (a variable the claim binds), or arithmetic
+        over numeric literals whose every operation is defined
+        (`_folded_number`).
+    """
+    for argument in [*call.args, *(k.value for k in call.keywords)]:
+        if isinstance(argument, (ast.Constant, ast.Name)) \
+                or _folded_number(argument) is not None:
+            continue
+        return ast.unparse(argument)
+    return None
 
 
 def _call_departs_from_domain(call: ast.Call, params: list, domain: dict) -> bool:
     """Intent:
         Whether the call passes, in some parameter's place, a value other
-        than the one the domain binds to that parameter: an argument
-        naming a variable the domain binds anywhere but as itself in its
-        own parameter's position (`f(-x)`, `f(x + 10)`, `f(y, x)`), or a
-        literal in the place of a parameter the domain binds to anything
-        but that one point (`for x in [-5, -1]`, `f(1)`). A literal in the
-        place of a parameter the domain does not bind, or binds to the
-        literal's own point, departs from nothing.
+        than the one the domain binds to that parameter. Each argument is
+        paired with the parameter it fills, by position or by keyword. An
+        argument that is its own parameter's name departs from nothing.
+        Any other argument departs when it names a variable (`f(-x)`,
+        `f(x + 10)`, `f(y, x)`, `f(x=y, y=x)`), when it fills no
+        parameter of the function or one already filled, or when it
+        stands in the place of a parameter the domain binds and is
+        anything but the number of that one point (`for x in [-5, -1]`,
+        `f(1)`, `f(1 + 1)`, `f("a")`). A constant in the place of a
+        parameter the domain does not bind departs from nothing.
     """
     bound = set(domain)
-    for index, argument in enumerate(call.args):
-        param = params[index] if index < len(params) else None
+    pairs = [(params[index] if index < len(params) else None, argument)
+             for index, argument in enumerate(call.args)]
+    pairs += [(k.arg if k.arg in params else None, k.value) for k in call.keywords]
+    filled = [param for param, _ in pairs]
+    if None in filled or len(set(filled)) != len(filled):
+        return True
+    for param, argument in pairs:
         if isinstance(argument, ast.Name) and argument.id == param:
             continue
-        names = {n.id for n in ast.walk(argument) if isinstance(n, ast.Name)}
-        if names & bound:
+        if any(isinstance(n, ast.Name) for n in ast.walk(argument)):
             return True
-        literal = _literal_number(argument)
-        if literal is not None and param in bound:
+        if param in bound:
+            number = _folded_number(argument)
             point = domain[param]
-            if not (isinstance(point, tuple) and len(point) == 2
-                    and point[0] == point[1] == literal):
+            if number is None or not (isinstance(point, tuple) and len(point) == 2
+                                      and point[0] == point[1] == number):
                 return True
-    return any({n.id for n in ast.walk(k.value) if isinstance(n, ast.Name)} & bound
-               for k in call.keywords)
-
-
-def _literal_number(node: ast.AST) -> "float | None":
-    """Intent:
-        The value of a numeric literal argument (`3`, `-1.5`), None for
-        any other expression.
-    """
-    sign = 1.0
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        sign = -1.0 if isinstance(node.op, ast.USub) else 1.0
-        node = node.operand
-    if isinstance(node, ast.Constant) and type(node.value) in (int, float):
-        return sign * float(node.value)
-    return None
+    return False
 
 
 def _raises_read(fn, facts, exc_name: str | None, domain: dict | None,
