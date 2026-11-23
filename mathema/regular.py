@@ -95,7 +95,8 @@ def _ranges(raw, where: str) -> list:
     for pair in raw:
         # a pair written as a tuple is the list it stands for
         if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi]")
+            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi] "  # :draft
+                              f"(two code points in a list, as JSON writes it, or in a tuple)")
         lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
         if lo > hi:
             raise InvalidTerm(f"{where}: the range {pair!r} ends before it starts")
@@ -495,7 +496,6 @@ def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
             out = _cat(_derivative(arg, code, seen, depth), rest)
     seen[key] = out
     return out
-
 
 
 class _Steps(dict):
@@ -914,8 +914,6 @@ class _Lowering:
         read as its atom's member."""
         plain = re.sub(r"\\u\{([0-9a-fA-F]+)\}", lambda m: chr(int(m.group(1), 16)), text)
         return "".join(chr(self.members[ord(ch) - _SYMBOL_BASE]) for ch in plain)
-
-
 
 
 def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -> Found:
