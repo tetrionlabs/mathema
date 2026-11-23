@@ -1,0 +1,8 @@
+claims.koine_record_soundness_support.an_inconsistent_definition_decides_nothing:
+  claims:
+    - name: an_inconsistent_definition_decides_nothing
+      statement: 'for i in {0, 1, 2, 3, 4, 5, 6}, d in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, w in {0, 1, 2, 3, 4}, f(i, d, w) == True'
+claims.koine_record_soundness_support.a_witness_holds_no_surrogate_pair_where_one_can_be_found:
+  claims:
+    - name: a_witness_holds_no_surrogate_pair_where_one_can_be_found
+      statement: 'for q in {0, 1, 2, 3, 4, 5, 6, 7}, f(q) == True'

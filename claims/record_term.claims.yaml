@@ -1,0 +1,20 @@
+claims.record_term_support.a_valid_vector_has_its_canonical_text_and_hash:
+  claims:
+    - name: a_valid_vector_has_its_canonical_text_and_hash
+      statement: 'for i in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78}, f(i) == True'
+claims.record_term_support.an_invalid_vector_is_refused:
+  claims:
+    - name: an_invalid_vector_is_refused
+      statement: 'for i in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(i) == True'
+claims.record_term_support.canonical_is_idempotent:
+  claims:
+    - name: canonical_is_idempotent
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}, f(t) == True'
+claims.record_term_support.canonical_keeps_the_written_meaning:
+  claims:
+    - name: canonical_keeps_the_written_meaning
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}, v in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46}, f(t, v) == True'
+claims.record_term_support.built_definitions_keep_the_written_meaning:
+  claims:
+    - name: built_definitions_keep_the_written_meaning
+      statement: 'for d in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, e in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, v in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46}, f(d, e, v) == True'

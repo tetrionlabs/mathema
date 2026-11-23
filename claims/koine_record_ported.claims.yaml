@@ -1,0 +1,32 @@
+claims.koine_record_ported_support.a_term_is_inside_itself_and_disjoint_from_its_complement:
+  claims:
+    - name: a_term_is_inside_itself_and_disjoint_from_its_complement
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(t) == True'
+claims.koine_record_ported_support.a_term_is_inside_its_union_and_around_its_intersection:
+  claims:
+    - name: a_term_is_inside_its_union_and_around_its_intersection
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, u in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(t, u) == True'
+claims.koine_record_ported_support.inclusion_is_transitive:
+  claims:
+    - name: inclusion_is_transitive
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, u in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, w in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(t, u, w) == True'
+claims.koine_record_ported_support.a_term_equals_its_canonical_form:
+  claims:
+    - name: a_term_equals_its_canonical_form
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(t) == True'
+claims.koine_record_ported_support.a_text_of_any_character_is_found:
+  claims:
+    - name: a_text_of_any_character_is_found
+      statement: 'for i in {0, 1, 2, 3, 4}, f(i) == True'
+claims.koine_record_ported_support.an_unconfirmed_solver_value_is_unknown:
+  claims:
+    - name: an_unconfirmed_solver_value_is_unknown
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(t) == True'
+claims.koine_record_ported_support.no_answer_is_unknown:
+  claims:
+    - name: no_answer_is_unknown
+      statement: 'for t in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}, f(t) == True'
+claims.koine_record_ported_support.the_solver_tells_numbers_from_booleans:
+  claims:
+    - name: the_solver_tells_numbers_from_booleans
+      statement: 'for c in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, d in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, f(c, d) == True'
