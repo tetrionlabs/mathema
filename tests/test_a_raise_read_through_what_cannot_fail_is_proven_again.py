@@ -12,6 +12,7 @@ proven: an instance cause whose constructor refuses, a first link that is
 true somewhere, a group member that is not an exception, a wrapper that
 changes the arguments, and a listed missing value on a parameter the
 raise reads."""
+import builtins
 import functools
 from typing import Optional
 
@@ -20,6 +21,8 @@ import pytest
 from mathema.conjecture import check_conjectures, claim
 
 _NEG = "for x in [-5, -1], "
+_needs_groups = pytest.mark.skipif(not hasattr(builtins, "ExceptionGroup"),
+                                   reason="Python 3.11 or later")
 
 
 def cause_class(x: float) -> float:
@@ -106,7 +109,7 @@ def _row(fn, text):
 @pytest.mark.parametrize("fn,text", [
     (cause_class, _NEG + "raises(f(x), ValueError)"),
     (chain_short_circuits, _NEG + "raises(f(x), ValueError)"),
-    (group, _NEG + "raises(f(x), ExceptionGroup)"),
+    pytest.param(group, _NEG + "raises(f(x), ExceptionGroup)", marks=_needs_groups),
     (wrapped, _NEG + "raises(f(x), ValueError)"),
     (unused_second, _NEG + "y in {1, None}, raises(f(x, y), ValueError)"),
 ], ids=["cause class", "short circuit", "group", "pass-through wrapper", "unused None"])
@@ -118,7 +121,8 @@ def test_a_raise_that_cannot_fail_on_the_way_is_proven(fn, text):
 @pytest.mark.parametrize("fn,text", [
     (cause_refuses, _NEG + "raises(f(x), ValueError)"),
     (chain_reaches_text, _NEG + "raises(f(x), ValueError)"),
-    (group_of_a_number, _NEG + "raises(f(x), ExceptionGroup)"),
+    pytest.param(group_of_a_number, _NEG + "raises(f(x), ExceptionGroup)",
+                 marks=_needs_groups),
     (wrapped_negated, _NEG + "raises(f(x), ValueError)"),
     (used_second, _NEG + "y in {1, None}, raises(f(x, y), ValueError)"),
 ], ids=["cause refuses", "chain reaches text", "group of a number", "negating wrapper",
