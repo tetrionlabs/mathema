@@ -9293,12 +9293,14 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
         dom = _as_domain(bound)
         if not p.isidentifier() or dom.base_type == "L" or dom.dims:
             continue
+        policy = ctx.missing.get(p, NO_ANNOTATION)
+        if _restates_missing_defaults(dom, (NO_ANNOTATION, policy)):
+            continue
         named = set(_set_sentinels(dom)) | ({ABSENT} if dom.absent else set())
         sentinels = sorted((s for s in named if s not in dom.excluded),
                            key=_member_sort_key)
         if not sentinels:
             continue
-        policy = ctx.missing.get(p, NO_ANNOTATION)
         listed[p] = [(s, v) for s in sentinels
                      for v in realise_sentinel(s, policy.members, policy.absence)]
     if not listed:
@@ -9439,6 +9441,34 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                          + (f": the function raised {raised}" if raised else "")),
                  meta={**meta, "mathema.corroboration": "reproduced",
                        "mathema.witness_executed": True})
+
+
+def _restates_missing_defaults(dom, defaults) -> bool:  # :draft
+    """Intent:
+        Whether the domain's type clause admits exactly the missing
+        values one of `defaults` (each a `MissingDefaults`) admits where
+        a domain states nothing: the object's absence when `absent`, the
+        whole hole class when it has `members`, and nothing else. This
+        is the text the renderer writes for an interval or a named type
+        that names no missing value (`[1.0, 5.0] : float|absent|missing`
+        read without its function, `: float|missing` beside a `float`
+        parameter, `R|absent|missing`), so such a clause names none. A
+        set or a union that lists a sentinel (`{1, None}`,
+        `[0, 1] | {None}`), and a clause that admits anything other
+        than a default (`: float|absent` beside a `float` parameter,
+        `: float|nan`), names what it lists.
+    """
+    from .domain import ABSENT, MISSING, _is_enumerated, _set_sentinels
+    typed = dom.clause or (dom.explicit_type and not any(
+        not isinstance(piece, frozenset) for piece in dom.pieces))
+    if not typed or _is_enumerated(dom) or dom.dims:
+        return False
+    if any(isinstance(v, type(ABSENT)) for v in dom.excluded):
+        return False
+    stated = (bool(dom.absent), frozenset(_set_sentinels(dom)))
+    return any(stated == (bool(d.absent),
+                          frozenset({MISSING}) if d.members else frozenset())
+               for d in defaults if d is not None)
 
 
 def _listed_value_clock() -> float:
