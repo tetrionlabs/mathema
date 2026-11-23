@@ -24,6 +24,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - `is_empty_safe(xs)` runs every empty input the parameter admits (the empty tuple beside the empty list for a plain or abstract sequence), and a raise on a non-empty input no longer falsifies it.
 - `excluded_outside_domain(x)` is proven by construction only for a wrapper `enforce_domain` or `enforce_dimensions` built; a function that merely carries their attribute is decided by calls outside the domain.
 - A division by zero on the claim's own side that only the float evaluation makes (`exp(f(x)) / exp(f(x))` at x = -1e6, where exp underflows to 0.0) is no counterexample: read exactly the side has a value there, so the point is left undecided; a division by zero the claim states exactly still falsifies.
+- The safety gate (`is_missing_safe(f)`, `is_absent_safe(f)`) is no stronger than its weakest row: a stated policy row that only holds leaves the gate at holds; every row proven, from a stated row or a guard the body reads, still proves it.
 
 ## 0.6.6.1
 
