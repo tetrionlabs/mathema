@@ -13,12 +13,22 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ### Upgrading from 0.6.6.1
 - A claim whose every variable is a text has no `[float]` companion row.
+- Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 1 in this release: canonical statement text). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. The claim identity (`claims_fingerprint`) does not carry the rules number; it moves only for a claim whose stored text this release writes differently (a negated relation, a string literal an earlier release quoted ambiguously).
+- The stored statement text of a string literal is written from its value, and a negated relation keeps its parentheses. A domain set's string member is still read as the text between its quotes (`{"\t"}` is a backslash and a t); when that differs from the same text read as an expression literal, `mathema verify` says so in a note. A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
+- `lineage.statement_text` is no longer written.
+- A claim whose stored text 0.6.6.1 wrote and cannot read back (`= not (a < x and x < b)`) is checked again as written and re-recorded with a note, where 0.6.6.1 failed the whole function with "rebuild the record". An edit made to that claim since its record was written is adopted without `--as superseded`.
 
 ### Fixes
 - The check of a language's definition compares the strings the claim itself writes. Agreement on the values tried is no proof: the definition, the reading of a validator and `<L> holds only texts` each stand as `assumed`, with an `axiom` id and a `corroboration` record of the values drawn, compared and skipped, the seed and the outcome. A proven line names a definition it assumes when a value was skipped or none was compared.
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
 - The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
+- Stored text an earlier release wrote for two different claims (`f(s, '}"', 's')` and `f(s, '}"", "s')`) is reported as ambiguous, naming both readings and `mathema accept ... --as superseded` for an edit; the claim is checked as written, never kept at its old verdict.
+- A key that raises after its record is written, while it is checked or while its dependencies are settled, gets the record it had before the run back, whatever stopped it (an exception, running out of memory, an interrupt or the wall-clock alarm), and a read of the store later in the same run sees what is on disk.
+- A claim whose stored text mathema cannot write fails its function's row and shows its kept row as `unchecked`; the function is checked again on every run until the text can be written.
+- A risk accepted on a claim that a later check proves or finds holding stays in the record as history, is no longer counted as accepted risk, and the sweep says so.
+- After an earlier key's release move, a moved key still names its rename remedy.
+- A note names each character it shows (`a tab (U+0009)`), a claim whose stored text moved in more than one way gets every note that applies, and docsync's diagnostics follow `--root`.
 
 ## 0.6.6.1
 

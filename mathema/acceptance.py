@@ -1275,6 +1275,29 @@ def _apply_attested(plan: dict, attestation) -> str:
     if plan["as"] == "superseded":
         entry = doc[plan["key"]]
         claims = entry.get("claims") or []
+        earlier = (target.get("meta") or {}).pop("mathema.earlier_reading", None)
+        if isinstance(earlier, dict):
+            # the live row is the claim as written, already checked; the
+            # earlier reading of its stored text is what is superseded
+            import copy
+            prior = copy.deepcopy(target)
+            prior["statement"] = earlier.get("statement")
+            prior["verdict"] = earlier.get("verdict")
+            for field_name in ("note", "sketch", "counterexample", "n",
+                               "condition", "acceptance_history"):
+                prior.pop(field_name, None)
+            prior["accepted"] = plan["accepted"]
+            prior["acceptance_history"] = [event]
+            prior["superseded_by"] = target.get("name")
+            entry.setdefault("superseded", []).append(prior)
+            _restamp_integrity(doc[plan["key"]])
+            write_yaml(plan["path"], doc,
+                       header=f"machine record; supersession of "
+                              f"{target.get('name')}")
+            # :draft
+            return (f"superseded: the earlier reading of {target.get('name')} "
+                    f"({earlier.get('statement')}); the claim as written "
+                    f"stays as checked")
         target["accepted"] = plan["accepted"]
         target.setdefault("acceptance_history", []).append(event)
         target["superseded_by"] = target.get("name")
