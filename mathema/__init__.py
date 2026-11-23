@@ -985,6 +985,8 @@ def check(fn, claims: list | None = None, domain: dict | None = None,
             probes = probes + _policy.default_rows(
                 fn, facts, parent_domain or {}, covered, _policy.row_name,
                 optional_only=not written)
+        from .conjecture import link_claim_groups
+        link_claim_groups(probes)
     if all_claims:
         # the split offer's own runs are not the record's claims: they
         # stay out of the calls the policy rows read

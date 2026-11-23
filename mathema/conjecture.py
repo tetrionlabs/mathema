@@ -9366,7 +9366,18 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                     left_out.setdefault(p, []).append(_sentinel_word(
                         sentinel, ascii_mode=True))
                     lowered = lowered or outcome.lowers
-                    notes.append(outcome.text)
+                    if outcome.row is None:
+                        notes.append(outcome.text)
+                    else:
+                        notes.append(
+                            # :draft
+                            (f"the listed value {shown} was run at {ran}{of_others} "
+                             f"and {outcome.text}" if not swept else
+                             f"the listed value {shown} {outcome.text.replace(' at each', '')}")
+                            # :draft
+                            + f", which no guard or stated row covers, so {shown} "
+                              f"is left out of the domain and judged by the policy "
+                              f"row {outcome.row}")
                 elif not swept:
                     notes.append(
                         # :draft
@@ -9572,11 +9583,12 @@ class _ListedOutcome:
     """What the function did at a named missing value no run decided:
     `text` says it; `wrong` is the point where the result breaks the
     return annotation, else None; `left_out` whether the value leaves
-    the printed domain; `lowers` whether that lowers a proof to holds."""
+    the printed domain; `lowers` whether that lowers a proof to holds;
+    `row` the policy row that judges a raise nothing covers, else None."""
 
-    def __init__(self, text, wrong=None, left_out=False, lowers=False):
+    def __init__(self, text, wrong=None, left_out=False, lowers=False, row=None):
         self.text, self.wrong = text, wrong
-        self.left_out, self.lowers = left_out, lowers
+        self.left_out, self.lowers, self.row = left_out, lowers, row
 
 
 def _listed_value_judged(fn, facts, p: str, sentinel, shown: str,
@@ -9584,10 +9596,11 @@ def _listed_value_judged(fn, facts, p: str, sentinel, shown: str,
     """Intent:
         Judge a named missing value at `points`, the points where the
         relation was not decided, by what the function did there. A
-        raise at every point behind the function's own raising guard, or
-        one a stated policy row says f raises, leaves the value out of
-        the printed domain, the note naming the guard and the policy row
-        that shows it, or the stated row. None (or nan) at every
+        raise at every point leaves the value out of the printed domain:
+        behind the function's own raising guard, or one a stated policy
+        row says f raises, the note names the guard and the policy row
+        that shows it, or the stated row; a raise nothing covers names
+        the policy row (`row`) that judges it. None (or nan) at every
         point is judged against the return annotation: one that does
         not admit it gives the first point as `wrong`; None where the
         annotation admits it, or there is none, leaves the value out of
@@ -9639,7 +9652,8 @@ def _listed_value_judged(fn, facts, p: str, sentinel, shown: str,
                 # :draft
                 f"{shown} {kind.replace('raised', 'raises')}, as the stated row "
                 f"{policy_text(stated)} says", left_out=True)
-        return _ListedOutcome(f"{kind} at each")  # :draft
+        return _ListedOutcome(f"{kind} at each", left_out=True,  # :draft
+                              row=f"{what}[{p}]")
     if kind == "gave no value":
         return _ListedOutcome("gave no value at each")  # :draft
     result = kind.split(" ", 1)[1]
@@ -9717,6 +9731,32 @@ def _listed_values_not_run(ctx, fn, facts, cj_domain: dict, listed: dict,
                  # :draft
                  note="the relation was derived over the real points; "
                       + "; ".join(notes))
+
+
+def link_claim_groups(probes: list) -> None:
+    """Intent:
+        Give each mathematics row that left a named missing value out of
+        its printed domain (`meta["mathema.listed_left_out"]`) the
+        policy rows that judge that value, under
+        `meta["mathema.claim_group"]`: one entry per row, its name, its
+        verdict and the value, so a policy row's verdict reaches the
+        claim it was written in.
+    """
+    policy_rows = [p for p in probes if (p.meta or {}).get("mathema.policy")]
+    for row in probes:
+        left_out = (row.meta or {}).get("mathema.listed_left_out") or {}
+        group = []
+        for param, words in left_out.items():
+            for word in words:
+                kind = "absent" if word == "absent" else "missing"
+                shown = "None" if word == "absent" else word
+                for other in policy_rows:
+                    pol = other.meta["mathema.policy"]
+                    if pol.get("kind") == kind and pol.get("parameter") in (None, param):
+                        group.append({"row": other.name, "verdict": other.verdict,
+                                      "value": f"{param} = {shown}"})
+        if group:
+            row.meta = {**row.meta, "mathema.claim_group": group}  # :draft
 
 
 def _listed_value_inside(bound):
