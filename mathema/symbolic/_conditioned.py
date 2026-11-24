@@ -14,6 +14,9 @@ branch.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
+
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -1199,12 +1202,36 @@ def _read_the_raise(fn, facts: Facts, domain: dict, trace: list, stmt: ast.Raise
         `fn` links, which `lift_conditioned` reads only when each such
         wrapper's call is read (`wrapper_refusal`).
     """
-    from .._raise_reading import ANY, kind_of_bound
+    from .._raise_reading import ANY, kind_of_bound, kind_of_value
     steps = []
     for step in trace:
         if step[0] == "stmt" and step[1] is stmt:
             break
         steps.append(step)
     kinds = {p: kind_of_bound(domain[p]) if p in domain else ANY for p in facts.params}
+    for p, value in (_CALL_CONSTANTS.get() or {}).items():  # :draft
+        if p in kinds and p not in domain:
+            kinds[p] = kind_of_value(value)
     from ._base import innermost
     return read_raise_path(innermost(fn), steps, stmt, kinds)
+
+
+#: the constant the call being read passes for each parameter the domain
+#: does not bind, None when no call is being read
+_CALL_CONSTANTS: "contextvars.ContextVar[dict | None]" = contextvars.ContextVar(
+    "mathema_call_constants", default=None)
+
+
+@contextlib.contextmanager
+def call_constants(constants: dict):  # :draft
+    """Intent:
+        While the block runs, the path to a raise is read with each
+        parameter of `constants` holding exactly the value the claim's
+        call writes for it (`f(x, 'a')` passes the string `'a'`), where
+        the domain does not bind that parameter.
+    """
+    token = _CALL_CONSTANTS.set(dict(constants))
+    try:
+        yield
+    finally:
+        _CALL_CONSTANTS.reset(token)

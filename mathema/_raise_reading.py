@@ -737,6 +737,10 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
         if isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant) \
                 and isinstance(node.left.value, str):
             return _percent_level(node, kinds, ns)
+        if isinstance(node.op, ast.Mult):  # :draft
+            repeated = _repeated(a, b)
+            if repeated is not None:
+                return level, repeated
         return UNKNOWN, ANY
     if isinstance(node, ast.BoolOp):
         level, kind = TOTAL, _EMPTY
@@ -802,6 +806,31 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
             level = min(level, read_expression(element, kinds, ns)[0])
         return level, ValueKind(frozenset({tuple if isinstance(node, ast.Tuple) else list}))
     return UNKNOWN, ANY
+
+
+#: the largest count a string, tuple or list is read to be repeated by
+_REPEAT_MOST = 4096.0
+
+
+def _repeated(a: ValueKind, b: ValueKind) -> "ValueKind | None":  # :draft
+    """Intent:
+        The kind of `a * b` where it repeats a string, a tuple or a list a
+        bounded number of times: one operand is always of that one type,
+        the other always an `int` or a `bool` of magnitude at most
+        `_REPEAT_MOST`. The result is of the same type (empty for a count
+        of zero or less), and nothing is raised. None for anything else.
+    """
+    def sequence(k):
+        return k.types is not None and len(k.types) == 1 and k.types <= {str, tuple, list}
+
+    def count(k):
+        return k.types is not None and bool(k.types) and k.types <= {int, bool} \
+            and k.magnitude <= _REPEAT_MOST
+    if sequence(a) and count(b):
+        return ValueKind(a.types)
+    if count(a) and sequence(b):
+        return ValueKind(b.types)
+    return None
 
 
 def _source(node: ast.AST) -> str:

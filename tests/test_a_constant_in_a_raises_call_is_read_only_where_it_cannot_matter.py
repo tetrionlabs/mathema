@@ -166,3 +166,30 @@ def test_a_form_that_is_not_read_is_named(argument, form):
     assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
     said = f"{row.sketch} {row.note}"
     assert "is not read" not in said or form in said, said
+
+
+def doubles_second(x, y):
+    if x < 0:
+        z = y * 2
+        raise ValueError(z)
+    return x
+
+
+@pytest.mark.parametrize("argument,raised", [
+    ("None", "TypeError"), ("1.5 < 2 < None", "TypeError"), ("{1: 2}", "TypeError"),
+], ids=["None", "a comparison with None", "a dict"])
+def test_a_literal_the_raise_cannot_compute_with_is_not_proven(argument, raised):
+    call = f"f(x, {argument})"
+    assert _outcome(doubles_second, call, {"x": -2.0}) == raised
+    (row,) = check_conjectures(
+        doubles_second, [claim(_NEG + f"raises({call}, ValueError)", route="derive")])
+    assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
+
+
+@pytest.mark.parametrize("argument", ["'a'", "(1, 2)", "[1]", "3"])
+def test_the_raise_is_read_at_the_literal_the_call_passes(argument):
+    call = f"f(x, {argument})"
+    assert _outcome(doubles_second, call, {"x": -2.0}) == "ValueError"
+    (row,) = check_conjectures(
+        doubles_second, [claim(_NEG + f"raises({call}, ValueError)", route="derive")])
+    assert row.verdict == "proven", (row.verdict, row.sketch, row.note)

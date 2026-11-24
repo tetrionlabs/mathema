@@ -644,7 +644,7 @@ THIRD_EXPECTED = {
     'cases2[5]': 'falsified',
     'cases2[6]': 'falsified',
     'cases2[7]': 'holds',
-    'cases2[8]': 'holds',
+    'cases2[8]': 'proven',
     'cases2[9]': 'holds',
     'cases2[10]': 'proven',
     'cases2[11]': 'proven',

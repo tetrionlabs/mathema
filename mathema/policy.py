@@ -396,6 +396,20 @@ def guard_is_read(guard) -> bool:
                                   or (len(guard) > 3 and guard[3] is not None))
 
 
+def _assuming(guard, meta: dict) -> str:  # :draft
+    """Intent:
+        The words for the annotations a guard's reading took as types,
+        ", assuming y is a float, as annotated", empty when it took none;
+        the same assumptions are recorded on the row as
+        `meta["mathema.assumptions"]["annotations"]`.
+    """
+    assumed = list(guard[4]) if guard is not None and len(guard) > 4 else []
+    if not assumed:
+        return ""
+    meta.setdefault("mathema.assumptions", {})["annotations"] = assumed
+    return ", assuming " + " and ".join(assumed)  # :draft
+
+
 def _guard_raises_the_claimed(guard, expected: "str | None", fn) -> bool:
     """Intent:
         Whether a guard's behaviour meets a stated `raises(...)`: the guard's
@@ -1026,7 +1040,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                 and _guard_raised_it(fn, found_guards[0], calls):
             guard = found_guards[0]
     if guard is not None:
-        reason = f"stated; from the guard on line {guard[2]}; {evidence}"
+        reason = f"stated; from the guard on line {guard[2]}{_assuming(guard, meta)}; {evidence}"
         meta["mathema.policy"]["reason"] = reason
         return Probe(cj.name, statement, "proven", n=len(calls), route="examine",
                      note=reason, meta=meta)
@@ -1305,6 +1319,14 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
         too when calling `fn` does not run that body: a wrapper whose call
         is not read, or a generator or coroutine function
         (`suspended_call_refusal`).
+
+    Notes:
+        The result is `(read, assumed)`. The path is read first with every
+        other parameter any object. Where that does not read it, a
+        parameter annotated `float`, `int`, `bool` or `str` is taken to
+        hold a value of exactly that type (`_annotated_kind`), and
+        `assumed` says so for each one the path names: "y is a float, as
+        annotated".
     """
     from .symbolic._base import innermost, strip_docstring
     from ._raise_reading import ANY, ReadRaise, read_raise_path
@@ -1318,31 +1340,72 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
     body = strip_docstring(tree.body)
     if not any(stmt is node for stmt in body):
         return None
+    def read_with(kinds: dict):
+        steps: list = []
+        earlier: list = []
+        for stmt in body:
+            if stmt is node:
+                break
+            if isinstance(stmt, ast.If) and not stmt.orelse and len(stmt.body) == 1 \
+                    and isinstance(stmt.body[0], ast.Raise):
+                taken = read_raise_path(body_fn, steps + [("test", stmt.test)],
+                                        stmt.body[0], kinds)
+                if not isinstance(taken, ReadRaise):
+                    return None, steps
+                earlier.append(taken.cls)
+                steps.append(("test", stmt.test))
+                continue
+            steps.append(("stmt", stmt))
+        steps.append(("test", node.test))
+        for stmt in node.body:
+            if stmt is raise_stmt:
+                break
+            steps.append(("stmt", stmt))
+        read = read_raise_path(body_fn, steps, raise_stmt, kinds)
+        if not isinstance(read, ReadRaise) or not all(issubclass(c, read.cls) for c in earlier):
+            return None, steps
+        return read, steps
+
     kinds = {q: ANY for q in facts.params}
     kinds[param] = _hole_kind(fn, param, kind, member)
-    steps: list = []
-    earlier: list = []
-    for stmt in body:
-        if stmt is node:
-            break
-        if isinstance(stmt, ast.If) and not stmt.orelse and len(stmt.body) == 1 \
-                and isinstance(stmt.body[0], ast.Raise):
-            taken = read_raise_path(body_fn, steps + [("test", stmt.test)], stmt.body[0], kinds)
-            if not isinstance(taken, ReadRaise):
-                return None
-            earlier.append(taken.cls)
-            steps.append(("test", stmt.test))
-            continue
-        steps.append(("stmt", stmt))
-    steps.append(("test", node.test))
-    for stmt in node.body:
-        if stmt is raise_stmt:
-            break
-        steps.append(("stmt", stmt))
-    read = read_raise_path(body_fn, steps, raise_stmt, kinds)
-    if not isinstance(read, ReadRaise) or not all(issubclass(c, read.cls) for c in earlier):
+    read, _ = read_with(kinds)
+    if read is not None:
+        return read, ()
+    annotated = {q: found for q in facts.params if q != param
+                 for found in [_annotated_kind(body_fn, q)] if found is not None}
+    if not annotated:
         return None
-    return read
+    read, steps = read_with({**kinds, **{q: found[0] for q, found in annotated.items()}})
+    if read is None:
+        return None
+    named = {n.id for _, step in steps for n in ast.walk(step) if isinstance(n, ast.Name)}
+    return read, tuple(f"{q} is {annotated[q][1]}, as annotated"
+                       for q in facts.params if q in annotated and q in named)
+
+
+#: the annotations a policy proof takes as a parameter's exact type, with
+#: the words for each
+_ANNOTATED_TYPES = ((float, "a float"), (int, "an int"), (bool, "a bool"), (str, "a string"))
+
+
+def _annotated_kind(fn, param: str):  # :draft
+    """Intent:
+        `(kind, words)` for a parameter annotated with exactly `float`,
+        `int`, `bool` or `str`: a value of that one type, and "a float".
+        None for any other annotation or none. The annotation is the
+        class itself, or its name as text where the function's module
+        gives that name no other meaning.
+    """
+    from ._raise_reading import ValueKind
+    try:
+        annotation = fn.__annotations__.get(param)
+    except AttributeError:
+        return None
+    for cls, words in _ANNOTATED_TYPES:
+        if annotation is cls or (annotation == cls.__name__ and type(annotation) is str
+                                 and cls.__name__ not in getattr(fn, "__globals__", {})):
+            return ValueKind(frozenset({cls})), words
+    return None
 
 
 def guard_policies(facts, fn=None) -> dict:
@@ -1361,7 +1424,8 @@ def guard_policies(facts, fn=None) -> dict:
         other return drops. A raising check on each entry of a sequence
         parameter (`for v in xs: if isnan(v): raise`, `if any(isnan(v)
         for v in xs): raise`) states the policy for the holes in it.
-        A raising guard's entry is `("raises", name, line, cls)`: `cls`
+        A raising guard's entry is `("raises", name, line, cls, assumed)`,
+        `assumed` the annotations its reading took as types (`_guard_raise`): `cls`
         the class raised when the path from the entry of `fn` (the live
         function `facts` describes) to the `raise` is read as raising
         exactly that class (`_guard_raise`), else None, which marks the
@@ -1500,10 +1564,12 @@ def guard_policies(facts, fn=None) -> dict:
                 # function's entry to the raise is read as raising
                 # exactly that class; an unread guard still says the
                 # raise is deliberate, and proves nothing
-                read = _guard_raise(fn, facts, tree, node, raise_stmt, p, kind, member)
-                if read is not None:
+                found = _guard_raise(fn, facts, tree, node, raise_stmt, p, kind, member)
+                if found is not None:
+                    read, assumed = found
                     out.setdefault((p, kind, member),
-                                   ("raises", read.cls.__name__, node.lineno, read.cls))
+                                   ("raises", read.cls.__name__, node.lineno, read.cls,
+                                    assumed))
                     continue
                 exc = raise_stmt.exc
                 name = None
@@ -1871,7 +1937,8 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
                        f"from the guard on line {guard[2]}, whose path to its raise "
                        f"is not read; {evidence}")
         return row("proven", behaviour, exception, "derived",
-                   f"from the guard on line {guard[2]}; {evidence}", route="examine")
+                   f"from the guard on line {guard[2]}{_assuming(guard, meta)}; {evidence}",
+                   route="examine")
     if origin == "type":
         from ._missing_words import DEFAULTS
         expected = DEFAULTS[kind]

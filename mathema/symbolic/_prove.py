@@ -4844,14 +4844,15 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
-    with call_keywords(call_src):
+    from ._conditioned import call_constants
+    params = _call_parameters(fn, facts.params)
+    reading = _CallReading(
+        params=params, domain=domain or {},
+        taken=frozenset(facts.params) | frozenset(domain or {}) | frozenset(bound_names))
+    with call_keywords(call_src), call_constants(_scalar_constants(tree.body, reading)):
         proof = _raises_read(fn, facts, exc_name, domain, max_callee_depth)
         if proof.status != "proven":
             return proof
-        params = _call_parameters(fn, facts.params)
-        reading = _CallReading(
-            params=params, domain=domain or {},
-            taken=frozenset(facts.params) | frozenset(domain or {}) | frozenset(bound_names))
         refused = _structure_guard_refusal(fn, tree.body, reading)  # :draft
         if refused is not None:
             return ProofResult("unliftable", sketch=refused)
@@ -4952,6 +4953,29 @@ def _structure_guard_refusal(fn, call: ast.Call, reading: "_CallReading") -> "st
     except Exception as error:
         return f"an enforce_structure guard around the function is not read ({type(error).__name__})"
     return None
+
+
+def _scalar_constants(call: ast.Call, reading: "_CallReading") -> dict:  # :draft
+    """Intent:
+        `{parameter: value}` for each parameter the domain does not bind
+        whose place in the call holds a constant (`_constant_value`) that
+        is an `int`, a `float`, a `bool`, a `str`, a tuple, a list or None: the value the
+        function's body runs with there. Empty for a call that fills a
+        parameter twice or one the function does not have.
+    """
+    pairs = [(reading.params[i] if i < len(reading.params) else None, a)
+             for i, a in enumerate(_positional_arguments(call))]
+    pairs += [(k.arg if k.arg in reading.params else None, k.value) for k in call.keywords]
+    names = [param for param, _ in pairs]
+    if None in names or len(set(names)) != len(names):
+        return {}
+    out = {}
+    for param, argument in pairs:
+        value = _constant_value(argument, reading.taken)
+        if param not in reading.domain and value is not _UNREAD \
+                and (value is None or type(value) in (int, float, bool, str, tuple, list)):
+            out[param] = value
+    return out
 
 
 def _call_parameters(fn, params: list) -> list:  # :draft
@@ -5338,10 +5362,11 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
         [-5, -1]`, `f(1)`, `f(1 + 1)`, `f("a")` depart). In the place of a
         parameter the domain does not bind, a literal or arithmetic over
         literals departs from nothing, and so does any other constant
-        whose value is a number (`pi`, `2 * pi`, `max(1, 2)`) where no
-        wrapper on the way reads that parameter; a tuple, a list or a
-        comparison departs there. A constant that does not hash departs
-        where a wrapper on the way hashes its arguments.
+        (`pi`, `max(1, 2)`, `(1, 2)`, `1 < 2`) where no wrapper on the way
+        reads that parameter: the path to the raise is read with the
+        parameter holding that value (`_scalar_constants`). A constant
+        that does not hash departs where a wrapper on the way hashes its
+        arguments.
     """
     params, domain, taken = reading.params, reading.domain, reading.taken
     pairs = [(params[index] if index < len(params) else None, argument)
@@ -5370,8 +5395,9 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
             if not (_is_number(value) and isinstance(point, tuple) and len(point) == 2
                     and point[0] == point[1] == value):
                 return True
-        elif not _is_literal_arithmetic(argument) \
-                and not (_is_number(value) and param in reading.untouched):
+        elif not _is_literal_arithmetic(argument) and not (
+                param in reading.untouched
+                and (value is None or type(value) in (int, float, bool, str, tuple, list))):
             return True
     return False
 

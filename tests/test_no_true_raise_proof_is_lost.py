@@ -4,15 +4,12 @@
 `raise` is still proven under the stricter one. Each case is a small
 function, a claim, the points the claim is checked to be true at by
 calling the function, and the verdict the earlier reading gave
-(`BASE`). Three groups:
+(`BASE`). Two groups:
 
 - `KEPT` and the rows of `ELSEWHERE` whose verdict at `BASE` is proven:
   the earlier reading proved it, and it is proven.
-- `ELSEWHERE_HELD`: the earlier reading proved it and it is true, and
-  another test of the stricter reading asserts it is not proven. It is
-  expected to fail here until the two agree.
-- `NEVER_PROVEN`: true, and the earlier reading did not prove it either.
-  Only its truth is checked.
+- `NEVER_PROVEN` and the other rows of `ELSEWHERE`: true, and the earlier
+  reading did not prove it. Only its truth is checked.
 
 The kinds of claim: a constant of the claim language in the call (`pi`,
 `2 * pi`, `max(1, 2)`, a tuple), a constant in the place of a parameter
@@ -63,6 +60,13 @@ def plain(x, y):
 def one(x):
     if x < 0:
         raise ValueError("n")
+    return x
+
+
+def doubles_second(x, y):
+    if x < 0:
+        z = y * 2
+        raise ValueError(z)
     return x
 
 
@@ -243,6 +247,12 @@ _CONSTANTS = [
     ('sorted([2, 1])', plain, _NEG + "raises(f(x, sorted([2, 1])), ValueError)", "f(x, sorted([2, 1]))"),
     ('str(1)', plain, _NEG + "raises(f(x, str(1)), ValueError)", "f(x, str(1))"),
     ("str('a')", plain, _NEG + "raises(f(x, str('a')), ValueError)", "f(x, str('a'))"),
+    ("text the raise repeats", doubles_second,
+     _NEG + "raises(f(x, 'a'), ValueError)", "f(x, 'a')"),
+    ("a tuple the raise repeats", doubles_second,
+     _NEG + "raises(f(x, (1, 2)), ValueError)", "f(x, (1, 2))"),
+    ("a number the raise doubles", doubles_second,
+     _NEG + "raises(f(x, 3), ValueError)", "f(x, 3)"),
     ("a number where the domain binds an unread parameter", plain,
      _Y + "raises(f(x, 3), ValueError)", "f(x, 3)"),
     ("the same by keyword", plain, _Y + "raises(f(x, y=3), ValueError)", "f(x, y=3)"),
@@ -721,19 +731,11 @@ ELSEWHERE = [
       ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y", "absent(f, x) raises(TypeError)"),
       "f(x, y)", "TypeError",
       [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
-]
-
-#: a true claim of those files the earlier reading proved, asserted not
-#: proven by the test named: the policy holds for every float `y`, and the
-#: path to the guard compares `y`, which the reading takes as any object
-ELSEWHERE_HELD = [
-    (("raise_review_three_cases2", "pol_second_sub", "best",
+    ("raise_review_three_cases2", "pol_second_sub", "best",
       ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y",
        "absent(f, x) raises(ArithmeticError)"),
       "f(x, y)", "ArithmeticError",
       [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
-     "test_the_raise_reading_review_cases.py::test_a_third_review_case_gets_its_verdict"
-     "[cases2[8]]"),
 ]
 
 _STRENGTH = {"proven": 2, "holds": 1}
@@ -765,21 +767,17 @@ def _own(entry):
     return (name, fn, (text,), "derive", call, exception, points, base, {})
 
 
-def _params(cases, held=()):
+def _params(cases):
     out = []
     for case in cases:
         marks = [pytest.mark.skipif(case[5] == "ExceptionGroup"
                                     and not hasattr(builtins, "ExceptionGroup"),
                                     reason="Python 3.11 or later")]
         out.append(pytest.param(*case[1:], id=case[0], marks=marks))
-    for case, test in held:
-        out.append(pytest.param(*case[1:], id=case[0], marks=pytest.mark.xfail(
-            strict=True, reason=f"asserted not proven by {test}")))
     return out
 
 
 _ALL_KEPT = [_own(c) for c in KEPT] + [_elsewhere(c) for c in ELSEWHERE if c[-1] == "proven"]
-_ALL_HELD = [(_elsewhere(c), t) for c, t in ELSEWHERE_HELD]
 _ALL_NEVER = [_own(c) for c in NEVER_PROVEN] \
     + [_elsewhere(c) for c in ELSEWHERE if c[-1] != "proven"]
 _ARGS = "fn,texts,route,call,exception,points,base,names"
@@ -793,7 +791,7 @@ def _raised(fn, call, point):
     return None
 
 
-@pytest.mark.parametrize(_ARGS, _params(_ALL_KEPT + [c for c, _ in _ALL_HELD] + _ALL_NEVER))
+@pytest.mark.parametrize(_ARGS, _params(_ALL_KEPT + _ALL_NEVER))
 def test_the_claim_is_true_at_each_point(fn, texts, route, call, exception, points,
                                          base, names):
     expected = eval(exception, {**vars(builtins), **names})
@@ -803,7 +801,7 @@ def test_the_claim_is_true_at_each_point(fn, texts, route, call, exception, poin
         assert isinstance(error, expected), (call, point, error)
 
 
-@pytest.mark.parametrize(_ARGS, _params(_ALL_KEPT, _ALL_HELD))
+@pytest.mark.parametrize(_ARGS, _params(_ALL_KEPT))
 def test_a_true_claim_proven_before_is_still_proven(fn, texts, route, call, exception,
                                                     points, base, names):
     assert base == "proven"
