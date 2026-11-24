@@ -273,14 +273,9 @@ def shortfall_is_empty(compared: int, disagreed: int, skipped: int) -> bool:
 
 
 def before_region_arrow_reference(part: str) -> str:
-    """The text of `part` before its first `-->`, `=>` or `⟹`, stripped,
-    found with a plain search for each arrow."""
-    cut = len(part)
-    for arrow in ("-->", "=>", "⟹"):
-        at = part.find(arrow)
-        if at != -1:
-            cut = min(cut, at)
-    return part[:cut].strip()
+    """The text of `part` before the first `-->`, `=>` or `⟹` and the
+    whitespace in front of it, stripped, found with a regular expression."""
+    return re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=re.DOTALL).strip()
 
 
 def arrow_free(text: str) -> bool:

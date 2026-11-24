@@ -3448,8 +3448,12 @@ def _before_region_arrow(part: str) -> str:
         leading and trailing whitespace removed. A conjunct with no
         arrow comes back stripped and otherwise unchanged.
     """
-    import re as _re
-    return _re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=_re.DOTALL).strip()
+    cut = len(part)
+    for arrow in ("-->", "=>", "⟹"):
+        at = part.find(arrow)
+        if at != -1 and at < cut:
+            cut = at
+    return part[:cut].strip()
 
 
 def fingerprint_text(cj) -> str:
