@@ -2009,6 +2009,247 @@ def sample_std(returns: "pandas.Series") -> float:
     return returns.std(ddof=1)
 
 
+def clamp(x: float, lo: float, hi: float) -> float:
+    """x held to the interval from lo to hi: lo below it, hi above it,
+    x itself inside ("subject_function")."""
+    return max(lo, min(hi, x))
+
+
+def withdraw(balance: float, amount: float) -> float:
+    """The balance of an account after a withdrawal: the account's
+    state is the balance, taken as an argument and given back as the
+    result. An amount above the balance is refused with a ValueError
+    and no new balance ("subject_method_state")."""
+    if amount > balance:
+        raise ValueError("insufficient funds")
+    return balance - amount
+
+
+def percent_to_fraction(percent: float) -> float:
+    """A percentage as a fraction of one, the first stage of
+    `growth_factor_pipeline`."""
+    return percent / 100
+
+
+def fraction_to_growth_factor(fraction: float) -> float:
+    """The factor a value grows by at a fractional rate, the second
+    stage of `growth_factor_pipeline`."""
+    return 1 + fraction
+
+
+def growth_factor_pipeline(percent: float) -> float:
+    """The two stages composed: a percentage in, a growth factor out
+    ("subject_pipeline")."""
+    return fraction_to_growth_factor(percent_to_fraction(percent))
+
+
+def growth_factor_reference(percent: float) -> float:
+    """The growth factor for a percentage, written in one expression:
+    the reference `growth_factor_pipeline` is compared with."""
+    return 1 + percent / 100
+
+
+def growth_factor_misread(percent: float) -> float:
+    """The growth factor with the percentage taken as a fraction, so
+    5 gives 6 where the reference gives 1.05."""
+    return 1 + percent
+
+
+def describe(fn) -> str:
+    """One line for a function, the types it maps from and to as its
+    annotations write them: `(float, float) -> float`. A tool is a map
+    from programs to documents, and this is a small one."""
+    notes = dict(fn.__annotations__)
+    result = notes.pop("return", "?")
+    return f"({', '.join(str(note) for note in notes.values())}) -> {result}"
+
+
+#: the two stages of `growth_factor_pipeline`, a named finite
+#: collection of maps
+PIPELINE_STAGES = (percent_to_fraction, fraction_to_growth_factor)
+
+#: the maps the claim-subject examples are about, `clamp` among them
+SUBJECT_MAPS = (clamp, withdraw, percent_to_fraction,
+                fraction_to_growth_factor)
+
+#: a build file's settings as a JSON schema: an object whose `jobs`,
+#: the number of parallel jobs, is a whole number from 1 to 8
+BUILD_CONFIG = {
+    "type": "object",
+    "properties": {"jobs": {"type": "integer", "minimum": 1, "maximum": 8}},
+    "required": ["jobs"],
+    "additionalProperties": False,
+}
+
+
+def build_jobs(config: dict) -> int:
+    """The number of parallel jobs a parsed build file asks for."""
+    return config["jobs"]
+
+
+# Claim subjects ----------------------------------------------------
+# Every subject of a claim is a map from a stated domain to a codomain,
+# with hidden state written out as an input and an output: a function
+# maps values to values, a method maps (state, arguments) to the new
+# state, a pipeline is a composition of maps, a tool maps programs to
+# documents, a config file is a value in a language, and a module is a
+# finite family of maps.
+
+#: the claim-subject examples that are adjudicated today, each
+#: `(example function, claim)`: a true claim and, under a key ending
+#: `_trap`, its false twin, which is falsified with a witness
+CLAIM_SUBJECT_ROWS: dict[str, tuple[str, str]] = {  # :draft
+    # a function, values to values  # :draft
+    "subject_function": (  # :draft
+        "clamp",  # :draft
+        "for x in [-10, 10], lo in [0, 1], hi in [2, 3], "  # :draft
+        "lo <= clamp(x, lo, hi) <= hi"),  # :draft
+    "subject_function_trap": (  # :draft
+        "clamp",  # :draft
+        "for x in [-10, 10], lo in [0, 1], hi in [2, 3], "  # :draft
+        "clamp(x, lo, hi) == x"),  # :draft
+    # a method with its state written out: the balance goes in as an  # :draft
+    # argument and the new balance comes back as the value  # :draft
+    "subject_method_state": (  # :draft
+        "withdraw",  # :draft
+        "for balance in [0, 1000], amount in [0, 100], "  # :draft
+        "assuming amount <= balance, "  # :draft
+        "withdraw(balance, amount) == balance - amount"),  # :draft
+    # the same map where no withdrawal can exceed the balance  # :draft
+    "subject_method_state_funded": (  # :draft
+        "withdraw",  # :draft
+        "for balance in [100, 1000], amount in [0, 100], "  # :draft
+        "withdraw(balance, amount) == balance - amount"),  # :draft
+    # the refusal is its own claim: no new state where the amount  # :draft
+    # is above the balance  # :draft
+    "subject_method_state_refusal": (  # :draft
+        "withdraw",  # :draft
+        "for balance in [0, 100], amount in (100, 200], "  # :draft
+        "raises(withdraw(balance, amount), ValueError)"),  # :draft
+    # without the premise the claim covers withdrawals the account  # :draft
+    # refuses, and the witness is one of them  # :draft
+    "subject_method_state_trap": (  # :draft
+        "withdraw",  # :draft
+        "for balance in [0, 1000], amount in [0, 100], "  # :draft
+        "withdraw(balance, amount) == balance - amount"),  # :draft
+    # a pipeline, two maps composed, against a reference written in  # :draft
+    # one expression: as whole functions, and point by point  # :draft
+    "subject_pipeline": (  # :draft
+        "growth_factor_pipeline",  # :draft
+        "let g = mathema.lexicon.growth_factor_reference, f =:= g"),  # :draft
+    "subject_pipeline_trap": (  # :draft
+        "growth_factor_pipeline",  # :draft
+        "let g = mathema.lexicon.growth_factor_misread, f =:= g"),  # :draft
+    "subject_pipeline_pointwise": (  # :draft
+        "growth_factor_reference",  # :draft
+        "let load = mathema.lexicon.fraction_to_growth_factor, "  # :draft
+        "let transform = mathema.lexicon.percent_to_fraction, "  # :draft
+        "for percent in [0, 100], "  # :draft
+        "f(percent) == load(transform(percent))"),  # :draft
+    "subject_pipeline_pointwise_trap": (  # :draft
+        "growth_factor_misread",  # :draft
+        "let load = mathema.lexicon.fraction_to_growth_factor, "  # :draft
+        "let transform = mathema.lexicon.percent_to_fraction, "  # :draft
+        "for percent in [0, 100], "  # :draft
+        "f(percent) == load(transform(percent))"),  # :draft
+    # a config file as a value in a record language, the binding  # :draft
+    # named as the function's parameter is (needs mathema-language)  # :draft
+    "subject_config_record": (  # :draft
+        "build_jobs",  # :draft
+        "for config in L[mathema.lexicon.BUILD_CONFIG], "  # :draft
+        'config["jobs"] <= 8'),  # :draft
+    "subject_config_record_trap": (  # :draft
+        "build_jobs",  # :draft
+        "for config in L[mathema.lexicon.BUILD_CONFIG], "  # :draft
+        'config["jobs"] <= 4'),  # :draft
+}  # :draft
+
+
+@dataclass(frozen=True)
+class FormNotYetAccepted:
+    """A claim form the grammar does not read yet, or reads as another
+    claim: the example function it is about, the claim as it is wanted,
+    what mathema says of it today (`refused: ` and the exact message, or
+    a verdict, `: ` and text its witness contains), and the verdict it
+    lands on once the form is read, with text the witness then
+    contains for a false twin."""
+    function: str
+    wanted: str
+    today: str
+    expected: str
+    witness: str = ""
+
+
+#: the claim-subject examples whose form is not accepted yet
+FORMS_NOT_YET_ACCEPTED: dict[str, FormNotYetAccepted] = {  # :draft
+    # a tool, a map from programs to documents, over a named finite  # :draft
+    # collection of programs  # :draft
+    "subject_tool_collection": FormNotYetAccepted(  # :draft
+        function="describe",  # :draft
+        wanted="for fn in mathema.lexicon.PIPELINE_STAGES, "  # :draft
+               'describe(fn) == "(float) -> float"',  # :draft
+        today="refused: 'fn in mathema.lexicon.PIPELINE_STAGES': "  # :draft
+              "'mathema.lexicon.PIPELINE_STAGES' isn't a recognized "  # :draft
+              "interval, discrete set, or named set (R/Z/N) for 'fn'",  # :draft
+        expected="proven"),  # :draft
+    "subject_tool_collection_trap": FormNotYetAccepted(  # :draft
+        function="describe",  # :draft
+        wanted="for fn in mathema.lexicon.SUBJECT_MAPS, "  # :draft
+               'describe(fn) == "(float) -> float"',  # :draft
+        today="refused: 'fn in mathema.lexicon.SUBJECT_MAPS': "  # :draft
+              "'mathema.lexicon.SUBJECT_MAPS' isn't a recognized "  # :draft
+              "interval, discrete set, or named set (R/Z/N) for 'fn'",  # :draft
+        expected="falsified",  # :draft
+        witness="(float, float, float) -> float"),  # :draft
+    # one program, bound by `let` and passed as the argument: the  # :draft
+    # function under test is handed a wrapper, so it describes that  # :draft
+    "subject_tool_one_program": FormNotYetAccepted(  # :draft
+        function="describe",  # :draft
+        wanted="let stage = mathema.lexicon.percent_to_fraction, "  # :draft
+               'describe(stage) == "(float) -> float"',  # :draft
+        today="falsified: '() -> ?' vs '(float) -> float'",  # :draft
+        expected="proven"),  # :draft
+    # a config file as a value in a record language, read as the  # :draft
+    # parsed record, under a name of the claim's own  # :draft
+    "subject_config_parsed": FormNotYetAccepted(  # :draft
+        function="build_jobs",  # :draft
+        wanted="for r in L[mathema.lexicon.BUILD_CONFIG] : parsed, "  # :draft
+               'r["jobs"] <= 8',  # :draft
+        today="refused: 'r in L[mathema.lexicon.BUILD_CONFIG] : parsed': "  # :draft
+              "'L[mathema.lexicon.BUILD_CONFIG] : parsed' isn't a "  # :draft
+              "recognized interval, discrete set, or named set (R/Z/N) "  # :draft
+              "for 'r'",  # :draft
+        expected="proven"),  # :draft
+    "subject_config_parsed_trap": FormNotYetAccepted(  # :draft
+        function="build_jobs",  # :draft
+        wanted="for r in L[mathema.lexicon.BUILD_CONFIG] : parsed, "  # :draft
+               'r["jobs"] <= 4',  # :draft
+        today="refused: 'r in L[mathema.lexicon.BUILD_CONFIG] : parsed': "  # :draft
+              "'L[mathema.lexicon.BUILD_CONFIG] : parsed' isn't a "  # :draft
+              "recognized interval, discrete set, or named set (R/Z/N) "  # :draft
+              "for 'r'",  # :draft
+        expected="falsified",  # :draft
+        witness="'jobs': 5"),  # :draft
+    # a module, a finite family of maps: its public functions  # :draft
+    "subject_module_public": FormNotYetAccepted(  # :draft
+        function="describe",  # :draft
+        wanted="for g in public(mathema._deprecation), "  # :draft
+               "is_deterministic(g)",  # :draft
+        today="refused: 'g in public(mathema._deprecation)': "  # :draft
+              "'public(mathema._deprecation)' isn't a recognized "  # :draft
+              "interval, discrete set, or named set (R/Z/N) for 'g'",  # :draft
+        expected="proven"),  # :draft
+    "subject_module_public_trap": FormNotYetAccepted(  # :draft
+        function="describe",  # :draft
+        wanted="for g in public(mathema.lexicon), is_deterministic(g)",  # :draft
+        today="refused: 'g in public(mathema.lexicon)': "  # :draft
+              "'public(mathema.lexicon)' isn't a recognized interval, "  # :draft
+              "discrete set, or named set (R/Z/N) for 'g'",  # :draft
+        expected="falsified",  # :draft
+        witness="noisy_quote draws from the shared random generator"),  # :draft
+}  # :draft
+
+
 #: the example functions that carry a runtime guard and a declared
 #: claim: the guard and the claims decorator are applied on the first
 #: read of `EXAMPLE_FUNCTIONS` (see `_examples`), so importing this
