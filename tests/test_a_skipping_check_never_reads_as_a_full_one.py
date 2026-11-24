@@ -122,3 +122,68 @@ def test_an_entry_says_what_fell_short(entry, said):
 def test_an_entry_stored_as_checked_keeps_what_that_status_said():
     stored = {"statement": "A", "status": "checked"}
     assert domain_relations.assumption_entry_text(stored) == "A (assumed)"
+
+
+def test_an_unfinished_comparison_did_not_agree_on_every_value():
+    counts = {"values drawn": 5, "values compared": 5, "values skipped": 0, "disagreed": 0}
+    entry = {"statement": "A", "status": "assumed", "corroboration": counts}
+    assert domain_relations.agreed_on_every_value(entry)
+    unfinished = {**entry, "unfinished": "the check of the definition of A did not finish"}
+    assert not domain_relations.agreed_on_every_value(unfinished)
+    assert not domain_relations.agreed_on_every_value(
+        {"statement": "A", "status": "checked", "unfinished": "did not finish"})
+    assert domain_relations.assumption_entry_text(unfinished) == \
+        "A (assumed, the comparison did not finish)"
+
+
+class _NoSampler(S.StringLanguage):
+    """Every string over a and b; its sampler and its hazards raise."""
+
+    def sample(self, rng):
+        raise RuntimeError("no sampler")
+
+    def hazards(self):
+        raise RuntimeError("no hazards")
+
+
+class _RaisesAlways(_NoSampler):
+    """The same language, whose `contains()` raises on every value."""
+
+    def contains(self, value):
+        raise RuntimeError("cannot decide")
+
+
+def _defined(language):
+    from mathema.domain import parse_binding
+    register_language(language.name, language)
+    try:
+        defined = domain_relations.defined_bound(parse_binding(f"s in L[{language.name}]")[1])
+        (text, served, most, least), = defined.read
+        return domain_relations.check_definition(text, served, most, least, defined.alphabet)
+    finally:
+        unregister_language(language.name)
+
+
+def _over_ab(kind, name):
+    return kind(name, level="predicate", accepts=lambda s: set(s) <= set("ab"), pool="ab",
+                generate=S._gen_ab, schema={"term": S.AB_STAR})
+
+
+def test_the_record_states_the_draws_made():
+    drawn = _defined(_over_ab(S.StringLanguage, "drawsmade"))["corroboration"]
+    assert drawn["draws"] == domain_relations.GUARD_DRAWS == drawn["draws cap"]
+    none = _defined(_over_ab(_NoSampler, "nosampler"))
+    record = none["corroboration"]
+    assert record["draws"] == 0 and record["draws cap"] == domain_relations.GUARD_DRAWS
+    assert record["values compared"] > 0 and record["values skipped"] == 0
+    assert none["artefact"]["members drawn"] == 0
+
+
+def test_a_language_that_decides_no_value_reads_no_value_compared():
+    entry = _defined(_over_ab(_RaisesAlways, "raisesalways"))
+    record = entry["corroboration"]
+    assert record["draws"] == 0 and record["values compared"] == 0
+    assert record["values skipped"] == record["values drawn"] > 0
+    assert domain_relations.assumption_entry_text(entry) == \
+        "L[raisesalways] == its stated definition (assumed, no value compared)"
+    assert not domain_relations.agreed_on_every_value(entry)

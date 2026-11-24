@@ -9,8 +9,9 @@ and caps of the run, and its outcome, beside its `axiom`: the statement and a st
 The proof outline of a row says `assuming <statement> (assumed)` for
 each definition. The printed record says it under a proven row only for
 a definition whose corroboration record shows a skipped value or no
-value compared. A stored assumption with the earlier status `checked` reads as
-`assumed` with no corroboration record."""
+value compared. A stored assumption with the earlier status `checked`, which
+said every value compared agreed and none was skipped, has no
+corroboration record and reads as `assumed` and fully compared."""
 import pytest
 
 import _text_validators as T
@@ -158,20 +159,50 @@ def test_the_line_is_decided_by_the_corroboration_record(record, agreed):
     if record is not None:
         entry["corroboration"] = record
     assert domain_relations.agreed_on_every_value(entry) is agreed
-    assert domain_relations.agreed_on_every_value({**entry, "status": "checked"}) is agreed
+    # the earlier status `checked` said every value compared agreed and
+    # none was skipped; a record, where there is one, is what is read
+    assert domain_relations.agreed_on_every_value({**entry, "status": "checked"}) is (
+        agreed or record is None)
 
 
-def test_a_stored_assumption_with_the_status_checked_reads_as_assumed():
+#: the assumptions of a proven row as a record written before the
+#: corroboration record existed stores them
+STORED = {
+    "standard": {
+        "z3": {"statement": "z3 answers 'no string exists' only when none does",
+               "version": "5.3.2", "status": "assumed"},
+        "canonical form": {"statement": "the canonical form of a term holds the strings "
+                                        "the term holds",
+                           "version": "regular_language 1", "status": "assumed"}},
+    "definitions": [{"language": "L[overab]", "statement": "L[overab] == its stated definition",
+                     "status": "checked",
+                     "artefact": {"seed": 2237466130, "members drawn": 31, "length bound": 6,
+                                  "atoms": 2, "strings compared": 9692, "strings skipped": 0,
+                                  "skipped": []}}],
+    "texts": [{"language": "L[overab]", "statement": "L[overab] holds only texts",
+               "status": "checked", "artefact": {"values run": 7}}]}
+
+
+def test_a_stored_assumption_with_the_status_checked_reads_as_fully_compared():
     record = mathema.check(_same, claims=["L[overab] subset L[overab]"])
     (row,) = record.probes
-    stored = {"language": "L[overab]", "statement": "L[overab] == its stated definition",
-              "status": "checked", "artefact": {"seed": 1, "strings compared": 9}}
-    row.meta = {**row.meta, "mathema.assumptions": {"standard": {}, "definitions": [stored],
-                                                    "texts": []}}
-    printed = str(record)
-    assert "assuming L[overab] == its stated definition (assumed)" in printed, printed
-    assert "(checked)" not in printed, printed
+    (stored,) = STORED["definitions"]
+    row.meta = {**row.meta, "mathema.assumptions": STORED}
+    assert str(record).split("\n")[1:] == [
+        "  proven    L_overab_subset_L_overab: L[overab] subset L[overab]"]
+    assert domain_relations.agreed_on_every_value(stored)
     assert domain_relations.assumption_status(stored) == "assumed"
+    assert domain_relations.assumption_entry_text(stored) == \
+        "L[overab] == its stated definition (assumed)"
     assert domain_relations.assuming_text([stored]) == \
         "proven, assuming L[overab] == its stated definition (assumed)"
     assert stored["status"] == "checked" and "corroboration" not in stored
+
+
+def test_a_stored_assumed_entry_with_no_record_still_prints_its_line():
+    record = mathema.check(_same, claims=["L[overab] subset L[overab]"])
+    (row,) = record.probes
+    stored = {**STORED["definitions"][0], "status": "assumed"}
+    row.meta = {**row.meta, "mathema.assumptions": {**STORED, "definitions": [stored]}}
+    assert "assuming L[overab] == its stated definition (assumed)" in str(record)
+    assert not domain_relations.agreed_on_every_value(stored)
