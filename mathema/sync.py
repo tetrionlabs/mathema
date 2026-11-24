@@ -277,7 +277,7 @@ def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
         written now or no earlier rendering (alone or together) gives
         it. A row a move names records `c`, whether or not its old text
         reads back as `c`. The caller applies this only to a row of a
-        record written under an earlier rules number.
+        record written under an earlier reasoning version.
     """
     from ._annotation_text import complex_parameters
     from .grammar import complex_in_view
@@ -398,8 +398,8 @@ def claim_conflicts(fn, file_entry: dict,
           that release wrote; the claim is adjudicated as written, with
           no supersession. A move of literal quoting or negation
           parentheses is
-          recognised only in a record written under an earlier rules
-          number (`spec.written_under_earlier_rules`).
+          recognised only in a record written under an earlier reasoning
+          version (`spec.written_under_earlier_rules`).
         - kind "ambiguous-text": the verified row's stored text is
           what an earlier release wrote for the authored claim under
           its literal quoting, and is also, read in this release, the

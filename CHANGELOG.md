@@ -5,7 +5,8 @@ Notable changes to mathema are recorded here from its first public release onwar
 ## Unreleased
 
 ### Upgrading from 0.6.6.2
-- Every record is checked again once. mathema's rules number (`mathema._rules.RULES`) is 2 in this release; the table in `mathema/_rules.py` names each rule that changed.
+- Every record is checked again once. mathema's reasoning version (`mathema._rules.REASONING_VERSION`) is 2 in this release; the table in `mathema/_rules.py` names each rule that changed.
+- The number 0.6.6.2 called the rules number is called the reasoning version; `mathema._rules.RULES` still reads as an alias.
 
 ## 0.6.6.2
 
