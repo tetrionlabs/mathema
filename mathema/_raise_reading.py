@@ -458,8 +458,14 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
     mixes = (float in ta and not _converts_to_float(b)) \
         or (float in tb and not _converts_to_float(a))
     if isinstance(op, (ast.Add, ast.Sub)):
+        # |a ± b| >= |a| - |b| and >= |b| - |a|: where one operand is
+        # always larger in magnitude than the other can be, the result
+        # is never zero
+        apart = max(a.least - b.magnitude, b.least - a.magnitude)
+        least = math.nextafter(apart, 0.0) if 0.0 < apart < math.inf else 0.0  # :draft
         return (HALTS if mixes else TOTAL), ValueKind(out_types,
-                                                       _up(a.magnitude + b.magnitude))
+                                                       _up(a.magnitude + b.magnitude),
+                                                       least)
     if isinstance(op, ast.Mult):
         size = 0.0 if 0.0 in (a.magnitude, b.magnitude) else _up(a.magnitude * b.magnitude)
         return (HALTS if mixes else TOTAL), ValueKind(out_types, size)
@@ -470,6 +476,12 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
                                 else math.inf)
     if isinstance(op, (ast.Div, ast.FloorDiv, ast.Mod)):
         divisor = right.value if isinstance(right, ast.Constant) else None
+        if isinstance(right, ast.UnaryOp) and isinstance(right.op, (ast.USub, ast.UAdd)) \
+                and isinstance(right.operand, ast.Constant) \
+                and type(right.operand.value) in (int, float):
+            # a signed literal: `-1.5`
+            divisor = -right.operand.value if isinstance(right.op, ast.USub) \
+                else right.operand.value  # :draft
         if type(divisor) in (int, float) and abs(divisor) >= 1 \
                 and _converts_to_float(a) and math.isfinite(_magnitude(divisor)):
             # |a / c| <= |a| and |a // c| <= |a| + 1 for |c| >= 1, and
@@ -484,6 +496,21 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
             kind = ValueKind(frozenset({float}) if isinstance(op, ast.Div) else out_types,
                              size)
             return TOTAL, kind
+        if type(divisor) is float and divisor != 0 and math.isfinite(divisor) \
+                and _converts_to_float(a):
+            # a float c nearer zero than 1: the other operand converts to
+            # float, and a float division, floor division or remainder by
+            # a float that is not zero gives a float (an infinity where
+            # the quotient is too large) and never raises. |a % c| <= |c|
+            least = _least(divisor)  # :draft
+            quotient = _up(a.magnitude / least) if math.isfinite(a.magnitude) else math.inf
+            if isinstance(op, ast.Div):
+                size = quotient
+            elif isinstance(op, ast.FloorDiv):
+                size = _up(quotient + 1.0)
+            else:
+                size = _magnitude(divisor)
+            return TOTAL, ValueKind(frozenset({float}), size)
         return HALTS, ValueKind(_NUMBERS)
     return UNKNOWN, ANY
 
@@ -837,6 +864,38 @@ def constructor_refusal(cls: type, count: int, keywords: list) -> "str | None":
     return None
 
 
+#: builtin exception classes whose `__init__` is `BaseException`'s own
+#: and so refuses every keyword argument with a TypeError
+KEYWORD_REFUSING = frozenset({
+    "BaseException", "Exception", "ArithmeticError", "AssertionError", "BufferError",
+    "EOFError", "FloatingPointError", "IndexError", "KeyError", "LookupError",
+    "NotImplementedError", "OverflowError", "RecursionError", "RuntimeError",
+    "TypeError", "ValueError", "ZeroDivisionError"})
+
+
+def _refuses_keywords(cls: type) -> bool:  # :draft
+    """Intent:
+        Whether building `cls` with any keyword argument raises
+        `TypeError` once the arguments are evaluated: the class is made by
+        `type` itself, no class of its MRO outside the builtins defines
+        `__init__` or `__new__`, and the nearest builtin class of its MRO
+        is one of `KEYWORD_REFUSING`, whose `__init__` refuses every
+        keyword ("TypeError() takes no keyword arguments"). `ImportError`,
+        `AttributeError`, `NameError`, `OSError` and the other builtins
+        that take keywords of their own are not read.
+    """
+    if type(cls) is not type or not issubclass(cls, BaseException):
+        return False
+    for klass in cls.__mro__:
+        if klass.__module__ != "builtins":
+            if "__init__" in vars(klass) or "__new__" in vars(klass):
+                return False
+            continue
+        return klass.__name__ in KEYWORD_REFUSING \
+            and getattr(builtins, klass.__name__, None) is klass
+    return False
+
+
 def _is_builtin_import(found) -> bool:
     """Intent:
         Whether `found` is the builtin `__import__` itself.
@@ -1093,6 +1152,10 @@ def read_raise_path(fn, steps: list, stmt: ast.Raise, kinds: dict) -> "ReadRaise
         count, keywords = len(exc.args), [k.arg for k in exc.keywords if k.arg]
     else:
         count, keywords, known = 0, [], True
+    if not group and keywords and _refuses_keywords(cls):  # :draft
+        # the constructor raises TypeError for the keyword once the
+        # arguments are evaluated, so the statement raises that
+        cls, name, keywords = TypeError, "TypeError", []
     refusal = None if group else constructor_refusal(cls, count, keywords)
     if refusal is not None:
         builtin_only = type(cls) is type and not any(

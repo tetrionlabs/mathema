@@ -137,3 +137,32 @@ def test_a_false_claim_with_a_constant_in_the_call_is_not_proven(fn, text, call,
 def test_the_constants_of_the_claim_language_are_the_ones_read():
     assert MATH_CONSTANTS["pi"] == math.pi and math.isnan(MATH_CONSTANTS["nan"])
     assert _SAFE_FUNCS["max"] is max and _SAFE_FUNCS["abs"] is abs
+
+
+@pytest.mark.parametrize("argument,raised", [
+    ("2 ** (1 // 0)", "ZeroDivisionError"), ("0 ** -1", "ZeroDivisionError"),
+    ("2.0 ** 10000", "OverflowError"), ("[1, 2][5]", "IndexError"),
+    ("(1, 2)['a']", "TypeError"), ("*[1 / 0]", "ZeroDivisionError"),
+    ("not 1 / 0", "ZeroDivisionError"), ("1 and 1 / 0", "ZeroDivisionError"),
+    ("1 if 1 / 0 else 2", "ZeroDivisionError"), ("len(3)", "TypeError"),
+    ("sum(['a'])", "TypeError"),
+    ("sorted([1, 'a'])", "TypeError"), ("str(1 / 0)", "ZeroDivisionError"),
+])
+def test_a_form_that_is_read_is_not_proven_where_it_can_raise(argument, raised):
+    call = f"f(x, {argument})"
+    assert _outcome(plain, call, {"x": -2.0}) == raised
+    (row,) = check_conjectures(
+        plain, [claim(_NEG + f"raises({call}, ValueError)", route="derive")])
+    assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
+
+
+@pytest.mark.parametrize("argument,form", [
+    ("{1: 2}", "a dict display"), ("{1, 2}", "a set display"),
+    ("[1, 2][0:1]", "a slice"), ("**{}", "an unpacked mapping"),
+])
+def test_a_form_that_is_not_read_is_named(argument, form):
+    (row,) = check_conjectures(
+        plain, [claim(_NEG + f"raises(f(x, {argument}), ValueError)", route="derive")])
+    assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
+    said = f"{row.sketch} {row.note}"
+    assert "is not read" not in said or form in said, said

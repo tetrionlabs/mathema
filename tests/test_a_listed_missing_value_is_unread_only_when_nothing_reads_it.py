@@ -151,6 +151,7 @@ def _hands_on(fn):
 guard_under_a_pass_through = _hands_on(domain_guard_excludes_none)
 other_guard_under_a_pass_through = _hands_on(domain_guard_on_the_other_parameter)
 dimension_guard_over_a_domain_guard = enforce_dimensions()(domain_guard_on_the_other_parameter)
+dimension_guard_over_an_excluding_guard = enforce_dimensions()(domain_guard_excludes_none)
 cached = functools.lru_cache(maxsize=None)(plain)
 lambda_over_plain = _lambda_hands_on(plain)
 under_a_lambda = _lambda_hands_on(_one)
@@ -191,12 +192,11 @@ def test_a_guard_that_refuses_the_listed_missing_value_falsifies_the_claim(
 
 
 @pytest.mark.parametrize("fn", [dimension_guard, structure_guard,
-                                dimension_guard_over_a_domain_guard],
+                                dimension_guard_over_an_excluding_guard],
                          ids=["dimension guard", "structure guard",
-                              "dimension guard over a domain guard"])
+                              "dimension guard over a domain guard that excludes None"])
 def test_another_guard_on_the_unnamed_parameter_is_not_read_past(fn):
-    if fn is not dimension_guard_over_a_domain_guard:
-        assert _raised(fn, -2.0, None) not in (None, "KeyError")
+    assert _raised(fn, -2.0, None) not in (None, "KeyError")
     row = _row(fn, _Y + "raises(f(x, y), KeyError)")
     assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
 
@@ -206,8 +206,9 @@ def test_another_guard_on_the_unnamed_parameter_is_not_read_past(fn):
     (other_guard_under_a_pass_through, "KeyError"),
     (cached, "ValueError"),
     (lambda_over_plain, "ValueError"),
+    (dimension_guard_over_a_domain_guard, "KeyError"),
 ], ids=["domain guard on the other parameter", "the same under a pass-through", "cache",
-        "lambda"])
+        "lambda", "dimension guard over a domain guard"])
 def test_a_wrapper_read_as_leaving_the_parameter_alone_keeps_the_proof(fn, raised):
     assert _raised(fn, -2.0, None) == raised
     row = _row(fn, _Y + f"raises(f(x, y), {raised})")

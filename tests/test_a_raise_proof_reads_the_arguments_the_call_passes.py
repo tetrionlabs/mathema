@@ -52,7 +52,8 @@ def _row(fn, text):
 
 @pytest.mark.parametrize("call", [
     "f(x, 1/0)", "f(x, 1 // (2 - 2))", "f(x, y=1/0)", "f(x, int('a'))", "f(x, 0 ** -1)",
-    "f(x, 2 ** 3)", "f(x, [1][2])", "f(x, *[1])", "f(x, **{})", "f(x, undefined_name)",
+    "f(x, 2 ** (1 // 0))", "f(x, [1][2])", "f(x, *[1 / 0])", "f(x, **{})",
+    "f(x, undefined_name)",
 ])
 def test_an_argument_that_is_not_read_as_unable_to_fail_is_not_proven(call):
     row = _row(plain, _NEG + f"raises({call}, ValueError)")
@@ -66,7 +67,8 @@ def test_the_argument_that_is_not_read_is_named():
 
 
 @pytest.mark.parametrize("call", ["f(x, 1/2)", "f(x, 2*3 + 1)", "f(x, -1.5)", "f(x, 'a')",
-                                  "f(x, y=3 - 1)", "f(x, None)", "f(x, 7 // 2)"])
+                                  "f(x, y=3 - 1)", "f(x, None)", "f(x, 7 // 2)",
+                                  "f(x, 2 ** 3)", "f(x, *[1])"])
 def test_an_argument_of_literals_and_defined_arithmetic_is_read(call):
     row = _row(plain, _NEG + f"raises({call}, ValueError)")
     assert row.verdict == "proven", (row.verdict, row.sketch, row.note)
@@ -94,12 +96,21 @@ def test_a_call_that_passes_each_parameter_its_own_variable_is_proven(fn, text):
 @pytest.mark.parametrize("fn,text", [
     (plain, _Y + "raises(f(x=y, y=x), ValueError)"),
     (plain, _Y + "raises(f(y, x), ValueError)"),
-    (plain, _Y + "raises(f(x, y=x), ValueError)"),
+    (plain, _Y + "raises(f(y, y=x), ValueError)"),
     (_Holder().reads_second, _Y + "raises(f(x, y), ValueError)"),
     (reads_second, _NEG + "raises(f(x, 'a'), ValueError)"),
     (_Holder().method, _Y + "raises(f(y, x), ValueError)"),
-], ids=["keywords swapped", "positions swapped", "keyword given another variable",
+], ids=["keywords swapped", "positions swapped", "each given the other's variable",
         "method reads it", "text where the body adds", "method, positions swapped"])
 def test_a_call_that_passes_a_parameter_another_value_is_not_proven(fn, text):
     row = _row(fn, text)
     assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
+
+
+@pytest.mark.parametrize("text", [
+    _Y + "raises(f(x, y=x), ValueError)",
+    _NEG + "raises(f(x, x), ValueError)",
+], ids=["keyword given another variable", "position given another variable"])
+def test_another_variable_for_a_parameter_nothing_reads_is_proven(text):
+    row = _row(plain, text)
+    assert row.verdict == "proven", (row.verdict, row.sketch, row.note)

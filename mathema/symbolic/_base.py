@@ -1438,14 +1438,22 @@ _CALL_KEYWORDS: "contextvars.ContextVar[frozenset | None]" = contextvars.Context
     "mathema_call_keywords", default=None)
 
 
+#: how many positional arguments the call being read passes, None when unknown
+_CALL_POSITIONAL: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
+    "mathema_call_positional", default=None)
+
+
 @contextlib.contextmanager
 def call_keywords(call_src: "str | None"):  # :draft
     """Intent:
         While the block runs, the wrapper readings know which keywords the
-        call `call_src` passes (`f(x, y=y)` passes `y`), so a wrapper that
-        keeps a keyword of its own is read for a call that does not pass
-        it. Nothing is known for None, for text that is not one call, and
-        for a call that unpacks a mapping (`f(**k)`).
+        call `call_src` passes (`f(x, y=y)` passes `y`) and how many
+        positional arguments, so a wrapper that keeps a keyword of its own
+        is read for a call that does not pass it, and one that needs a
+        first positional argument for a call that passes one. Nothing is
+        known for None, for text that is not one call, and for a call that
+        unpacks a mapping (`f(**k)`); the positional count is not known
+        for a call with a starred argument.
     """
     known = None
     if call_src is not None:
@@ -1455,11 +1463,15 @@ def call_keywords(call_src: "str | None"):  # :draft
             call = None
         if isinstance(call, ast.Call) and all(k.arg is not None for k in call.keywords):
             known = frozenset(k.arg for k in call.keywords)
-    token = _CALL_KEYWORDS.set(known)
+    positional = None
+    if known is not None and not any(isinstance(a, ast.Starred) for a in call.args):
+        positional = len(call.args)
+    token, count = _CALL_KEYWORDS.set(known), _CALL_POSITIONAL.set(positional)
     try:
         yield
     finally:
         _CALL_KEYWORDS.reset(token)
+        _CALL_POSITIONAL.reset(count)
 
 
 def _wrapper_is_read(fn) -> bool:  # :draft
@@ -1484,7 +1496,46 @@ def _wrapper_is_read(fn) -> bool:  # :draft
         return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema" \
             or hands_over_to_wrapped(fn)
     return os.path.abspath(fn.__code__.co_filename).startswith(package) \
-        or _passes_through(fn)  # :draft
+        or _passes_through(fn) or _dispatches_to_wrapped(fn)  # :draft
+
+
+def _dispatches_to_wrapped(fn) -> bool:  # :draft
+    """Intent:
+        Whether `fn` is the wrapper `functools.singledispatch` builds, with
+        nothing registered but the function it wraps, called with at least
+        one positional argument: it looks the first argument's class up in
+        a registry whose only entry is `object`, finds the wrapped
+        function for every class, and calls it on the same arguments.
+
+    Notes:
+        The wrapper is recognised by the code object `singledispatch`
+        defines for it, whose only names are `TypeError` (raised for a
+        call with no positional argument) and `__class__`. The registry
+        and the cache of earlier lookups are read from the closure of its
+        `dispatch`; a cache entry for anything else leaves it unread. The
+        call's positional count comes from `call_keywords`.
+    """
+    import functools
+
+    def nested(name):
+        found = [c for c in functools.singledispatch.__code__.co_consts
+                 if isinstance(c, types.CodeType) and c.co_name == name]
+        return found[0] if len(found) == 1 else None
+    code = fn.__code__
+    if code is not nested("wrapper") or code.co_freevars != ("dispatch", "funcname") \
+            or set(code.co_names) != {"TypeError", "__class__"} \
+            or not _CALL_POSITIONAL.get():
+        return False
+    wrapped = vars(fn).get("__wrapped__")
+    try:
+        dispatch = _cell(fn, "dispatch")
+        if type(dispatch) is not types.FunctionType or dispatch.__code__ is not nested("dispatch"):
+            return False
+        registry, cache = _cell(dispatch, "registry"), _cell(dispatch, "dispatch_cache")
+        return wrapped is not None and type(registry) is dict and list(registry) == [object] \
+            and registry[object] is wrapped and all(v is wrapped for v in list(cache.values()))
+    except (ValueError, AttributeError, TypeError, IndexError):
+        return False
 
 
 def _passes_through(fn) -> bool:  # :draft
@@ -1725,7 +1776,8 @@ def _guard_admits(violation, param: str, bound) -> bool:  # :draft
     return True
 
 
-def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None) -> frozenset:  # :draft
+def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None,
+                                structures_admit: bool = False) -> frozenset:  # :draft
     """Intent:
         The parameters among `params` whose argument reaches the function's
         body untouched by anything between the call of `fn` and that body:
@@ -1743,14 +1795,14 @@ def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None) -> fro
         `enforce_domain` guard judges against its domain also stays when
         the guard lets through every member of the parameter's finite set
         (`_guard_admits`): the guard reads each value and hands it on.
+        `structures_admit` says the same of every `enforce_structure`
+        guard: each is already shown to let through the value the call
+        passes, so the parameters it judges stay.
 
     Notes:
         `lru_cache` hashes each argument. The missing values a domain lists
         are realised as `None`, a float nan and the scalar markers of the
         array libraries, each of which hashes.
-
-        The `enforce_dimensions` guard is read where the function it wraps
-        is a plain Python function.
     """
     import functools
     from .. import authoring
@@ -1772,10 +1824,9 @@ def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None) -> fro
             if reading is not None:
                 if reading.covered is None:
                     return frozenset()
-                if fn.__code__ is _guard_code(authoring.enforce_dimensions) \
-                        and not (type(inner) is types.FunctionType
-                                 and "__wrapped__" not in vars(inner)):
-                    return frozenset()
+                if structures_admit and fn.__code__ is _guard_code(authoring.enforce_structure):
+                    fn = inner
+                    continue
                 admitted = frozenset(
                     p for p in reading.judged_by_domain & left
                     if domain is not None and p in domain
@@ -1788,6 +1839,35 @@ def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None) -> fro
             return frozenset()
         fn = inner
     return frozenset()
+
+
+def structure_guards(fn) -> list:  # :draft
+    """Intent:
+        The structures each `enforce_structure` guard among the wrappers
+        `fn` links as `__wrapped__` judges, one `{parameter: properties}`
+        per guard, outermost first, each read from the guard's own closure
+        (`_guard_code`).
+    """
+    from .. import authoring
+    out: list = []
+    for _ in range(16):
+        if type(fn) is types.MethodType:
+            fn = fn.__func__
+            continue
+        if type(fn) is types.FunctionType and fn.__closure__ is not None \
+                and fn.__code__ is _guard_code(authoring.enforce_structure):
+            try:
+                declared = _cell(fn, "declared")
+            except (ValueError, IndexError):
+                declared = None
+            out.append(declared if type(declared) is dict else None)
+        try:
+            fn = getattr(fn, "__wrapped__", None)
+        except Exception:
+            fn = None
+        if fn is None:
+            break
+    return out
 
 
 def hashes_its_arguments(fn) -> bool:  # :draft

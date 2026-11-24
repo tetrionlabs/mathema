@@ -4,12 +4,13 @@
 `raise` is still proven under the stricter one. Each case is a small
 function, a claim, the points the claim is checked to be true at by
 calling the function, and the verdict the earlier reading gave
-(`BASE`). Three tables:
+(`BASE`). Three groups:
 
-- `KEPT`: the earlier reading proved it, and it is proven.
-- `HELD_BY_ANOTHER_TEST`: the earlier reading proved it and it is true,
-  and another test of the stricter reading asserts it is not proven. It
-  is expected to fail here until the two agree.
+- `KEPT` and the rows of `ELSEWHERE` whose verdict at `BASE` is proven:
+  the earlier reading proved it, and it is proven.
+- `ELSEWHERE_HELD`: the earlier reading proved it and it is true, and
+  another test of the stricter reading asserts it is not proven. It is
+  expected to fail here until the two agree.
 - `NEVER_PROVEN`: true, and the earlier reading did not prove it either.
   Only its truth is checked.
 
@@ -223,6 +224,25 @@ _CONSTANTS = [
     ("a list", plain, _NEG + "raises(f(x, [1, 2]), ValueError)", "f(x, [1, 2])"),
     ("a tuple, cached", cached, _NEG + "raises(f(x, (1, 2)), ValueError)", "f(x, (1, 2))"),
     ("text, cached", cached, _NEG + "raises(f(x, 'a'), ValueError)", "f(x, 'a')"),
+    ('2 ** 3', plain, _NEG + "raises(f(x, 2 ** 3), ValueError)", "f(x, 2 ** 3)"),
+    ('2 ** -1', plain, _NEG + "raises(f(x, 2 ** -1), ValueError)", "f(x, 2 ** -1)"),
+    ('2.5 ** 2', plain, _NEG + "raises(f(x, 2.5 ** 2), ValueError)", "f(x, 2.5 ** 2)"),
+    ('10 ** 300', plain, _NEG + "raises(f(x, 10 ** 300), ValueError)", "f(x, 10 ** 300)"),
+    ('[1, 2][0]', plain, _NEG + "raises(f(x, [1, 2][0]), ValueError)", "f(x, [1, 2][0])"),
+    ('(1, 2)[-1]', plain, _NEG + "raises(f(x, (1, 2)[-1]), ValueError)", "f(x, (1, 2)[-1])"),
+    ("'ab'[1]", plain, _NEG + "raises(f(x, 'ab'[1]), ValueError)", "f(x, 'ab'[1])"),
+    ('not 1', plain, _NEG + "raises(f(x, not 1), ValueError)", "f(x, not 1)"),
+    ('1 and 2', plain, _NEG + "raises(f(x, 1 and 2), ValueError)", "f(x, 1 and 2)"),
+    ('0 or 3', plain, _NEG + "raises(f(x, 0 or 3), ValueError)", "f(x, 0 or 3)"),
+    ('not (1 < 2)', plain, _NEG + "raises(f(x, not (1 < 2)), ValueError)", "f(x, not (1 < 2))"),
+    ('1 if 2 else 3', plain, _NEG + "raises(f(x, 1 if 2 else 3), ValueError)", "f(x, 1 if 2 else 3)"),
+    ('1 if 0 else 3', plain, _NEG + "raises(f(x, 1 if 0 else 3), ValueError)", "f(x, 1 if 0 else 3)"),
+    ('len([1, 2])', plain, _NEG + "raises(f(x, len([1, 2])), ValueError)", "f(x, len([1, 2]))"),
+    ("len('abc')", plain, _NEG + "raises(f(x, len('abc')), ValueError)", "f(x, len('abc'))"),
+    ('sum([1, 2])', plain, _NEG + "raises(f(x, sum([1, 2])), ValueError)", "f(x, sum([1, 2]))"),
+    ('sorted([2, 1])', plain, _NEG + "raises(f(x, sorted([2, 1])), ValueError)", "f(x, sorted([2, 1]))"),
+    ('str(1)', plain, _NEG + "raises(f(x, str(1)), ValueError)", "f(x, str(1))"),
+    ("str('a')", plain, _NEG + "raises(f(x, str('a')), ValueError)", "f(x, str('a'))"),
     ("a number where the domain binds an unread parameter", plain,
      _Y + "raises(f(x, 3), ValueError)", "f(x, 3)"),
     ("the same by keyword", plain, _Y + "raises(f(x, y=3), ValueError)", "f(x, y=3)"),
@@ -270,32 +290,19 @@ KEPT = [(name, fn, text, call, "ValueError", _X, "proven")
      _Y + "raises(f(x, y), ValueError)", "f(x, y)", "ValueError", _BOTH, "proven"),
     ("class method", _Methods.of_the_class,
      _Y + "raises(f(x, y), ValueError)", "f(x, y)", "ValueError", _BOTH, "proven"),
-]
-
-#: (case, the test that asserts the claim is not proven)
-HELD_BY_ANOTHER_TEST = [
-    (("a power of literals", plain, _NEG + "raises(f(x, 2 ** 3), ValueError)",
-      "f(x, 2 ** 3)", "ValueError", _X, "proven"),
-     "test_a_raise_proof_reads_the_arguments_the_call_passes.py::"
-     "test_an_argument_that_is_not_read_as_unable_to_fail_is_not_proven[f(x, 2 ** 3)]"),
-    (("a starred list of literals", plain, _NEG + "raises(f(x, *[1]), ValueError)",
-      "f(x, *[1])", "ValueError", _X, "proven"),
-     "test_a_raise_proof_reads_the_arguments_the_call_passes.py::"
-     "test_an_argument_that_is_not_read_as_unable_to_fail_is_not_proven[f(x, *[1])]"),
-    (("another variable for an unread parameter, by keyword", plain,
-      _Y + "raises(f(x, y=x), ValueError)", "f(x, y=x)", "ValueError", _BOTH, "proven"),
-     "test_a_raise_proof_reads_the_arguments_the_call_passes.py::"
-     "test_a_call_that_passes_a_parameter_another_value_is_not_proven"
-     "[keyword given another variable]"),
-    (("another variable for an unread parameter, by position", plain,
-      _NEG + "raises(f(x, x), ValueError)", "f(x, x)", "ValueError", _X, "proven"),
-     "the same reading as [keyword given another variable]"),
-    (("dimension guard over a domain guard on the other parameter",
-      dimensions_over_a_domain_guard, _Y + "raises(f(x, y), KeyError)", "f(x, y)",
-      "KeyError", _BOTH, "proven"),
-     "test_a_listed_missing_value_is_unread_only_when_nothing_reads_it.py::"
-     "test_another_guard_on_the_unnamed_parameter_is_not_read_past"
-     "[dimension guard over a domain guard]"),
+    ("another variable for an unread parameter, by keyword", plain,
+     _Y + "raises(f(x, y=x), ValueError)", "f(x, y=x)", "ValueError", _BOTH, "proven"),
+    ("another variable for an unread parameter, by position", plain,
+     _NEG + "raises(f(x, x), ValueError)", "f(x, x)", "ValueError", _X, "proven"),
+    ("a starred list of literals", plain,
+     _NEG + "raises(f(x, *[1]), ValueError)", "f(x, *[1])", "ValueError", _X, "proven"),
+    ("a starred tuple", plain,
+     _NEG + "raises(f(x, *(1,)), ValueError)", "f(x, *(1,))", "ValueError", _X, "proven"),
+    ("a starred list holding the variable", plain,
+     _NEG + "raises(f(*[x, 1]), ValueError)", "f(*[x, 1])", "ValueError", _X, "proven"),
+    ("dimension guard over a domain guard on the other parameter",
+     dimensions_over_a_domain_guard, _Y + "raises(f(x, y), KeyError)", "f(x, y)",
+     "KeyError", _BOTH, "proven"),
 ]
 
 NEVER_PROVEN = [
@@ -697,27 +704,29 @@ ELSEWHERE = [
      'for x in [-4.9999999, -1], raises(f(x), TypeError)',
      'f(x)', 'TypeError', [{'x': -4.9999999}, {'x': -2.99999995}, {'x': -3.79999993}, {'x': -1}],
      'proven'),
+    ("raise_review_three_cases1", "mod_neg", "best",
+      "for x in [-5, -1], raises(f(x), ValueError)", "f(x)", "ValueError", _X, "proven"),
+    ("raise_review_three_cases1", "floordiv_small", "best",
+      "for x in [-5, -1], raises(f(x), ValueError)", "f(x)", "ValueError", _X, "proven"),
+    ("raise_review_three_cases1", "div_least", "best",
+      "for x in [-5, -1], raises(f(x), ValueError)", "f(x)", "ValueError", _X, "proven"),
+    ("raise_review_three_cases5", "dispatched", "best",
+      "for x in [-5, -1], raises(f(x), TypeError)", "f(x)", "TypeError", _X, "proven"),
+    ("test_the_raise_reading_review_cases", "pol_kw", "best",
+      ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y", "absent(f, x) raises(TypeError)"),
+      "f(x, y)", "TypeError",
+      [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
+    ("test_a_raise_is_read_only_along_a_path_that_cannot_fail",
+      "policy_keyword_argument", "best",
+      ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y", "absent(f, x) raises(TypeError)"),
+      "f(x, y)", "TypeError",
+      [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
 ]
 
-#: true claims of those files the earlier reading proved, each asserted
-#: not proven by the test named
+#: a true claim of those files the earlier reading proved, asserted not
+#: proven by the test named: the policy holds for every float `y`, and the
+#: path to the guard compares `y`, which the reading takes as any object
 ELSEWHERE_HELD = [
-    (("raise_review_three_cases1", "mod_neg", "best",
-      "for x in [-5, -1], raises(f(x), ValueError)", "f(x)", "ValueError", _X, "proven"),
-     "test_the_raise_reading_review_cases.py::test_a_third_review_case_gets_its_verdict"
-     "[cases1[17]]"),
-    (("raise_review_three_cases1", "floordiv_small", "best",
-      "for x in [-5, -1], raises(f(x), ValueError)", "f(x)", "ValueError", _X, "proven"),
-     "test_the_raise_reading_review_cases.py::test_a_third_review_case_gets_its_verdict"
-     "[cases1[21]]"),
-    (("raise_review_three_cases1", "div_least", "best",
-      "for x in [-5, -1], raises(f(x), ValueError)", "f(x)", "ValueError", _X, "proven"),
-     "test_the_raise_reading_review_cases.py::test_a_third_review_case_gets_its_verdict"
-     "[cases1[23]]"),
-    (("raise_review_three_cases5", "dispatched", "best",
-      "for x in [-5, -1], raises(f(x), TypeError)", "f(x)", "TypeError", _X, "proven"),
-     "test_the_raise_reading_review_cases.py::test_a_third_review_case_gets_its_verdict"
-     "[cases5[12]]"),
     (("raise_review_three_cases2", "pol_second_sub", "best",
       ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y",
        "absent(f, x) raises(ArithmeticError)"),
@@ -725,20 +734,6 @@ ELSEWHERE_HELD = [
       [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
      "test_the_raise_reading_review_cases.py::test_a_third_review_case_gets_its_verdict"
      "[cases2[8]]"),
-    (("test_the_raise_reading_review_cases", "pol_kw", "best",
-      ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y", "absent(f, x) raises(TypeError)"),
-      "f(x, y)", "TypeError",
-      [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
-     "test_the_raise_reading_review_cases.py::test_a_review_policy_case_gets_its_verdict"
-     "[pol_kw:absent(f, x) raises(TypeError)]"),
-    (("test_a_raise_is_read_only_along_a_path_that_cannot_fail",
-      "policy_keyword_argument", "best",
-      ("for x in [0, 1], y in [-1, 1], f(x, y) == x * y", "absent(f, x) raises(TypeError)"),
-      "f(x, y)", "TypeError",
-      [{"x": None, "y": y} for y in (-1, -0.5, 0.0, 0.123456, 1)], "proven"),
-     "test_a_raise_is_read_only_along_a_path_that_cannot_fail.py::"
-     "test_a_policy_is_not_proven_from_a_guard_whose_path_may_raise_something_else"
-     "[policy_keyword_argument]"),
 ]
 
 _STRENGTH = {"proven": 2, "holds": 1}
@@ -784,8 +779,7 @@ def _params(cases, held=()):
 
 
 _ALL_KEPT = [_own(c) for c in KEPT] + [_elsewhere(c) for c in ELSEWHERE if c[-1] == "proven"]
-_ALL_HELD = [(_own(c), t) for c, t in HELD_BY_ANOTHER_TEST] \
-    + [(_elsewhere(c), t) for c, t in ELSEWHERE_HELD]
+_ALL_HELD = [(_elsewhere(c), t) for c, t in ELSEWHERE_HELD]
 _ALL_NEVER = [_own(c) for c in NEVER_PROVEN] \
     + [_elsewhere(c) for c in ELSEWHERE if c[-1] != "proven"]
 _ARGS = "fn,texts,route,call,exception,points,base,names"

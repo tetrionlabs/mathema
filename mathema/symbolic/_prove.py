@@ -4768,7 +4768,8 @@ def suspended_call_refusal(fn) -> "str | None":
             f"call does")
 
 
-def _unread_parameters(fn, facts, domain: "dict | None" = None) -> frozenset:  # :draft
+def _unread_parameters(fn, facts, domain: "dict | None" = None,
+                       structures_admit: bool = False) -> frozenset:  # :draft
     """Intent:
         The parameters no value passed for changes what the call does: the
         function's body never names them, or names one only as the target
@@ -4793,7 +4794,7 @@ def _unread_parameters(fn, facts, domain: "dict | None" = None) -> frozenset:  #
     only_deleted = {t.id for t in deleted
                     if sum(1 for n in names if n.id == t.id) == 1}
     unnamed = frozenset(p for p in facts.params if p not in named or p in only_deleted)
-    return unnamed and parameters_no_wrapper_reads(fn, unnamed, domain)
+    return unnamed and parameters_no_wrapper_reads(fn, unnamed, domain, structures_admit)
 
 
 def _listed_missing(domain: dict) -> list:
@@ -4848,11 +4849,16 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
         if proof.status != "proven":
             return proof
         params = _call_parameters(fn, facts.params)
-        untouched = parameters_no_wrapper_reads(fn, params)
         reading = _CallReading(
             params=params, domain=domain or {},
-            taken=frozenset(facts.params) | frozenset(domain or {}) | frozenset(bound_names),
-            untouched=untouched, unread=_unread_parameters(fn, facts) & untouched,
+            taken=frozenset(facts.params) | frozenset(domain or {}) | frozenset(bound_names))
+        refused = _structure_guard_refusal(fn, tree.body, reading)  # :draft
+        if refused is not None:
+            return ProofResult("unliftable", sketch=refused)
+        untouched = parameters_no_wrapper_reads(fn, params, structures_admit=True)
+        reading = replace(
+            reading, untouched=untouched,
+            unread=_unread_parameters(fn, facts, structures_admit=True) & untouched,
             hashed=hashes_its_arguments(fn))
     if _call_departs_from_domain(tree.body, reading):  # :draft
         return ProofResult("unliftable", sketch=(
@@ -4860,12 +4866,92 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
             f"derive reads raises(...) at f({', '.join(params)}) over the "
             f"claim's domain, and the call written is {call_src}"))
     unread = _unread_argument(tree.body, reading)
+    if unread is not None and unread[1] is not None:
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"the argument `{unread[0]}` is not read: {unread[1]} is a form derive "
+            f"does not read in a call's argument"))
     if unread is not None:
         return ProofResult("unliftable", sketch=(
             # :draft
-            f"the call's argument `{unread}` is evaluated before the function runs, "
+            f"the call's argument `{unread[0]}` is evaluated before the function runs, "
             f"and is not read as unable to raise"))
     return proof
+
+
+def _structure_guard_refusal(fn, call: ast.Call, reading: "_CallReading") -> "str | None":  # :draft
+    """Intent:
+        Why an `enforce_structure` guard around the function is not read
+        to let the call through, None when there is no such guard or each
+        lets every value through. For each parameter a guard declares a
+        structure on, the value the call passes is judged as the guard
+        judges it, by the property's own check: a constant in that place
+        (`_constant_value`) at its value; the parameter's own variable at
+        every member of the finite set the domain binds it to, or, for an
+        interval, only when the properties are `is_finite` and `is_real`
+        and the interval has no infinite closed end, since every real
+        number of it then has both. Anything else is not read: a parameter
+        the call does not fill or the domain does not bind, another
+        property over an interval, a listed missing value.
+    """
+    import math
+    from .. import matrices
+    from ..domain import Interval, _as_domain, is_sentinel
+    from ._base import structure_guards
+    guards = structure_guards(fn)
+    if not guards:
+        return None
+    pairs = dict(zip(reading.params, _positional_arguments(call)))
+    pairs.update({k.arg: k.value for k in call.keywords if k.arg is not None})
+
+    def passes(prop: str, value) -> bool:
+        entry = matrices.PROPERTIES.get(prop)
+        if entry is None:
+            return False
+        found = entry.check(value)
+        return not (found is False or (found is None and entry.level == "finite"
+                                       and not matrices.is_numeric(value)))
+
+    def admitted(param: str, props) -> bool:
+        argument = pairs.get(param)
+        if argument is None:
+            return False
+        value = _constant_value(argument, reading.taken)
+        if value is not _UNREAD:
+            return all(passes(prop, value) for prop in props)
+        if not (isinstance(argument, ast.Name) and argument.id == param
+                and param in reading.domain):
+            return False
+        dom = _as_domain(reading.domain[param])
+        if dom.dims or dom.base_type not in ("R", "Z", "N") or not dom.pieces:
+            return False
+        for piece in dom.pieces:
+            if isinstance(piece, frozenset):
+                if any(is_sentinel(v) or not all(passes(prop, v) for prop in props)
+                       for v in piece):
+                    return False
+            elif isinstance(piece, Interval) or (isinstance(piece, tuple) and len(piece) == 2):
+                closed = (getattr(piece, "closed_lo", True), getattr(piece, "closed_hi", True))
+                if not set(props) <= {"is_finite", "is_real"} or any(
+                        not _is_number(end) or end != end
+                        or (math.isinf(end) and shut) for end, shut in zip(piece, closed)):
+                    return False
+            else:
+                return False
+        return True
+
+    try:
+        for declared in guards:
+            if declared is None:
+                return "an enforce_structure guard around the function is not read"
+            for param, props in declared.items():
+                if not admitted(param, props):
+                    return (f"the enforce_structure guard judges `{param}` "
+                            f"({', '.join(sorted(props))}) before the function runs, and is "
+                            f"not read to let through every value the call passes for it")
+    except Exception as error:
+        return f"an enforce_structure guard around the function is not read ({type(error).__name__})"
+    return None
 
 
 def _call_parameters(fn, params: list) -> list:  # :draft
@@ -4929,12 +5015,18 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
           here, so an overflow is seen and leaves it unread;
         - a comparison of integers and floats with `<`, `<=`, `>`, `>=`,
           `==`, `!=`;
-        - a call of the claim language over integers and floats that
-          gives one (`_constant_call`): `abs(a)`, `sqrt(a)`, `max(a, b)`;
+        - a call of the claim language that gives a value (`_constant_call`):
+          `abs(a)`, `sqrt(a)`, `max(a, b)`, `len`, `sum`, `sorted`, `str`;
+        - a power of numbers, computed here; an integer power is read only
+          while its result stays within `_POWER_BITS` bits;
+        - `not a`, `a and b`, `a or b` and `b if a else c` over expressions
+          each read this way, every operand read whether or not Python
+          would reach it;
+        - a tuple, a list or a string subscripted by an integer, where the
+          index is in range;
         - a tuple or a list of expressions each read this way.
 
-        A power, a subscript, any other call and a starred element are not
-        read.
+        Anything else is not read (`_unread_form` names the form).
     """
     from .._math_vocab import MATH_CONSTANTS
     if isinstance(node, ast.Constant):
@@ -4966,11 +5058,34 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
                    for op, a, b in zip(node.ops, values, values[1:]))
     if isinstance(node, ast.Call):
         return _constant_call(node, taken)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = _constant_value(node.operand, taken)
+        return _UNREAD if value is _UNREAD else not value
+    if isinstance(node, ast.BoolOp):
+        values = [_constant_value(operand, taken) for operand in node.values]
+        if any(value is _UNREAD for value in values):
+            return _UNREAD
+        stops = (lambda v: not v) if isinstance(node.op, ast.And) else bool
+        return next((value for value in values[:-1] if stops(value)), values[-1])
+    if isinstance(node, ast.IfExp):
+        test, body, other = (_constant_value(part, taken)
+                             for part in (node.test, node.body, node.orelse))
+        if test is _UNREAD or body is _UNREAD or other is _UNREAD:
+            return _UNREAD
+        return body if test else other
+    if isinstance(node, ast.Subscript):
+        held, index = _constant_value(node.value, taken), _constant_value(node.slice, taken)
+        if type(held) not in (tuple, list, str) or type(index) is not int \
+                or not -len(held) <= index < len(held):
+            return _UNREAD
+        return held[index]
     if not isinstance(node, ast.BinOp):
         return _UNREAD
     a, b = _constant_value(node.left, taken), _constant_value(node.right, taken)
     if not (_is_number(a) and _is_number(b)):
         return _UNREAD
+    if isinstance(node.op, ast.Pow):
+        return _constant_power(a, b)
     try:
         if isinstance(node.op, ast.Add):
             return a + b
@@ -4991,6 +5106,28 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
     return _UNREAD
 
 
+#: the most bits an integer power read as a constant may have
+_POWER_BITS = 4096
+
+
+def _constant_power(a, b):  # :draft
+    """Intent:
+        `a ** b` for integers and floats, `_UNREAD` where Python raises
+        (`0 ** -1`, `2.0 ** 10000`) or gives a complex number (`(-8) **
+        0.5`). An integer to a non-negative integer power cannot raise; it
+        is computed only while `b` times the bits of `a` stays within
+        `_POWER_BITS`, and is unread above that.
+    """
+    if type(a) is int and type(b) is int and b >= 0 \
+            and b * max(1, a.bit_length()) > _POWER_BITS:
+        return _UNREAD
+    try:
+        result = a ** b
+    except (OverflowError, ZeroDivisionError):
+        return _UNREAD
+    return result if _is_number(result) else _UNREAD
+
+
 #: the functions of the claim language that take one number and give one
 _ONE_NUMBER_FUNCTIONS = ("abs", "Abs", "sqrt", "exp", "log", "log10", "log2",
                          "sin", "cos", "tan", "floor", "ceil")
@@ -4998,32 +5135,129 @@ _ONE_NUMBER_FUNCTIONS = ("abs", "Abs", "sqrt", "exp", "log", "log10", "log2",
 
 def _constant_call(node: ast.Call, taken: frozenset):  # :draft
     """Intent:
-        The value of a call of the claim language over integers and floats
-        read as constants (`_constant_value`): `abs`, `sqrt`, `exp`, the
-        logarithms, `sin`, `cos`, `tan`, `floor` or `ceil` of one, `min` or
-        `max` of two or more. The claim language's own function is run on
-        the constants here, so one that raises (`exp(1000)`, `log(0)`,
-        `sqrt(-1)`) or gives anything but an integer or a float leaves the
-        call unread. `_UNREAD` as well for a name the claim binds and for
-        any other call.
+        The value of a call of the claim language over constants
+        (`_constant_value`), run through the claim language's own table:
+        `abs`, `sqrt`, `exp`, the logarithms, `sin`, `cos`, `tan`, `floor`
+        or `ceil` of one integer or float, `min` or `max` of two or more,
+        kept when the result is an integer or a float; `len` of a tuple, a
+        list or a string, which the claim language spells `dim(v, 0)` and
+        runs through its own `dim`; `sum` and `sorted` of a tuple or a list of
+        integers and floats; `str` of a number, a string, None or a truth
+        value, where the table gives that name Python's own builtin. A
+        call that raises here (`exp(1000)`, `log(0)`, `sqrt(-1)`, `str` of
+        an integer too long to print) is unread, and so is a name the
+        claim binds and any other call.
     """
     from ..conjecture import _SAFE_FUNCS
     if not isinstance(node.func, ast.Name) or node.keywords or node.func.id in taken:
         return _UNREAD
     name = node.func.id
+    called = _SAFE_FUNCS.get(name)
     values = [_constant_value(argument, taken) for argument in node.args]
-    if not values or not all(_is_number(value) for value in values):
+    if not values or any(value is _UNREAD for value in values):
         return _UNREAD
+    numbers = all(_is_number(value) for value in values)
+    first = values[0]
     try:
-        if name in _ONE_NUMBER_FUNCTIONS and len(values) == 1:
-            result = _SAFE_FUNCS[name](values[0])
-        elif name in ("min", "max", "Min", "Max") and len(values) >= 2:
-            result = _SAFE_FUNCS[name](*values)
+        if numbers and name in _ONE_NUMBER_FUNCTIONS and len(values) == 1:
+            result = called(first)
+        elif numbers and name in ("min", "max", "Min", "Max") and len(values) >= 2:
+            result = called(*values)
+        elif name == "dim" and len(values) == 2 and type(first) in (tuple, list, str) \
+                and type(values[1]) is int and values[1] == 0:
+            # `len(v)` in a claim is read as `dim(v, 0)`
+            result = called(first, 0)
+        elif len(values) != 1:
+            return _UNREAD
+        elif called is len and type(first) in (tuple, list, str):
+            return len(first)
+        elif (called is sum or called is sorted) and type(first) in (tuple, list) \
+                and all(_is_number(item) for item in first):
+            return called(first)
+        elif called is str and (first is None or type(first) in (int, float, str, bool)):
+            return str(first)
         else:
             return _UNREAD
     except Exception:
         return _UNREAD
     return result if _is_number(result) else _UNREAD
+
+
+#: what each form of expression the constant reading has no rule for is called
+_FORM_WORDS = (
+    (ast.Dict, "a dict display"), (ast.Set, "a set display"),
+    (ast.ListComp, "a list comprehension"), (ast.SetComp, "a set comprehension"),
+    (ast.DictComp, "a dict comprehension"), (ast.GeneratorExp, "a generator expression"),
+    (ast.Lambda, "a lambda"), (ast.JoinedStr, "an f-string"),
+    (ast.Attribute, "an attribute"), (ast.Starred, "a starred expression"),
+    (ast.Slice, "a slice"), (ast.NamedExpr, "an assignment expression"),
+    (ast.Await, "an await"), (ast.Yield, "a yield"), (ast.YieldFrom, "a yield"),
+)
+
+
+def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":  # :draft
+    """Intent:
+        Words for the form of expression that leaves `node` unread as a
+        constant (`_constant_value`), where the reading has no rule for
+        that form at all: "a dict display", "a call of `factorial`", "the
+        operator `@`", "a subscript of a list by a slice". None when every
+        form in the expression has a rule and one of them is not shown
+        unable to raise at these values (`1 / 0`, `0 ** -1`, `[1][2]`).
+        The innermost such form, in the order Python evaluates, is named.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.expr_context, ast.operator, ast.unaryop, ast.boolop,
+                              ast.cmpop, ast.keyword)):
+            continue
+        if isinstance(node, ast.Call) and child is node.func:
+            continue
+        if _constant_value(child, taken) is _UNREAD:
+            return _unread_form(child, taken)
+    for kind, words in _FORM_WORDS:
+        if isinstance(node, kind):
+            return words
+    if isinstance(node, ast.Call):
+        from ..conjecture import _SAFE_FUNCS
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        if node.keywords:
+            return "a call with a keyword"
+        if name not in _ONE_NUMBER_FUNCTIONS \
+                and name not in ("min", "max", "Min", "Max", "dim") \
+                and _SAFE_FUNCS.get(name) not in (len, sum, sorted, str):
+            return f"a call of `{name}`" if name else "a call"
+        return None
+    if isinstance(node, ast.Name):
+        return f"the name `{node.id}`"
+    if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.MatMult, ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)):
+        return f"the operator `{_OPERATOR_TEXT[type(node.op)]}`"
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+        return "the operator `~`"
+    if isinstance(node, ast.Compare) and not all(
+            isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq))
+            for op in node.ops):
+        return "a membership or identity test"
+    return None
+
+
+_OPERATOR_TEXT = {ast.MatMult: "@", ast.BitAnd: "&", ast.BitOr: "|", ast.BitXor: "^",
+                  ast.LShift: "<<", ast.RShift: ">>"}
+
+
+def _positional_arguments(call: ast.Call) -> list:  # :draft
+    """Intent:
+        The positional arguments of a call as Python passes them, a
+        starred tuple or list display (`*[1, 2]`) replaced by its elements
+        in order. Any other starred argument stays as it is written.
+    """
+    out: list = []
+    for argument in call.args:
+        if isinstance(argument, ast.Starred) and isinstance(argument.value, (ast.Tuple, ast.List)) \
+                and not any(isinstance(item, ast.Starred) for item in argument.value.elts):
+            out += argument.value.elts
+        else:
+            out.append(argument)
+    return out
 
 
 def _folded_number(node: ast.AST, taken: frozenset = frozenset()) -> "int | float | None":  # :draft
@@ -5036,19 +5270,27 @@ def _folded_number(node: ast.AST, taken: frozenset = frozenset()) -> "int | floa
     return value if _is_number(value) else None
 
 
-def _unread_argument(call: ast.Call, reading: "_CallReading | None" = None) -> "str | None":  # :draft
+def _unread_argument(call: ast.Call,
+                     reading: "_CallReading | None" = None) -> "tuple[str, str | None] | None":  # :draft
     """Intent:
-        The source of the first argument of the call whose evaluation is
-        not read as unable to raise, None when every one is read: a bare
-        name (a variable the claim binds) or a constant expression of the
-        claim language (`_constant_value`).
+        `(source, form)` for the first argument of the call whose
+        evaluation is not read as unable to raise, None when every one is
+        read: a bare name (a variable the claim binds) or a constant
+        expression of the claim language (`_constant_value`). `form` names
+        the form of expression the reading has no rule for
+        (`_unread_form`), and is None when the forms are all read and this
+        one may raise. A mapping unpacked into the call (`**k`) is not
+        read.
     """
     taken = reading.taken if reading is not None else frozenset()
-    for argument in [*call.args, *(k.value for k in call.keywords)]:
-        if isinstance(argument, ast.Name) \
+    for keyword in call.keywords:
+        if keyword.arg is None:
+            return f"**{ast.unparse(keyword.value)}", "an unpacked mapping"
+    for argument in [*_positional_arguments(call), *(k.value for k in call.keywords)]:
+        if (isinstance(argument, ast.Name) and argument.id in taken) \
                 or _constant_value(argument, taken) is not _UNREAD:
             continue
-        return ast.unparse(argument)
+        return ast.unparse(argument), _unread_form(argument, taken)
     return None
 
 
@@ -5081,8 +5323,12 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
         is paired with the parameter it fills, by position or by keyword;
         an argument that fills no parameter of the function, or one
         already filled, departs. An argument that is its own parameter's
-        name departs from nothing. Any other argument that names a
-        variable departs (`f(-x)`, `f(x + 10)`, `f(y, x)`, `f(x=y, y=x)`).
+        name departs from nothing, and neither does the bare name of
+        another variable the domain binds in the place of a parameter
+        neither the body nor any wrapper reads (`f(x, x)` where nothing
+        reads the second). Any other argument that names a variable
+        departs (`f(-x)`, `f(x + 10)`, `f(y, x)`, `f(x=y, y=x)`). A starred
+        tuple or list display fills the places its elements would.
 
         A constant (`_constant_value`) departs from nothing in the place
         of a parameter neither the body nor any wrapper on the way reads,
@@ -5099,7 +5345,7 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
     """
     params, domain, taken = reading.params, reading.domain, reading.taken
     pairs = [(params[index] if index < len(params) else None, argument)
-             for index, argument in enumerate(call.args)]
+             for index, argument in enumerate(_positional_arguments(call))]
     pairs += [(k.arg if k.arg in params else None, k.value) for k in call.keywords]
     filled = [param for param, _ in pairs]
     if None in filled or len(set(filled)) != len(filled):
@@ -5107,9 +5353,12 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
     for param, argument in pairs:
         if isinstance(argument, ast.Name) and argument.id == param:
             continue
+        if isinstance(argument, ast.Name) and argument.id in domain \
+                and param in reading.unread:
+            continue
         value = _constant_value(argument, taken)
         if value is _UNREAD:
-            if any(isinstance(n, ast.Name) for n in ast.walk(argument)):
+            if any(isinstance(n, ast.Name) and n.id in taken for n in ast.walk(argument)):
                 return True
             continue
         if reading.hashed and not _hashes(value):

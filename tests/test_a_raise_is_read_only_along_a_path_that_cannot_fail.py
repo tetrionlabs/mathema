@@ -386,8 +386,14 @@ def policy_keyword_argument(x: Optional[float], y: float) -> float:
     return x * y
 
 
+def policy_keyword_accepted(x: Optional[float], y: float) -> float:
+    if x is None:
+        raise ImportError(name="x is required")
+    return x * y
+
+
 _POLICY = [policy_divides_before_the_raise, policy_divides_before_the_guard,
-           policy_local_class, policy_keyword_argument]
+           policy_local_class, policy_keyword_accepted]
 
 
 def _policy_row(fn):
@@ -400,6 +406,15 @@ def _policy_row(fn):
 def test_a_policy_is_not_proven_from_a_guard_whose_path_may_raise_something_else(fn):
     with pytest.raises(BaseException) as raised:
         fn(None, 0.0)
-    assert fn is policy_keyword_argument or type(raised.value) is not builtins.TypeError
+    assert type(raised.value) is not builtins.TypeError
     row = _policy_row(fn)
     assert row.verdict != "proven", (row.verdict, row.route, row.note)
+
+
+def test_a_policy_is_proven_where_the_constructor_refuses_its_keyword():
+    for y in (-1.0, 0.0, 0.123456, 1.0):
+        with pytest.raises(BaseException) as raised:
+            policy_keyword_argument(None, y)
+        assert type(raised.value) is builtins.TypeError
+    row = _policy_row(policy_keyword_argument)
+    assert row.verdict == "proven", (row.verdict, row.route, row.note)
