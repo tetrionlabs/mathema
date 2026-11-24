@@ -132,11 +132,19 @@ def as_recorded(row: dict) -> dict:
         type's missing-value default, rendered beside a constant that
         has no hole. That row reads as the constant alone (`let rho be
         [0.01, 0.99]`), its statement the canonical text this release
-        writes. Every other row reads as written.
+        writes. A row whose printed domain leaves a named missing value
+        out reads as the claim as written, kept beside it
+        (`meta["mathema.statement_as_written"]`). Every other row reads
+        as written.
     """
     from dataclasses import replace
 
     from .spec import _declared_conjecture, canonical_claim_text
+    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    as_written = meta.get("mathema.statement_as_written")  # :draft
+    if as_written:
+        return {k: v for k, v in {**row, "statement": as_written}.items()
+                if k != "domain"}
     if not row.get("statement") or not _written_by_an_earlier_release(row):
         return row
     try:
@@ -564,11 +572,12 @@ def apply_verified_wins(claims: list, conflicts: list,
             # contained; the structured fields ride beside it, so
             # nothing here re-parses a rendered condition
             from .spec import authored_route
-            rebuilt = {"name": name, "statement": as_recorded(row).get("statement"),
+            recorded = as_recorded(row)
+            rebuilt = {"name": name, "statement": recorded.get("statement"),
                        "route": authored_route(row)}
             for field_name in ("domain", "grammar", "tolerance"):
-                if row.get(field_name) is not None:
-                    rebuilt[field_name] = row[field_name]
+                if recorded.get(field_name) is not None:
+                    rebuilt[field_name] = recorded[field_name]
             rebuilt["meta"] = {"mathema.pending_supersession":
                                _display_claim(c)}
             kept.append(rebuilt)

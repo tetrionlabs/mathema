@@ -730,8 +730,10 @@ def recorded_claims(entry: "dict | None") -> list:
     """Intent:
         The authored claims a verified record holds, rebuilt from its
         live rows as the claim dicts its fingerprint was made over:
-        name, the row's statement (its canonical text), the route it
-        was authored with, and any grammar or tolerance the row states.
+        name, the row's statement (its canonical text; for a row whose
+        printed domain leaves a named missing value out, the claim as
+        written, kept beside it), the route it was authored with, and
+        any grammar or tolerance the row states.
         Rows mathema adds (suggestions, built-in and type rows, float
         companions, `dependencies_current`) are left out.
     """
@@ -740,7 +742,8 @@ def recorded_claims(entry: "dict | None") -> list:
         if not isinstance(row, dict) or not row.get("name"):
             continue
         meta: dict = row["meta"] if isinstance(row.get("meta"), dict) else {}
-        statement = row.get("statement") or row.get("law")
+        statement = (meta.get("mathema.statement_as_written")  # :draft
+                     or row.get("statement") or row.get("law"))
         if (not statement or row.get("name") == "dependencies_current"
                 or meta.get("mathema.surface") in ("mathema", "builtin", "types")
                 or meta.get("mathema.companion_of")):

@@ -6302,6 +6302,13 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             probe.note = f"{probe.note or ''}; {reading}".lstrip("; ")
         left_out = (probe.meta or {}).get("mathema.listed_left_out")
         if left_out and cj.domain and not probe.name.startswith(f"{cj.name}["):
+            if canonical:
+                # the row prints the domain without the values left out;
+                # the claim as written is kept beside it, so the record
+                # still reads as the claim its author wrote
+                probe.meta = {**(probe.meta or {}),  # :draft
+                              "mathema.statement_as_written":
+                                  canonical_claim_text(pins_into_calls(cj, fn))}
             cj = _dc_replace(cj, domain={
                 p2: _without_listed(b, left_out[p2]) if p2 in left_out else b
                 for p2, b in cj.domain.items()})
