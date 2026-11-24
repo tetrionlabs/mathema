@@ -1,0 +1,877 @@
+{
+ "assumptions.person.anytext": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "assumptions.person.three_digits": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "assumptions.person.two_digits": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "assumptions.relation.slugs_alnums": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "assumptions.relation.subset": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "assumptions.relation.subset_reversed": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "assumptions.same.alnums": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "holds"
+ },
+ "assumptions.shout.alnums": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "assumptions.slug.over_anytext": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "assumptions.slug.over_anytext_assuming": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "assumptions.slug.over_slugs": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.closed.(0, 1)": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.closed.R": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.closed.[0, 1]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.closed_open.(0, 1]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.closed_open.{0, 1}": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.integers.(-oo, oo)": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.integers.(0, 1]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.integers.Z": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.integers.[-1, 2]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.integers.[0, 1)": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.integers.[0, 100]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.integers.[0, 1]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.narrow.R": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.narrow.[0, 1]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.naturals.[-1, 2]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.naturals.[0, 1)": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.naturals.[0, 100]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.open.(0, 1)": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.open.[0, oo)": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.open.{0, 1}": {
+  "issue": 129,
+  "status": "undecided",
+  "verdict": "unknown"
+ },
+ "enforced.open_closed.R": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.open_closed.Z": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.open_closed.[-1, 2]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.open_closed.[0, 100]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.pair.[-1, 2]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.pair.[0, 1]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.reals.Z": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.shifted.(-oo, oo)": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.shifted.(0, 1]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.shifted.[-1, 2]": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.shifted.[0, 1]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.to_infinity.[0, oo)": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.unguarded.[0, 1]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "enforced.wide.R": {
+  "issue": 129,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "enforced.wide.[0, 1]": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "enforced.wide.{0, 1}": {
+  "issue": 129,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.call.0.none_in_band": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.call.1.nan_in_band": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.call.2.nan_in_band": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.call.3.nan_in_band": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.call.4.none_in_band": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "missing.call.5.always_zero": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "missing.call.6.always_zero": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "missing.call.none_true": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "missing.empty.list": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "missing.empty.list_or_range": {
+  "issue": 128,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.empty.list_or_text": {
+  "issue": 128,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.empty.optional": {
+  "issue": 128,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.empty.unannotated": {
+  "issue": null,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.empty.union": {
+  "issue": 128,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.empty.union_not": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "missing.listed.absent_union": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.listed.floor_nan": {
+  "issue": null,
+  "status": "contradicted holds",
+  "verdict": "holds"
+ },
+ "missing.listed.is_defined_guarded": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "holds"
+ },
+ "missing.listed.is_defined_none": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.listed.is_defined_one_none": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "missing.listed.nan_set": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "missing.listed.narrow_band": {
+  "issue": null,
+  "status": "contradicted holds",
+  "verdict": "holds"
+ },
+ "missing.listed.none_set": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "missing.listed.not_is_defined_none": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "falsified"
+ },
+ "raises.argument.00": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.01": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.02": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.03": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.04": {
+  "issue": 123,
+  "status": "crash",
+  "verdict": "crash"
+ },
+ "raises.argument.05": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.06": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.07": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.08": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.09": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.10": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.11": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.12": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.13": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.14": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.15": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.16": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.17": {
+  "issue": 123,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.argument.18": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.19": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.argument.let_function": {
+  "issue": 131,
+  "status": "WRONG",
+  "verdict": "falsified"
+ },
+ "raises.cause.instance": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "holds"
+ },
+ "raises.cause.int": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.cause.mock": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.guard.refuses_nan": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.guard.refuses_none": {
+  "issue": 124,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.guard.structure_finite": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.guard.structure_infinite": {
+  "issue": 125,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.guard.structure_value": {
+  "issue": 130,
+  "status": "WRONG",
+  "verdict": "falsified"
+ },
+ "raises.message.chain_negated": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.message.chain_short_circuits": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "holds"
+ },
+ "raises.message.chain_with_zero": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.unnamed.ignored": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.unnamed.ignored_nan": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.unnamed.read_in_branch": {
+  "issue": null,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.unnamed.swapped_call": {
+  "issue": null,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.wrapper.cached.(-5, -1]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.wrapper.cached.[-5, -1]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.wrapper.cached.[-5, -1] \u222a [1, 5]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.wrapper.cached.[-5, 0]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.wrapper.negated.[-5, -1]": {
+  "issue": null,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.wrapper.negated.[-5, -1] \u222a [1, 5]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.wrapper.negated.[-5, 0]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.wrapper.overflow_caught": {
+  "issue": 126,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.wrapper.swallowed.[-5, -1]": {
+  "issue": null,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "raises.wrapper.swallowed.[-5, -1] \u222a [1, 5]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "raises.wrapper.wrapped.[-5, -1]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.wrapper.wrapped_twice.(-5, -1]": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "raises.wrapper.wrapped_twice.{-1, -2}": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.above_half.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.above_half.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.above_ten.safe": {
+  "issue": 127,
+  "status": "WRONG",
+  "verdict": "falsified"
+ },
+ "safety.above_ten.unsafe": {
+  "issue": 127,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "safety.above_ten_reached.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.above_ten_reached.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.always.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.always.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.counter.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.counter.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.finite_set.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.finite_set.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.float_rounding.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.float_rounding.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.held.cycle.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.held.cycle.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.held.decimal.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.held.decimal.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.held.deque.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.held.deque.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.held.nested.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.held.nested.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.held.ordered_dict.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.held.ordered_dict.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.if_false.safe": {
+  "issue": 127,
+  "status": "WRONG",
+  "verdict": "falsified"
+ },
+ "safety.if_false.unsafe": {
+  "issue": 127,
+  "status": "WRONG",
+  "verdict": "proven"
+ },
+ "safety.inner_function.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.inner_function.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.integers.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.integers.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.last_member.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.last_member.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.loop_target.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.loop_target.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.marker.copies_mark_to_attribute": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.marker.copies_mark_to_dict": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.marker.copies_mark_to_list": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.marker.copies_mark_to_name": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.marker.makes_mark_named_object": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.marker.returns_mark_named_object": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "unknown"
+ },
+ "safety.marker.returns_mark_with_draw": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "unknown"
+ },
+ "safety.pure.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.pure.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.rebound.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.rebound.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.repeat.draws": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "unknown"
+ },
+ "safety.repeat.draws.not": {
+  "issue": null,
+  "status": "undecided",
+  "verdict": "unknown"
+ },
+ "safety.repeat.pure": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.repeat.pure.not": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.value_back.safe": {
+  "issue": null,
+  "status": "unconfirmed",
+  "verdict": "falsified"
+ },
+ "safety.value_back.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.write_then_raise.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.write_then_raise.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ },
+ "safety.xor.safe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "falsified"
+ },
+ "safety.xor.unsafe": {
+  "issue": null,
+  "status": "right",
+  "verdict": "proven"
+ }
+}

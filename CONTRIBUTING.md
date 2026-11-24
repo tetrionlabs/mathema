@@ -33,7 +33,32 @@ For your first pull request, please confirm in a comment that you have read and 
 4. Every new claim family, probe, or derive-route capability needs
    test coverage exercising both the case where it applies and the
    case where it correctly declines to.
-5. Open the pull request against `main`, describing what changed and
+5. A change that can move a verdict runs the verdict family of its
+   rule area before review. A family (`tests/families/`) is a set of
+   small functions and claims about them; the runner calls each
+   function at points of the claim's domain and checks that no
+   `proven` verdict is contradicted by a call and that every
+   `falsified` witness really fails when called. The areas are
+   `raises`, `missing`, `safety`, `enforced` and `assumptions`.
+
+       python -m mathema._devtools.verdict_families raises
+
+   To see which rows your change moves, export the base branch's
+   `mathema/` package and run against it:
+
+       mkdir -p /tmp/base && git archive origin/develop mathema | tar -x -C /tmp/base
+       python -m mathema._devtools.verdict_families raises --base /tmp/base/mathema
+
+   Each row is then unchanged, fixed (wrong on the base, right now),
+   lost (a true proof the base gave and your branch does not) or
+   newly wrong. Paste the summary into the pull request. The tests in
+   `tests/test_no_family_verdict_is_contradicted_by_a_call.py` run
+   every family on the current tree; a case that needs a reading this
+   tree does not have yet is skipped with that reading named. A case
+   that shows something new about the code goes into its family, with
+   a line saying what it shows, and its verdict on the base branch is
+   recorded in `tests/families/expected.json` (`--all-rules --record`).
+6. Open the pull request against `main`, describing what changed and
    why. Reference the issue it addresses, if any.
 
 ## What's most useful to contribute
