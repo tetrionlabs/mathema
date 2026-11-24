@@ -693,6 +693,63 @@ LEXICON: dict[str, str] = {
     # marker form `assuming n >= 2` ("dim_marker_premise")
     "dim_call_premise": ("assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, "
                          "f(returns) >= 0"),
+    # claim subjects: every subject of a claim is a map from a stated  # :draft
+    # domain to a codomain, with hidden state written out as an input  # :draft
+    # and an output. A row ending `_trap` is the false twin of the row  # :draft
+    # it is named after, falsified with a witness -------------------  # :draft
+    # a function, values to values  # :draft
+    "subject_function": ("for x in [-10, 10], lo in [0, 1], hi in [2, 3], "  # :draft
+                         "lo <= clamp(x, lo, hi) <= hi"),  # :draft
+    "subject_function_trap": (  # :draft
+        "for x in [-10, 10], lo in [0, 1], hi in [2, 3], "  # :draft
+        "clamp(x, lo, hi) == x"),  # :draft
+    # a method with its state written out: the balance goes in as an  # :draft
+    # argument and the new balance comes back as the value  # :draft
+    "subject_method_state": (  # :draft
+        "for balance in [0, 1000], amount in [0, 100], "  # :draft
+        "assuming amount <= balance, "  # :draft
+        "withdraw(balance, amount) == balance - amount"),  # :draft
+    # the same map where no withdrawal can exceed the balance  # :draft
+    "subject_method_state_funded": (  # :draft
+        "for balance in [100, 1000], amount in [0, 100], "  # :draft
+        "withdraw(balance, amount) == balance - amount"),  # :draft
+    # the refusal is its own claim: no new state where the amount is  # :draft
+    # above the balance  # :draft
+    "subject_method_state_refusal": (  # :draft
+        "for balance in [0, 100], amount in (100, 200], "  # :draft
+        "raises(withdraw(balance, amount), ValueError)"),  # :draft
+    # without the premise the claim covers withdrawals the account  # :draft
+    # refuses, and the witness is one of them  # :draft
+    "subject_method_state_trap": (  # :draft
+        "for balance in [0, 1000], amount in [0, 100], "  # :draft
+        "withdraw(balance, amount) == balance - amount"),  # :draft
+    # a pipeline, two maps composed, against a reference written in  # :draft
+    # one expression: as whole functions, and point by point. The  # :draft
+    # pointwise row is true of the reference and false of a function  # :draft
+    # that takes the percentage as a fraction  # :draft
+    "subject_pipeline": (  # :draft
+        "let g = mathema.lexicon.growth_factor_reference, f =:= g"),  # :draft
+    "subject_pipeline_trap": (  # :draft
+        "let g = mathema.lexicon.growth_factor_misread, f =:= g"),  # :draft
+    "subject_pipeline_pointwise": (  # :draft
+        "let load = mathema.lexicon.fraction_to_growth_factor, "  # :draft
+        "let transform = mathema.lexicon.percent_to_fraction, "  # :draft
+        "for percent in [0, 100], "  # :draft
+        "f(percent) == load(transform(percent))"),  # :draft
+    "subject_pipeline_pointwise_trap": (  # :draft
+        "let load = mathema.lexicon.fraction_to_growth_factor, "  # :draft
+        "let transform = mathema.lexicon.percent_to_fraction, "  # :draft
+        "for percent in [0, 100], "  # :draft
+        "f(percent) == load(transform(percent))"),  # :draft
+    # a config file as a value in a record language, the binding  # :draft
+    # named as the function's parameter is; the language is a JSON  # :draft
+    # schema, resolved through the mathema-language package  # :draft
+    "subject_config_record": (  # :draft
+        "for config in L[mathema.lexicon.BUILD_CONFIG], "  # :draft
+        'config["jobs"] <= 8'),  # :draft
+    "subject_config_record_trap": (  # :draft
+        "for config in L[mathema.lexicon.BUILD_CONFIG], "  # :draft
+        'config["jobs"] <= 4'),  # :draft
 }
 
 # The grammar's own table of contents: every LEXICON key, grouped by
@@ -852,6 +909,14 @@ SECTIONS: dict[str, tuple[str, ...]] = {
         "let_scale_seq_sharpe_premise", "let_scale_seq_sharpe_trap",
         "let_shift_seq_range", "let_shift_seq_mean_moves",
         "assuming_spread_positive", "dim_call_premise"),
+    "subjects": (  # :draft
+        "subject_function", "subject_function_trap",  # :draft
+        "subject_method_state", "subject_method_state_funded",  # :draft
+        "subject_method_state_refusal", "subject_method_state_trap",  # :draft
+        "subject_pipeline", "subject_pipeline_trap",  # :draft
+        "subject_pipeline_pointwise",  # :draft
+        "subject_pipeline_pointwise_trap",  # :draft
+        "subject_config_record", "subject_config_record_trap"),  # :draft
 }
 
 
@@ -1093,6 +1158,30 @@ TAGS: dict[str, tuple[str, ...]] = {
                              "unstated raise", "dataclass"),
     "absent_key_left_out": ("absent", "unset", "null", "key", "path", "dict",
                             "PATCH", "left out"),
+    "subject_function": ("clamp", "clip", "bounded", "function",  # :draft
+                         "claim subject"),  # :draft
+    "subject_function_trap": ("clamp", "clip", "trap", "false twin"),  # :draft
+    "subject_method_state": ("method", "class", "object", "state",  # :draft
+                             "account", "withdraw", "balance"),  # :draft
+    "subject_method_state_funded": ("method", "state", "account",  # :draft
+                                    "withdraw", "balance"),  # :draft
+    "subject_method_state_refusal": ("method", "state", "account",  # :draft
+                                     "insufficient funds", "overdraft",  # :draft
+                                     "raises"),  # :draft
+    "subject_method_state_trap": ("method", "state", "account",  # :draft
+                                  "overdraft", "trap", "false twin"),  # :draft
+    "subject_pipeline": ("pipeline", "composition", "stages",  # :draft
+                         "reference implementation", "equivalent"),  # :draft
+    "subject_pipeline_trap": ("pipeline", "composition", "percent",  # :draft
+                              "trap", "false twin"),  # :draft
+    "subject_pipeline_pointwise": ("pipeline", "composition", "compose",  # :draft
+                                   "transform", "load"),  # :draft
+    "subject_pipeline_pointwise_trap": ("pipeline", "composition",  # :draft
+                                        "trap", "false twin"),  # :draft
+    "subject_config_record": ("config", "configuration", "settings",  # :draft
+                              "json schema", "record", "build file"),  # :draft
+    "subject_config_record_trap": ("config", "settings", "json schema",  # :draft
+                                   "trap", "false twin"),  # :draft
 }
 
 
@@ -2045,13 +2134,15 @@ def growth_factor_pipeline(percent: float) -> float:
 
 def growth_factor_reference(percent: float) -> float:
     """The growth factor for a percentage, written in one expression:
-    the reference `growth_factor_pipeline` is compared with."""
+    the reference `growth_factor_pipeline` is compared with
+    ("subject_pipeline_pointwise")."""
     return 1 + percent / 100
 
 
 def growth_factor_misread(percent: float) -> float:
     """The growth factor with the percentage taken as a fraction, so
-    5 gives 6 where the reference gives 1.05."""
+    5 gives 6 where the reference gives 1.05
+    ("subject_pipeline_trap", "subject_pipeline_pointwise_trap")."""
     return 1 + percent
 
 
@@ -2083,7 +2174,8 @@ BUILD_CONFIG = {
 
 
 def build_jobs(config: dict) -> int:
-    """The number of parallel jobs a parsed build file asks for."""
+    """The number of parallel jobs a parsed build file asks for
+    ("subject_config_record")."""
     return config["jobs"]
 
 
@@ -2094,76 +2186,6 @@ def build_jobs(config: dict) -> int:
 # state, a pipeline is a composition of maps, a tool maps programs to
 # documents, a config file is a value in a language, and a module is a
 # finite family of maps.
-
-#: the claim-subject examples that are adjudicated today, each
-#: `(example function, claim)`: a true claim and, under a key ending
-#: `_trap`, its false twin, which is falsified with a witness
-CLAIM_SUBJECT_ROWS: dict[str, tuple[str, str]] = {  # :draft
-    # a function, values to values  # :draft
-    "subject_function": (  # :draft
-        "clamp",  # :draft
-        "for x in [-10, 10], lo in [0, 1], hi in [2, 3], "  # :draft
-        "lo <= clamp(x, lo, hi) <= hi"),  # :draft
-    "subject_function_trap": (  # :draft
-        "clamp",  # :draft
-        "for x in [-10, 10], lo in [0, 1], hi in [2, 3], "  # :draft
-        "clamp(x, lo, hi) == x"),  # :draft
-    # a method with its state written out: the balance goes in as an  # :draft
-    # argument and the new balance comes back as the value  # :draft
-    "subject_method_state": (  # :draft
-        "withdraw",  # :draft
-        "for balance in [0, 1000], amount in [0, 100], "  # :draft
-        "assuming amount <= balance, "  # :draft
-        "withdraw(balance, amount) == balance - amount"),  # :draft
-    # the same map where no withdrawal can exceed the balance  # :draft
-    "subject_method_state_funded": (  # :draft
-        "withdraw",  # :draft
-        "for balance in [100, 1000], amount in [0, 100], "  # :draft
-        "withdraw(balance, amount) == balance - amount"),  # :draft
-    # the refusal is its own claim: no new state where the amount  # :draft
-    # is above the balance  # :draft
-    "subject_method_state_refusal": (  # :draft
-        "withdraw",  # :draft
-        "for balance in [0, 100], amount in (100, 200], "  # :draft
-        "raises(withdraw(balance, amount), ValueError)"),  # :draft
-    # without the premise the claim covers withdrawals the account  # :draft
-    # refuses, and the witness is one of them  # :draft
-    "subject_method_state_trap": (  # :draft
-        "withdraw",  # :draft
-        "for balance in [0, 1000], amount in [0, 100], "  # :draft
-        "withdraw(balance, amount) == balance - amount"),  # :draft
-    # a pipeline, two maps composed, against a reference written in  # :draft
-    # one expression: as whole functions, and point by point  # :draft
-    "subject_pipeline": (  # :draft
-        "growth_factor_pipeline",  # :draft
-        "let g = mathema.lexicon.growth_factor_reference, f =:= g"),  # :draft
-    "subject_pipeline_trap": (  # :draft
-        "growth_factor_pipeline",  # :draft
-        "let g = mathema.lexicon.growth_factor_misread, f =:= g"),  # :draft
-    "subject_pipeline_pointwise": (  # :draft
-        "growth_factor_reference",  # :draft
-        "let load = mathema.lexicon.fraction_to_growth_factor, "  # :draft
-        "let transform = mathema.lexicon.percent_to_fraction, "  # :draft
-        "for percent in [0, 100], "  # :draft
-        "f(percent) == load(transform(percent))"),  # :draft
-    "subject_pipeline_pointwise_trap": (  # :draft
-        "growth_factor_misread",  # :draft
-        "let load = mathema.lexicon.fraction_to_growth_factor, "  # :draft
-        "let transform = mathema.lexicon.percent_to_fraction, "  # :draft
-        "for percent in [0, 100], "  # :draft
-        "f(percent) == load(transform(percent))"),  # :draft
-    # a config file as a value in a record language, the binding  # :draft
-    # named as the function's parameter is (needs mathema-language)  # :draft
-    "subject_config_record": (  # :draft
-        "build_jobs",  # :draft
-        "for config in L[mathema.lexicon.BUILD_CONFIG], "  # :draft
-        'config["jobs"] <= 8'),  # :draft
-    "subject_config_record_trap": (  # :draft
-        "build_jobs",  # :draft
-        "for config in L[mathema.lexicon.BUILD_CONFIG], "  # :draft
-        'config["jobs"] <= 4'),  # :draft
-}  # :draft
-
 
 @dataclass(frozen=True)
 class FormNotYetAccepted:
@@ -2415,6 +2437,20 @@ _EXAMPLE_ENTRIES: dict[str, tuple[object, list[str]]] = {
     "spread": (spread, ["let_shift_seq_range"]),
     "series_mean_shifted": (series_mean, ["let_shift_seq_mean_moves"]),
     "sample_std": (sample_std, ["dim_call_premise"]),
+    "clamp": (clamp, ["subject_function", "subject_function_trap"]),  # :draft
+    "withdraw": (withdraw, [  # :draft
+        "subject_method_state", "subject_method_state_funded",  # :draft
+        "subject_method_state_refusal", "subject_method_state_trap",  # :draft
+    ]),  # :draft
+    "growth_factor_pipeline": (growth_factor_pipeline, [  # :draft
+        "subject_pipeline", "subject_pipeline_trap",  # :draft
+    ]),  # :draft
+    "growth_factor_reference": (growth_factor_reference,  # :draft
+                                ["subject_pipeline_pointwise"]),  # :draft
+    "growth_factor_misread": (growth_factor_misread,  # :draft
+                              ["subject_pipeline_pointwise_trap"]),  # :draft
+    "build_jobs": (build_jobs, ["subject_config_record",  # :draft
+                                "subject_config_record_trap"]),  # :draft
 }
 
 

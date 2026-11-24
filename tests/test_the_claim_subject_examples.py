@@ -2,76 +2,81 @@
 # Copyright 2026 Tetrion Ltd
 """The lexicon's claim-subject examples: a function, a method with its
 state written out, a pipeline, a tool, a config file and a module, each
-as a map from a stated domain to a codomain. A row that is adjudicated
-today lands on its pinned verdict, the true claim and its false twin
-both; a form that is not accepted yet is pinned to what mathema says of
-it today, the exact refusal or the verdict, beside the verdict it is to
-land on."""
-import importlib.util
+as a map from a stated domain to a codomain. `tests/test_lexicon.py`
+pins the verdict of each row in the `subjects` section; here each false
+twin is pinned to the witness that falsifies it, the rows over a record
+language to their verdicts, and each form that is not accepted yet to
+what mathema says of it today, the exact refusal or the verdict, beside
+the verdict it is to land on."""
+import importlib
 import inspect
 
 import pytest
 
 from mathema import lexicon
 from mathema.conjecture import InvalidConjecture, check_conjectures, claim
-from mathema.lexicon import CLAIM_SUBJECT_ROWS, FORMS_NOT_YET_ACCEPTED
+from mathema.lexicon import (EXAMPLE_FUNCTIONS, FORMS_NOT_YET_ACCEPTED,
+                             LEXICON, SECTIONS)
 
-#: the rows over a record language, adjudicated only with
+#: the false twins, each with text its witness contains
+WITNESSES: dict = {
+    "subject_function_trap": "x = ",
+    "subject_method_state_trap": "raised ValueError",
+    "subject_pipeline_trap": "percent = ",
+    "subject_pipeline_pointwise_trap": "percent = ",
+    "subject_config_record_trap": "'jobs': 5",
+}
+
+#: the rows over a record language and the verdict each lands on with
 #: `mathema-language` installed
-_LANGUAGE_ROWS = ("subject_config_record", "subject_config_record_trap")
-
-#: the verdict every adjudicated row lands on, or
-#: `(verdict, text the witness contains)`
-PINNED: dict = {
-    "subject_function": "proven",
-    "subject_function_trap": ("falsified", "x = "),
-    "subject_method_state": "holds",
-    "subject_method_state_funded": "proven",
-    "subject_method_state_refusal": "holds",
-    "subject_method_state_trap": ("falsified", "raised ValueError"),
-    "subject_pipeline": "proven",
-    "subject_pipeline_trap": ("falsified", "percent = "),
-    "subject_pipeline_pointwise": "proven",
-    "subject_pipeline_pointwise_trap": ("falsified", "percent = "),
+LANGUAGE_ROWS: dict = {
     "subject_config_record": "proven",
-    "subject_config_record_trap": ("falsified", "'jobs': 5"),
+    "subject_config_record_trap": "falsified",
 }
 
 _VERDICTS = ("proven", "holds", "falsified")
 
 
-def _adjudicated(function: str, text: str):
-    """The row for `text` checked against the example function named."""
+def _example_function(key: str):
+    """The example function the lexicon pairs with the row `key`."""
+    (fn,) = [fn for fn, keys in EXAMPLE_FUNCTIONS.values() if key in keys]
+    return fn
+
+
+def _adjudicated(fn, text: str):
+    """The row for `text` checked against the function `fn`."""
     row = claim(text)
-    (p,) = [q for q in check_conjectures(getattr(lexicon, function), [row])
-            if q.name == row.name]
+    (p,) = [q for q in check_conjectures(fn, [row]) if q.name == row.name]
     return p
 
 
-def test_every_adjudicated_row_is_pinned_and_every_true_claim_has_a_false_twin():
-    assert set(PINNED) == set(CLAIM_SUBJECT_ROWS)
-    traps = {key for key in CLAIM_SUBJECT_ROWS if key.endswith("_trap")}
+def test_every_true_claim_in_the_section_has_a_false_twin_with_a_witness():
+    rows = set(SECTIONS["subjects"])
+    traps = {key for key in rows if key.endswith("_trap")}
+    assert traps == set(WITNESSES)
     for key in traps:
-        assert key[:-len("_trap")] in CLAIM_SUBJECT_ROWS, key
-        assert PINNED[key][0] == "falsified", key
-    for key in set(CLAIM_SUBJECT_ROWS) - traps:
-        assert PINNED[key] in ("proven", "holds"), key
+        assert key[:-len("_trap")] in rows, key
     for subject in ("function", "method_state", "pipeline", "config_record"):
         assert f"subject_{subject}_trap" in traps, subject
+    assert set(LANGUAGE_ROWS) <= rows
 
 
 @pytest.mark.needs_full_proof_budget
-@pytest.mark.parametrize("key", list(CLAIM_SUBJECT_ROWS))
-def test_an_adjudicated_row_lands_on_its_pinned_verdict(key):
-    if key in _LANGUAGE_ROWS:
+@pytest.mark.parametrize("key", list(WITNESSES))
+def test_a_false_twin_is_falsified_with_its_witness(key):
+    if key in LANGUAGE_ROWS:
         pytest.importorskip("mathema_language")
-    function, text = CLAIM_SUBJECT_ROWS[key]
-    want = PINNED[key]
-    verdict, witness = (want, None) if isinstance(want, str) else want
-    p = _adjudicated(function, text)
-    assert p.verdict == verdict, (p.verdict, p.note)
-    if witness is not None:
-        assert witness in str(p.counterexample), p.counterexample
+    p = _adjudicated(_example_function(key), LEXICON[key])
+    assert p.verdict == "falsified", (p.verdict, p.note)
+    assert WITNESSES[key] in str(p.counterexample), p.counterexample
+
+
+@pytest.mark.needs_full_proof_budget
+@pytest.mark.parametrize("key", list(LANGUAGE_ROWS))
+def test_a_row_over_the_record_language_lands_on_its_verdict(key):
+    pytest.importorskip("mathema_language")
+    p = _adjudicated(_example_function(key), LEXICON[key])
+    assert p.verdict == LANGUAGE_ROWS[key], (p.verdict, p.note)
 
 
 @pytest.mark.needs_full_proof_budget
@@ -85,7 +90,7 @@ def test_a_form_not_yet_accepted_is_pinned_to_what_mathema_says_today(key):
         assert str(refusal.value) == text
     else:
         assert kind in _VERDICTS, form.today
-        p = _adjudicated(form.function, form.wanted)
+        p = _adjudicated(getattr(lexicon, form.function), form.wanted)
         assert p.verdict == kind, (p.verdict, p.note)
         assert text in str(p.counterexample), p.counterexample
 
@@ -102,22 +107,27 @@ def test_a_form_not_yet_accepted_states_the_verdict_it_is_to_land_on():
             assert form.expected != form.today.partition(": ")[0], key
 
 
-def test_every_line_of_the_two_tables_is_marked_draft():
+def test_every_line_of_the_not_yet_accepted_table_is_marked_draft():
     lines = inspect.getsource(lexicon).splitlines()
-    for name in ("CLAIM_SUBJECT_ROWS", "FORMS_NOT_YET_ACCEPTED"):
-        start = next(i for i, line in enumerate(lines)
-                     if line.startswith(f"{name}: dict"))
-        end = next(i for i in range(start, len(lines))
-                   if lines[i].startswith("}"))
-        unmarked = [line for line in lines[start:end + 1]
-                    if not line.rstrip().endswith("# :draft")]
-        assert not unmarked, (name, unmarked)
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith("FORMS_NOT_YET_ACCEPTED: dict"))
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith("}"))
+    unmarked = [line for line in lines[start:end + 1]
+                if not line.rstrip().endswith("# :draft")]
+    assert not unmarked, unmarked
 
 
-def test_the_tables_stay_out_of_the_lexicon_proper():
-    held_apart = set(CLAIM_SUBJECT_ROWS) | set(FORMS_NOT_YET_ACCEPTED)
-    assert not held_apart & set(lexicon.LEXICON)
-    assert not set(CLAIM_SUBJECT_ROWS) & set(FORMS_NOT_YET_ACCEPTED)
+def test_every_line_naming_a_claim_subject_row_is_marked_draft():
+    """Outside a docstring, which ends its line, every line of the
+    lexicon module that names a claim-subject row carries the marker."""
+    unmarked = [line for line in inspect.getsource(lexicon).splitlines()
+                if '"subject_' in line
+                and not line.rstrip().endswith(('# :draft', '."""'))]
+    assert not unmarked, unmarked
+
+
+def test_a_form_not_yet_accepted_is_not_a_lexicon_row():
+    assert not set(FORMS_NOT_YET_ACCEPTED) & set(LEXICON)
 
 
 # --- the example functions, and what the expected verdicts rest on --------
