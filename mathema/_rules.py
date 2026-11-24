@@ -13,11 +13,35 @@ value  what it changed
 0      the fingerprint before the rules number existed
 1      canonical statement text: each string literal respelled from
        its value, and a negated relation in its parentheses
+2      the missing argument reading: a call that passes `None` or
+       nan as written is run at that value, or read exactly, never
+       derived as a real number
+2      the listed missing value reading: `is_defined` runs f at each
+       missing value the domain lists
+2      the negation reading: a negated claim is proven only from a
+       disproof whose witness was run
+2      the contained witness: the call that witnesses a negated
+       safety claim is made in a child process
+2      the empty input reading: `is_empty_safe` runs every empty
+       input the parameter admits
+2      the enforced domain reading: `excluded_outside_domain` is
+       proven only for mathema's own wrapper, enforcing no more than
+       the claim's domain
+2      the claim side reading: a failure only the float evaluation
+       of the claim's own side makes is no counterexample
+2      the weakest row reading: a safety gate is no stronger than
+       its weakest row
+2      the unreachable code reading: a write is in unreachable code
+       only under a constant test, or a test of one parameter that
+       nothing binds again against numeric literals
 =====  ==========================================================
+
+A release raises the number once. Each fix in that release that could
+change a verdict adds its own entry under the release's value.
 """
 from __future__ import annotations
 
-RULES = 1
+RULES = 2
 
 
 def rules_in_force() -> int:
