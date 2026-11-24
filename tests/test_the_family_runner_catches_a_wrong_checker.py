@@ -42,9 +42,14 @@ def _first_point(case):
 
 def test_a_falsification_whose_witness_holds_is_wrong():
     # value and raise claims true at every point: the witness is the first domain point
-    cases = [c for c in CASES if c.truth is True and c.points is None
-             and V._top_word(V.parse_claim(c.claim).body)[1] is None
-             and V.parse_claim(c.claim).bindings]
+    def readable(case):
+        try:
+            parsed = V.parse_claim(case.claim)
+        except V.CannotEvaluate:
+            return False
+        return V._top_word(parsed.body)[1] is None and bool(parsed.bindings)
+
+    cases = [c for c in CASES if c.truth is True and c.points is None and readable(c)]
     assert len(cases) > 15
 
     def witness(case):
