@@ -14,6 +14,7 @@ other routes."""
 import pytest
 
 import _text_validators as T
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 
 pytest.importorskip("z3")
 
@@ -36,7 +37,9 @@ def test_a_refusing_validator_returns_its_argument_wherever_it_is_defined(fn):
     assert T.on_smt(row)
     statuses = {a["statement"]: a["status"]
                 for a in row.meta["mathema.assumptions"]["definitions"]}
-    assert set(statuses.values()) == {"checked"}, statuses
+    assert set(statuses.values()) == {"assumed"}, statuses
+    assert all(_agreed_on_every_value(a)
+               for a in row.meta["mathema.assumptions"]["definitions"])
     assert f"{fn.__name__} accepts a text exactly when it is in" in " ".join(statuses)
 
 
