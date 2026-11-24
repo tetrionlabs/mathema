@@ -11,6 +11,7 @@ from mathema.conjecture import check_conjectures, claim, language_definition_sta
 from mathema.domain import parse_binding
 from mathema.domain_relations import defined_bound
 from mathema.languages import StringLanguage, register_language, unregister_language
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 
 pytest.importorskip("z3")
 
@@ -65,7 +66,9 @@ def test_the_term_is_read_and_decides_a_relation(name):
                                                    route="derive")])
     assert row.verdict == "proven", (row.verdict, row.note)
     statuses = {a["status"] for a in row.meta["mathema.assumptions"]["definitions"]}
-    assert statuses == {"checked"}
+    assert statuses == {"assumed"}
+    assert all(_agreed_on_every_value(a)
+               for a in row.meta["mathema.assumptions"]["definitions"])
 
 
 @pytest.mark.parametrize("name", ["byterm", "byold", "byboth"])
@@ -85,4 +88,4 @@ def test_a_form_with_neither_key_states_no_term():
 def test_the_language_core_builds_writes_term():
     from mathema.conjecture import _every_text_language
     form = _every_text_language().to_json()
-    assert regular.is_definition(form["term"]) and "definition" not in form
+    assert regular.is_definition(form["term"]) and form["definition"] == form["term"]

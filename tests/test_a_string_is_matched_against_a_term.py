@@ -90,7 +90,7 @@ def test_a_term_and_its_canonical_form_hold_the_same_strings():
                 continue
             node = document[key]
             written, canonical = _plain_matcher(node), regular.matcher(node)
-            letters = regular.representatives([node])[:4]
+            letters = regular._representatives([node])[:4]
             for n in range(4):
                 for t in itertools.product(letters, repeat=n):
                     text = "".join(t)

@@ -72,7 +72,7 @@ def _record(root, key):
 def test_a_record_from_before_the_number_is_stale_once(project, monkeypatch):
     from mathema.verify import verify_project
     with monkeypatch.context() as m:
-        m.setattr(_rules, "RULES", 0)
+        m.setattr(_rules, "REASONING_VERSION", 0)
         assert not verify_project(root=str(project)).problems
     out = verify_project(root=str(project))
     assert not out.problems, out.problems
@@ -100,7 +100,7 @@ def test_an_edited_claim_under_an_earlier_number_is_a_supersession(project,
                                                                    monkeypatch):
     from mathema.verify import verify_project
     with monkeypatch.context() as m:
-        m.setattr(_rules, "RULES", 0)
+        m.setattr(_rules, "REASONING_VERSION", 0)
         verify_project(root=str(project))
     edited = {**_CLAIMS, "rlpkg.mod.twice": {"claims": [
         {"name": "doubles", "statement": "for n in [0, 10] subset Z, f(n) >= n"}]}}
@@ -121,7 +121,7 @@ def test_all_checks_a_fresh_record_again(project):
 def test_raising_the_number_makes_every_record_stale(project, monkeypatch):
     from mathema.verify import verify_project
     verify_project(root=str(project))
-    monkeypatch.setattr(_rules, "RULES", _rules.RULES + 1)
+    monkeypatch.setattr(_rules, "REASONING_VERSION", _rules.REASONING_VERSION + 1)
     out = verify_project(root=str(project))
     assert "fresh" not in _why(out).values(), _why(out)
     assert set(_why(verify_project(root=str(project))).values()) == {"fresh"}

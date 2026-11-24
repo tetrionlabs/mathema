@@ -4,25 +4,11 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## Unreleased
 
-### Highlights
-- A function read as a pattern validator is decided on the solver route for more claim forms: `assuming f is defined, f(s) == s` for a validator that refuses every text outside its language; a match on `s or ''` over a language of texts; a `let`-bound variable with another name than the parameter; literal text added around the variable, decided over all text when the texts called on leave the variable's language; an exception class of the function's own package with a builtin exception as its only base and nothing of its own; and a message reading a module-level text constant.
-- `mathema.regular` has the calls of a term algebra: `validate`, `contains` and `matcher` (on a definition, with a bound and a budget, reporting the work spent, or on a bare node), `atoms`, `shortest_member` and `find_member`.
-
-### Upgrading from 0.6.6.1
-- A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release.
-- A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
-- A claim whose every variable is a text has no `[float]` companion row.
-- A record whose verdict rests on a checked language definition goes stale when the language's `contains()` changes, or a text constant a validator's message reads.
-- Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 2 in this release: canonical statement text, and the readings under Fixes that could change a verdict). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. The claim identity (`claims_fingerprint`) does not carry the rules number; it moves only for a claim whose stored text this release writes differently (a negated relation, a string literal an earlier release quoted ambiguously).
-- The stored statement text of a string literal is written from its value, and a negated relation keeps its parentheses. A domain set's string member is still read as the text between its quotes (`{"\t"}` is a backslash and a t); when that differs from the same text read as an expression literal, `mathema verify` says so in a note. A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
-- `lineage.statement_text` is no longer written.
-- A claim whose stored text 0.6.6.1 wrote and cannot read back (`= not (a < x and x < b)`) is checked again as written and re-recorded with a note, where 0.6.6.1 failed the whole function with "rebuild the record". An edit made to that claim since its record was written is adopted without `--as superseded`.
+### Upgrading from 0.6.6.2
+- Every record is checked again once. mathema's reasoning version (`mathema._rules.REASONING_VERSION`) is 2 in this release; the table in `mathema/_rules.py` names each rule that changed.
+- The number 0.6.6.2 called the rules number is called the reasoning version; `mathema._rules.RULES` still reads as an alias.
 
 ### Fixes
-- The check of a language's definition compares the strings the claim itself writes, and reports `assumed`, never `checked`, when the language's membership raised on a string; a proven line names each definition it assumed.
-- A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
-- A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
-- The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
 - A claim whose call passes a literal `None` (`for x in {1}, f(None, 0.5) == 0`) is decided by running that call, never proven by derive, which reads every argument as a real number.
 - `is_defined(f)` over a domain that lists a missing value (`{1, None}`, `[0, 1] | absent`) runs f at each listed value: a raise there falsifies it, with that call as the witness, and its negation reads the same run.
 - A negated claim (`not is_state_safe(f)`, `not is_deterministic(f)`) is proven from its positive's disproof only when that disproof's witness was executed; a disproof read from the source alone leaves the negation unknown, with the reason.
@@ -44,12 +30,40 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A domain error on the claim's own side that only the float evaluation makes (`log(exp(f(x)))` where the exponential rounds to zero) is no counterexample: the point is left undecided. Read exactly, each step stays in the reals, so `sqrt` of a negative number is no value.
 - `is_defined(f)` over single values runs f at a missing value the domain lists when derive does not decide the claim either.
 - A falsified claim's witness shows every argument the call passed as a literal, keyword arguments included.
+
+## 0.6.6.2
+
+### Highlights
+- A function read as a pattern validator is decided on the solver route for more claim forms: `assuming f is defined, f(s) == s` for a validator that refuses every text outside its language; a match on `s or ''` over a language of texts; a `let`-bound variable with another name than the parameter; literal text added around the variable, decided over all text when the texts called on leave the variable's language; an exception class of the function's own package with a builtin exception as its only base and nothing of its own; and a message reading a module-level text constant.
+- `mathema.regular` has the calls of a term algebra: `validate`, `contains` and `matcher` (on a definition, with a bound and a budget, reporting the work spent, or on a bare node), `atoms`, `shortest_member` and `find_member`.
+- A language's persisted form states its regular-language term under the key `term`. A form that carries only `definition` is still read, for this release; a form that states both is read by `term`.
+- A code point range written as a tuple in a regular-language definition is read as the list it stands for, with the same canonical text and hash. A definition that states both `language` and the bounds `at_least` and `at_most` is refused.
+- A record whose verdict rests on a language's stated definition, compared with the language's `contains()`, goes stale when that `contains()` changes, or a text constant a validator's message reads.
+
+### Upgrading from 0.6.6.1
+- The `language` extra takes mathema-language 0.2 to 0.4.
+- An assumption a proof rests on, compared with a language's `contains()` on the values tried, has the status `assumed` where it read `checked`; a stored `checked` is still read, as a comparison that agreed on every value. In a proof outline an entry may say what the comparison fell short of: `(assumed, 3 of 14 values skipped)`, `(assumed, no value compared)`.
+- A claim whose every variable is a text has no `[float]` companion row.
+- Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 1 in this release: canonical statement text). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. The claim identity (`claims_fingerprint`) does not carry the rules number; it moves only for a claim whose stored text this release writes differently (a negated relation, a string literal an earlier release quoted ambiguously).
+- The stored statement text of a string literal is written from its value, and a negated relation keeps its parentheses. A domain set's string member is still read as the text between its quotes (`{"\t"}` is a backslash and a t); when that differs from the same text read as an expression literal, `mathema verify` says so in a note. A record an earlier release wrote in the old spelling of an unedited claim is re-recorded with a note, never a supersession.
+- `lineage.statement_text` is no longer written.
+- A claim whose stored text 0.6.6.1 wrote and cannot read back (`= not (a < x and x < b)`) is checked again as written and re-recorded with a note, where 0.6.6.1 failed the whole function with "rebuild the record". An edit made to that claim since its record was written is adopted without `--as superseded`.
+
+### Fixes
+- The check of a language's definition compares the strings the claim itself writes. Agreement on the values tried is no proof: the definition, the reading of a validator and `<L> holds only texts` each stand as `assumed`, with an `axiom` id and a `corroboration` record of the values drawn, compared and skipped, the seed and the outcome. A proven line names a definition it assumes when a value was skipped or none was compared.
+- A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
+- A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
+- The derivative matcher answers a bounded repeat followed by anything on long texts, and gives up on a term too deep to read with `MatchBudget`.
 - Stored text an earlier release wrote for two different claims (`f(s, '}"', 's')` and `f(s, '}"", "s')`) is reported as ambiguous, naming both readings and `mathema accept ... --as superseded` for an edit; the claim is checked as written, never kept at its old verdict.
 - A key that raises after its record is written, while it is checked or while its dependencies are settled, gets the record it had before the run back, whatever stopped it (an exception, running out of memory, an interrupt or the wall-clock alarm), and a read of the store later in the same run sees what is on disk.
 - A claim whose stored text mathema cannot write fails its function's row and shows its kept row as `unchecked`; the function is checked again on every run until the text can be written.
 - A risk accepted on a claim that a later check proves or finds holding stays in the record as history, is no longer counted as accepted risk, and the sweep says so.
 - After an earlier key's release move, a moved key still names its rename remedy.
 - A note names each character it shows (`a tab (U+0009)`), a claim whose stored text moved in more than one way gets every note that applies, and docsync's diagnostics follow `--root`.
+
+### Known limits
+- In a few narrow cases a result is reported at a higher level than its evidence supports, or a verdict is wrong; each is described with a small example in the issue tracker (#120 to #132). The statement checked is true in most of them and the effect on ordinary claims is small. They were found by checking mathema's verdicts against executed results and by mutation runs over KOINE.
+- A claim someone wrote still runs its function on values drawn from the claim's domain. A function that writes, deletes or sends should not carry claims that are probed.
 
 ## 0.6.6.1
 

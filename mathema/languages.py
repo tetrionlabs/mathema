@@ -1122,7 +1122,8 @@ def _term_of(language) -> "dict | None":
         return None
     if TERM_KEY in form:
         return form[TERM_KEY]
-    return form.get("definition")  # :draft alias, remove when mathema-language writes term
+    # a form with no `term` is read by the earlier key
+    return form.get("definition")  # :draft
 
 
 def language_vocabulary() -> tuple:
