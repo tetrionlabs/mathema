@@ -7068,6 +7068,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        refused_at = _named_point_refused(ctx, fn, facts, statement)
+        if refused_at is not None:
+            out.append(stamp(refused_at))
+            continue
         from . import _premises
         from .types import shapes_from_signature
         not_read = _premises.pinned_container_words(
@@ -9006,6 +9010,10 @@ def _claim_array_ranks(cj_domain: dict, fn, facts) -> dict:
             structures = structures_from_signature(fn)
         except Exception:
             shapes, structures = {}, {}
+    # a parameter the claim binds to numbers is a number, whatever its
+    # marker says of that number
+    structures = {p: props for p, props in structures.items()
+                  if not _binds_numbers((cj_domain or {}).get(p))}
     return linalg.array_ranks(cj_domain, shapes,
                               getattr(facts, "param_kinds", None),
                               structures)
@@ -10194,15 +10202,129 @@ def _set_element(bound) -> "str | None":
     return None
 
 
+def _named_infinite_points(cj) -> list:
+    """Intent:
+        The infinite points a claim names, as (parameter, value): an
+        infinite member of a finite set it binds (`{0, inf}`), and an
+        infinite closed end of an interval it writes (`[0, oo]`). An
+        open end (`[0, oo)`) names no point, nor does a space of
+        vectors or matrices or a language.
+    """
+    from .domain import _as_domain
+
+    def infinite(v) -> bool:
+        return isinstance(v, float) and math.isinf(v)
+
+    named: list = []
+    for p, bound in (cj.domain or {}).items():
+        if isinstance(bound, list):
+            bound = tuple(bound)
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            continue
+        if dom.dims or dom.base_type == "L":
+            continue
+        for piece in dom.pieces:
+            if isinstance(piece, frozenset):
+                values = sorted(v for v in piece if infinite(v))
+            elif isinstance(piece, tuple) and len(piece) == 2:
+                values = [v for v, closed in (
+                    (piece[0], getattr(piece, "closed_lo", True)),
+                    (piece[1], getattr(piece, "closed_hi", True)))
+                    if closed and infinite(v)]
+            else:
+                values = []
+            named += [(p, v) for v in values
+                      if v not in dom.excluded and (p, v) not in named]
+    return named
+
+
+def _named_point_refused(ctx: "_ClaimContext", fn, facts,
+                         statement: str) -> "Probe | None":
+    """Intent:
+        The falsified row of a value claim that names an infinite point
+        (`_named_infinite_points`) at which the function's own guard
+        refuses the call, or None. The draws stand a finite reach in
+        for an infinite end, so the named point itself is called here:
+        a raise there by a `raise` of f's own body or by a mathema
+        guard around it is the witness, with the exception named.
+
+    Notes:
+        Read only for a comparison with no premise, whose every call of
+        f passes each parameter as itself; the other parameters take an
+        ordinary value of their bounds. A call that returns, or raises
+        from anything else, is left to the claim's ordinary reading.
+    """
+    from ._examine import _MATHEMA_DIR
+    from .gates import _fmt_point
+    from .runtime_types import calling
+    cj = ctx.cj
+    if (ctx.family is not None or cj.relation not in _COMPARISON_RELATIONS
+            or cj.negated or cj.links or ctx.extra or ctx.assumption
+            or ctx.assume_defined):
+        return None
+    named = _named_infinite_points(cj)
+    params = list(facts.params)
+    if not named or not params:
+        return None
+    calls = 0
+    for text in (cj.lhs, cj.rhs or "0"):
+        try:
+            tree = ast.parse(text, mode="eval")
+        except SyntaxError:
+            return None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id == "f":
+                calls += 1
+                if node.keywords or [getattr(a, "id", None)
+                                     for a in node.args] != params:
+                    return None
+    if not calls:
+        return None
+    run = calling(fn, facts, _declared_elements(ctx.cj_domain))
+    for p, value in named:
+        if p not in params:
+            continue
+        point = {q: value if q == p
+                 else _an_ordinary_value((ctx.cj_domain or {}).get(q))
+                 for q in params}
+        if any(v is _NO_VALUE for v in point.values()):
+            continue
+        try:
+            run(*[point[q] for q in params])
+        except Exception as exc:
+            tb = exc.__traceback__
+            while tb is not None and tb.tb_next is not None:
+                tb = tb.tb_next
+            raised_in = os.path.abspath(tb.tb_frame.f_code.co_filename) \
+                if tb is not None else ""
+            if not (deliberate_raise(exc, fn)
+                    or raised_in.startswith(_MATHEMA_DIR + os.sep)):
+                continue
+            where = _fmt_point(point, params)
+            name = _exits.exception_name(exc)
+            return Probe(
+                cj.name, statement, "falsified", route="probe",
+                counterexample=(f"{where}: raised {name}, at a point the "  # :draft
+                                f"claim names and f's own guard refuses"),
+                note=ctx.note,
+                meta={"mathema.corroboration": "reproduced",
+                      "mathema.witness_executed": True})
+    return None
+
+
 def _binds_numbers(bound) -> bool:
     """Intent:
         Whether a claim's binding of one parameter is a set of numbers:
         a real interval, a finite set that lists a number, or R, Z or N
-        with no dimensions. False for no binding, a space of vectors or
-        matrices (`R^n`, `R^(n,n)`), and a language.
+        with no dimensions. False for no binding (a parameter read over
+        its undeclared reach included), a space of vectors or matrices
+        (`R^n`, `R^(n,n)`), and a language.
     """
     from .domain import _as_domain, is_sentinel
-    if bound is None:
+    if bound is None or getattr(bound, "bare", False):
         return False
     if isinstance(bound, list):
         bound = tuple(bound)
@@ -11070,7 +11192,8 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
     Notes:
         The function is run only when its examination read everything
         and found no write other than to module-level values of its
-        project and draws from the shared random generator, so that the
+        project, draws from the shared random generator and items of
+        `os.environ`, of which the child has its own copy, so that the
         calls change nothing outside the child. A call that raises is
         no witness. A function that writes anything else, or that no
         child can import, is not called: `not is_state_safe(f)` is then
@@ -11088,9 +11211,13 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
         return None
     effects = examine(fn, _generator_parameter(fn, facts)
                       if kind == "is_state_safe" else None)
+    # an item of os.environ written is written in the child's own copy
+    in_environ = [site for site in effects.writes
+                  if " changes os.environ (" in site.text]
     runnable = not (effects.unknowns or effects.unknown_writes) and all(
         "module-level" in site.text
         or "the shared random generator" in site.text
+        or site in in_environ
         for site in effects.writes)
     cj_domain = ctx.cj_domain or {}
     names = list(facts.params)
@@ -11139,7 +11266,8 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
             watched.add((own.__module__, site.text[len(rebinds):]))
     seen = _contained.witness(
         fn, kind, [[point[p] for p in names] for point in points],
-        sorted(watched), _declared_elements(cj_domain))
+        sorted(watched), _declared_elements(cj_domain),
+        environ=bool(in_environ))
     if "failed" in seen:
         return ProofResult(
             "undecided",
@@ -11158,6 +11286,14 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
                 f"the module-level {_shown(seen.get('name'))} was "
                 f"{_shown(seen.get('before'))} before it and "
                 f"{_shown(seen.get('after'))} after it")
+    elif kind == "is_state_safe" and seen.get("seen") == "environ":
+        def length(n) -> str:
+            return ("not set" if not isinstance(n, int)
+                    else f"{n} character{'' if n == 1 else 's'} long")
+        said = (f"the call at {where} was run in a child process, and "  # :draft
+                f"the environment variable {_shown(seen.get('name'))} was "
+                f"{length(seen.get('before'))} before it and "
+                f"{length(seen.get('after'))} after it")
     elif kind == "is_deterministic" and seen.get("seen") == "results":
         said = (f"two calls at {where} were run in a child process, and "  # :draft
                 f"returned {_shown(seen.get('first'))} and "
@@ -11226,6 +11362,8 @@ def _write_read_as_run(fn, facts, effects, cj_domain) -> "tuple | None":
         for stmt in body:
             if isinstance(stmt, ast.Global):
                 declared_global.update(stmt.names)
+            # :draft the import of a loaded standard-library module is
+            # read as unable to raise
             elif isinstance(stmt, ast.Import) and all(
                     "." not in a.name and a.name in sys.stdlib_module_names
                     and a.name in sys.modules for a in stmt.names):

@@ -90,12 +90,16 @@ def differs(a, b) -> bool:
 
 
 def witness(fn, kind: str, points: list, watched: list,
-            declared: "dict | None" = None) -> dict:
+            declared: "dict | None" = None, environ: bool = False) -> dict:
     """Intent:
         What a child process saw calling `fn` at `points` (argument
         lists, tried in order until one shows it). `kind` "is_state_safe"
         looks for a call after which one of the `watched` module-level
-        values, `(module, name)` pairs, has changed; "is_deterministic"
+        values, `(module, name)` pairs, has changed, or, with `environ`,
+        after which the child's own environment has (answered as
+        `{"seen": "environ", "point": i, "name": variable, "before": n,
+        "after": n}`, each `n` the length of the value or None when the
+        variable is not set, never the value); "is_deterministic"
         for two calls with the same arguments whose results differ.
         The answer is `{"seen": "write", "point": i, "name": n,
         "before": text, "after": text}`, `{"seen": "results", "point":
@@ -117,7 +121,8 @@ def witness(fn, kind: str, points: list, watched: list,
     request = {"sys_path": list(sys.path), "module": fn.__module__,
                "file": os.path.abspath(module.__file__),
                "qualname": fn.__qualname__, "kind": kind,
-               "watched": [list(w) for w in watched], "packed": packed}
+               "watched": [list(w) for w in watched], "packed": packed,
+               "environ": bool(environ)}
     limit = FAILSAFE_WALL_CLOCK_SECONDS
     try:
         done = subprocess.run([sys.executable, "-c", _BOOTSTRAP],
@@ -208,7 +213,9 @@ def _observed(request: dict) -> dict:
         try:
             if request["kind"] == "is_state_safe":
                 before = held()
-                if not before:
+                environment = (dict(os.environ) if request.get("environ")
+                               else None)
+                if before is None or (not before and environment is None):
                     return {"seen": None}
                 run(*copy.deepcopy(args))
                 after = held()
@@ -220,6 +227,17 @@ def _observed(request: dict) -> dict:
                             "name": changed[0],
                             "before": short(before[changed[0]]),
                             "after": short(after[changed[0]])}
+                if environment is not None:
+                    now = dict(os.environ)
+                    moved = sorted(k for k in {*environment, *now}
+                                   if environment.get(k) != now.get(k))
+                    if moved:
+                        def length(value):
+                            return None if value is None else len(value)
+                        return {"seen": "environ", "point": index,
+                                "name": short(moved[0]).strip("'\""),
+                                "before": length(environment.get(moved[0])),
+                                "after": length(now.get(moved[0]))}
             else:
                 first = run(*copy.deepcopy(args))
                 second = run(*copy.deepcopy(args))

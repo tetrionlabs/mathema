@@ -6,9 +6,10 @@ interpreter imports f's module, calls f, and reports what it saw. The
 checking process's own module values are as they were, so one row never
 shows what another row's witness wrote. A child that runs past its
 budget leaves the row unknown, saying so. A function no child
-can import, or one that writes the environment or a file, is not called
-at all: a write the source shows a call making is read, and anything
-else is unknown with the reason."""
+can import, or one that writes a file, is not called at all: a write
+the source shows a call making is read, and anything else is unknown
+with the reason. A function that writes the environment is called in
+the child, which has its own copy of it."""
 import os
 import re
 
@@ -108,10 +109,10 @@ def test_a_child_past_its_budget_leaves_the_row_unknown(monkeypatch):
     assert _log == []
 
 
-def test_a_function_that_writes_the_environment_or_a_file_is_not_run():
+def test_the_environment_is_written_only_in_the_child_and_a_file_never():
     p = _row(sets_the_environment, "for x in [0, 1], not is_state_safe(f)")
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
-    assert "not run" in p.sketch and "child process" not in p.sketch, p.sketch
+    assert "child process" in p.sketch, p.sketch
     assert "MATHEMA_TEST_CHILD_WITNESS_NOT_RUN" not in os.environ
     p = _row(writes_a_file, "for x in [0, 1], not is_state_safe(f)")
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)

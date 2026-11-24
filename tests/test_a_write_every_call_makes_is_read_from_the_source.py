@@ -9,7 +9,13 @@ call. The same write as the first statement under a test that compares
 a parameter nothing binds again with numeric literals runs at every
 point where the test holds, and the row names one such point of the
 claim's domain. Nothing is called. A write after a statement that can
-raise or return, or under a test of any other form, is not read."""
+raise or return, or under a test of any other form, is not read.
+
+A function that writes a file is never run. A module-level function
+whose only writes outside itself are to `os.environ` is run in a child
+process, which has its own copy of the environment: the row names the
+variable and the length of its value, never the value, and the checking
+process's environment is as it was."""
 import os
 
 import pytest
@@ -54,6 +60,51 @@ def opens_to_read(x):
     with open(_PATH) as source:
         source.read()
     return x * 2.0
+
+
+def sets_a_long_value(x):
+    os.environ["MATHEMA_TEST_WRITE_READ_NOT_RUN"] = "kept-out-of-the-row-0123"
+    return x * 2.0
+
+
+def opens_past_a_half(x):
+    if x > 0.5:
+        open(_PATH, "a")
+    return x * 2.0
+
+
+def opens_in_the_else(x):
+    if x < 0.5:
+        pass
+    else:
+        open(_PATH, "a")
+    return x * 2.0
+
+
+def opens_in_a_band(x):
+    if x > 0.25 and x < 0.75:
+        if not x == 0.5:
+            open(_PATH, "a")
+    return x * 2.0
+
+
+def opens_under_arithmetic(x):
+    if x * x > 100.0:
+        open(_PATH, "a")
+    return x * 2.0
+
+
+def opens_after_a_division(x):
+    y = 1.0 / x
+    open(_PATH, "a")
+    return y
+
+
+def opens_after_an_early_return(x):
+    if x >= 0.0:
+        return x
+    open(_PATH, "a")
+    return x
 
 
 def sets_past_a_half(x):
@@ -108,8 +159,39 @@ def _row(fn, text="for x in [0, 1], not is_state_safe(f)"):
     return next(r for r in rows if not r.name.endswith("[float]"))
 
 
+@pytest.mark.parametrize("fn, text, point", [
+    (sets_the_environment, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (imports_then_sets_the_environment,
+     "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (sets_past_a_half, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (sets_past_a_half, "not is_state_safe(f)", "x = 0.5000000000000001"),
+    (sets_in_the_else, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (sets_in_a_band, "for x in [0, 1], not is_state_safe(f)", "x = 0."),
+    (sets_after_a_division, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (sets_after_an_early_return,
+     "for x in [0, 1], not is_state_safe(f)", "x = nan"),
+], ids=["first", "import", "body", "no-domain", "else", "band", "division",
+        "return"])
+def test_an_environment_write_is_witnessed_in_a_child_process(fn, text, point):
+    p = _row(fn, text)
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "proven by a witness: the call at " + point in p.sketch, p.sketch
+    assert "child process" in p.sketch, p.sketch
+    assert ("the environment variable MATHEMA_TEST_WRITE_READ_NOT_RUN was "
+            "not set before it and 1 character long after it") in p.sketch, \
+        p.sketch
+    assert _KEY not in os.environ
+
+
+def test_the_row_shows_the_length_of_the_value_and_never_the_value():
+    p = _row(sets_a_long_value)
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "24 characters long after it" in p.sketch, p.sketch
+    assert "kept-out" not in p.sketch + (p.note or ""), (p.sketch, p.note)
+    assert _KEY not in os.environ
+
+
 @pytest.mark.parametrize("fn", [
-    sets_the_environment, imports_then_sets_the_environment,
     opens_to_write, opens_to_append,
 ], ids=lambda fn: fn.__name__)
 def test_a_write_that_is_the_first_statement_proves_the_negation(fn):
@@ -130,40 +212,44 @@ def test_a_deletion_is_read_only_for_a_key_that_is_set(monkeypatch):
 
 
 @pytest.mark.parametrize("fn, text, point", [
-    (sets_past_a_half, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
-    (sets_past_a_half, "not is_state_safe(f)", "x = 0.5000000000000001"),
-    (sets_in_the_else, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
-    (sets_in_a_band, "for x in [0, 1], not is_state_safe(f)", "x = 0."),
+    (opens_past_a_half, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (opens_past_a_half, "not is_state_safe(f)", "x = 0.5000000000000001"),
+    (opens_in_the_else, "for x in [0, 1], not is_state_safe(f)", "x = 1"),
+    (opens_in_a_band, "for x in [0, 1], not is_state_safe(f)", "x = 0."),
 ], ids=["body", "no-domain", "else", "band"])
 def test_a_write_under_a_literal_test_is_proven_at_a_point_that_takes_it(
         fn, text, point):
     p = _row(fn, text)
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
     assert "not run" in p.sketch and point in p.sketch, p.sketch
-    assert _KEY not in os.environ
+    assert not os.path.exists(_PATH)
 
 
 def test_a_literal_test_that_holds_nowhere_in_the_domain_falsifies():
     p = _row(sets_past_a_half, "for x in [0, 0.25], not is_state_safe(f)")
     assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
+    p = _row(opens_past_a_half, "for x in [0, 0.25], not is_state_safe(f)")
+    assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
 
 
 def test_an_else_no_number_of_the_domain_takes_is_read_at_nan():
     # nan < 0.5 is False, and the domain admits nan
-    p = _row(sets_in_the_else, "for x in [0, 0.25], not is_state_safe(f)")
-    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
-    assert "x = nan" in p.sketch, p.sketch
-    assert _KEY not in os.environ
+    for fn in (sets_in_the_else, opens_in_the_else):
+        p = _row(fn, "for x in [0, 0.25], not is_state_safe(f)")
+        assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+        assert "x = nan" in p.sketch, p.sketch
+    assert _KEY not in os.environ and not os.path.exists(_PATH)
 
 
 @pytest.mark.parametrize("fn", [
-    sets_under_arithmetic, sets_after_a_division, sets_after_an_early_return,
-    sets_after_a_rebinding, opens_to_read,
+    sets_under_arithmetic, sets_after_a_rebinding, opens_to_read,
+    opens_under_arithmetic, opens_after_a_division,
+    opens_after_an_early_return,
 ], ids=lambda fn: fn.__name__)
-def test_a_write_not_read_as_run_is_not_proven(fn):
+def test_a_write_neither_witnessed_nor_read_as_run_is_not_proven(fn):
     p = _row(fn)
     assert p.verdict != "proven", (p.verdict, p.sketch, p.note)
-    assert _KEY not in os.environ
+    assert _KEY not in os.environ and not os.path.exists(_PATH)
 
 
 def test_a_function_defined_inside_another_is_read_the_same_way():

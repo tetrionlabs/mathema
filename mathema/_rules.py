@@ -37,8 +37,12 @@ value  what it changed
 2      the source reading of a write: where no call is run, a
        negated `is_state_safe` is proven from a write the source
        shows a call making
-2      the number draw: a parameter the claim binds to numbers is
-       drawn as a number, whatever marker its annotation carries
+2      the number reading: a parameter the claim binds to numbers is
+       drawn and derived as a number, whatever marker its annotation
+       carries
+2      the named point reading: an infinite point the claim names,
+       where the function's own guard refuses, falsifies a value
+       claim
 2      the let argument: a `let`-bound function passed as an
        argument is the function itself
 =====  ==========================================================

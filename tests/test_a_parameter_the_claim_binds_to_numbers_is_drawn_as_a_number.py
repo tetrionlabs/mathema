@@ -49,10 +49,20 @@ def test_a_marked_parameter_bound_to_numbers_is_checked_at_numbers(text):
     "for x in {0, inf}, f(x) == x + 1",
     "for x in [0, oo], f(x) == x + 1",
 ])
-def test_a_domain_holding_a_value_the_guard_refuses_is_not_proven(text):
+def test_a_named_value_the_guard_refuses_falsifies_at_that_value(text):
     p = _row(plus_one_finite, text)
-    assert p.verdict != "proven", (p.verdict, p.route, p.sketch, p.note)
+    assert p.verdict == "falsified", (p.verdict, p.route, p.sketch, p.note)
+    assert "x = inf" in (p.counterexample or ""), p.counterexample
     assert "[[" not in (p.counterexample or ""), p.counterexample
+
+
+def test_a_marked_parameter_bound_to_numbers_is_derived_as_the_unmarked_is():
+    marked = _row(plus_one_finite, "for x in [0, 5], f(x) == x + 1")
+    unmarked = _row(plus_one, "for x in [0, 5], f(x) == x + 1")
+    assert (unmarked.verdict, unmarked.route) == ("proven", "derive"), \
+        (unmarked.verdict, unmarked.route, unmarked.note)
+    assert (marked.verdict, marked.route) == (unmarked.verdict, unmarked.route), \
+        (marked.verdict, marked.route, marked.note)
 
 
 def test_a_false_claim_over_numbers_is_falsified_at_a_number():

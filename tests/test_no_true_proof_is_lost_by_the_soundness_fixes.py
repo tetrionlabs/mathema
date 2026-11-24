@@ -5,8 +5,8 @@ of `TRUE` is a claim that is true of its function, with the verdict
 the release before these fixes gave it: the verdict now is at least as
 strong. Each row of `FALSE` is a false claim one step beside a true
 one, and stays falsified. Each row of `NOT_PROVEN` is a claim one step
-beside a proof, where the source does not show the write runs or the
-domain holds a value the function's guard refuses, and is not proven. Each row of `EXCEPTIONS` is a true claim
+beside a proof, where no call was run that wrote and the source does
+not show the write runs, and is not proven. Each row of `EXCEPTIONS` is a true claim
 that was proven before and is unknown now, with the reason the row
 gives: the function cannot be run contained, or the run did not finish
 within its budget.
@@ -195,6 +195,14 @@ TRUE = [
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_SOURCE, 'sets_in_a_band',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'sets_after_a_division',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'sets_after_an_early_return',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'opens_past_a_half',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'opens_in_the_else',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_CHILD, 'sets_the_environment',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_CHILD, 'writes_a_file',
@@ -285,25 +293,27 @@ FALSE = [
     (_SOURCE, "sets_past_a_half",
      "for x in [0, 0.25], not is_state_safe(f)"),
     (_NUMBERS, "plus_one_finite", "for x in [0, 5], f(x) == x + 2"),
+    (_NUMBERS, "plus_one_finite", "for x in {0, inf}, f(x) == x + 1"),
+    (_NUMBERS, "plus_one_finite", "for x in [0, oo], f(x) == x + 1"),
     (_LET, "describe",
      f'let stage = {_LET}.halve, describe(stage) == "(int) -> int"'),
 ]
 
-#: module, function, claim: the source does not show the write runs, or
-#: the domain holds a value the function's guard refuses
+#: module, function, claim: no call was run that wrote, and the source
+#: does not show the write runs
 NOT_PROVEN = [
     (_SOURCE, "sets_under_arithmetic",
      "for x in [0, 1], not is_state_safe(f)"),
-    (_SOURCE, "sets_after_a_division",
+    (_SOURCE, "opens_under_arithmetic",
      "for x in [0, 1], not is_state_safe(f)"),
-    (_SOURCE, "sets_after_an_early_return",
+    (_SOURCE, "opens_after_a_division",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SOURCE, "opens_after_an_early_return",
      "for x in [0, 1], not is_state_safe(f)"),
     (_SOURCE, "sets_after_a_rebinding",
      "for x in [0, 1], not is_state_safe(f)"),
     (_HERE, "appends_where_the_square_is_large",
      "for x in [0, 1], not is_state_safe(f)"),
-    (_NUMBERS, "plus_one_finite", "for x in {0, inf}, f(x) == x + 1"),
-    (_NUMBERS, "plus_one_finite", "for x in [0, oo], f(x) == x + 1"),
 ]
 
 #: module, function, claim, the verdict before the fixes, the reason
@@ -362,6 +372,13 @@ def test_a_recorded_exception_is_unknown_with_its_reason(
     assert before == "proven"
     assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
     assert reason in (p.note or ""), p.note
+
+
+def test_a_marked_parameter_bound_to_numbers_is_proven_as_the_unmarked_is():
+    marked = _row(_NUMBERS, "plus_one_finite", "for x in [0, 5], f(x) == x + 1")
+    unmarked = _row(_NUMBERS, "plus_one", "for x in [0, 5], f(x) == x + 1")
+    assert (marked.verdict, marked.route) == (unmarked.verdict, unmarked.route) \
+        == ("proven", "derive"), (marked.verdict, marked.route, marked.note)
 
 
 def test_the_proofs_a_none_or_nan_argument_lost_are_proven_again():
