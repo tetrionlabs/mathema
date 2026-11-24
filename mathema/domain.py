@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 from ._render_mode import get_unicode_output
 from ._scan import (_split_commas, mask_strings, unmask_strings,
-                    uses_legacy_quoting)
+                    uses_legacy_named_filled, uses_legacy_quoting)
 
 # superscript rendering for a vector/matrix space exponent, so `R^n`
 # reads `ℝⁿ` in unicode the way `x^2` reads `x²` elsewhere. Only
@@ -2400,7 +2400,7 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     # a missing value the text named stays as written, and a kind the
     # text left unstated stays unstated
     named = (named_beside(dom) if show_missing and not words and defaults is None
-             else ())  # :draft
+             and not uses_legacy_named_filled() else ())  # :draft
     if named and value_pieces:
         return (union_op.join(_render_piece(p, ascii_mode=ascii_mode, as_int=as_int)
                               for p in value_pieces)

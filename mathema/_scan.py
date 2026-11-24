@@ -201,11 +201,43 @@ def uses_legacy_not_parentheses() -> bool:
     return _LEGACY_NOT_PARENTHESES.get()
 
 
+#: whether stored claim text fills in the default missing values where
+#: the claim names one beside an interval or a named type, as releases up
+#: to 0.6.6.2 did, for reading a record those releases wrote
+_LEGACY_NAMED_FILLED: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "legacy_named_filled", default=False)
+
+
+@contextlib.contextmanager
+def legacy_named_filled():
+    """Intent:
+        Within the block, a domain that names a missing value beside an
+        interval or a named type is rendered as releases up to 0.6.6.2
+        wrote it, with the type clause and the default missing values
+        filled in (`[0, 1] | {None}` as `[0.0, 1.0] : float|absent|missing`,
+        the text of the plain interval), so a record those releases
+        wrote can be compared with the claim it records.
+    """
+    token = _LEGACY_NAMED_FILLED.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_NAMED_FILLED.reset(token)
+
+
+def uses_legacy_named_filled() -> bool:
+    """Intent:
+        Whether `legacy_named_filled` is in force.
+    """
+    return _LEGACY_NAMED_FILLED.get()
+
+
 def uses_legacy_rendering() -> bool:
     """Intent:
         Whether any rendering of an earlier release is in force.
     """
-    return _LEGACY_QUOTING.get() or _LEGACY_NOT_PARENTHESES.get()
+    return (_LEGACY_QUOTING.get() or _LEGACY_NOT_PARENTHESES.get()
+            or _LEGACY_NAMED_FILLED.get())
 
 
 def string_literal(value: str) -> str:
