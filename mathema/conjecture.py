@@ -6699,8 +6699,15 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                        route=external[name].get("route"),
                        note=external[name].get("provenance", "")))
                 for name, wanted in refs if name in external]
+            # a row decided on a route ending `:within_float64` holds,
+            # and still answers `is proven`: what rests on it is capped
+            # to holds below, with the reason in its note
             unmet = [(name, wanted, ref) for name, wanted, ref in resolved
-                     if not (ref.verdict == "proven" if wanted == "proven"
+                     if not (ref.verdict == "proven"
+                             or (ref.verdict == "holds"
+                                 and (getattr(ref, "route", None) or "")
+                                 .endswith(":within_float64"))
+                             if wanted == "proven"
                              else ref.verdict in ("proven", "holds"))]
             if unmet:
                 name, wanted, ref = unmet[0]
@@ -6714,15 +6721,17 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # the weakest lemma bounds the conclusion; an external
             # premise is named by its provenance so the cap says whose
             # word it rests on
-            empirical = [
-                (external[name].get("provenance", name)
-                 if name in external else name)
-                for name, _, ref in resolved if ref.verdict == "holds"]
             within = [(external[name].get("provenance", name)
                        if name in external else name)
                       for name, _, ref in resolved
                       if (getattr(ref, "route", None) or "")
                       .endswith(":within_float64")]
+            empirical = [
+                (external[name].get("provenance", name)
+                 if name in external else name)
+                for name, _, ref in resolved if ref.verdict == "holds"
+                and not (getattr(ref, "route", None) or "")
+                .endswith(":within_float64")]
             if empirical:
                 verdict_cap = ("holds", ", ".join(empirical))
             elif within:
@@ -6808,6 +6817,9 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                 # meta, never applied silently.
                 capped_to, ref_name = _cap
                 if capped_to == "within_float64":
+                    # what rests on a float64 sweep is no proof of the
+                    # mathematics either
+                    probe.verdict = "holds"
                     if not (probe.route or "").endswith(":within_float64"):
                         probe.route = f"{probe.route or 'derive'}:within_float64"
                         probe.note = (f"{probe.note}; rests on {ref_name}, "
@@ -10451,6 +10463,16 @@ def replace_proof(proof, status: str, sketch: str):
                        quantifier=proof.quantifier, meta=dict(proof.meta))
 
 
+def _tolerant_form_offer(cj) -> str:
+    """The clause a row decided within float64 ends with when its claim
+    is an equality: the tolerant relation states what the float64 sweep
+    showed. Empty for any other relation."""
+    if getattr(cj, "relation", None) != "==":
+        return ""
+    return ("; to state the value within a tolerance, write the claim "  # :draft
+            "with ~= in place of ==")  # :draft
+
+
 def _provenance_meta(proof) -> dict:
     """Intent:
         The proof-mechanism provenance worth carrying onto the output
@@ -12460,7 +12482,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # the cap in the note
             route = f"derive:{mechanism}"
             if mechanism.endswith(":within_float64"):
-                note = f"{note}; {proof.sketch}".lstrip("; ")
+                note = (f"{note}; {proof.sketch}".lstrip("; ")
+                        + _tolerant_form_offer(cj))
         else:
             route = ("derive:extensive"
                     if mechanism is not None and mechanism not in ("domain_split", "smt")
@@ -12471,7 +12494,10 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             # per-branch attribution for the implementation-coverage pass:
             # a domain-restricted proof covers only its reachable branches.
             meta["mathema.derive_lines"] = sorted(derive_lines)
-        proven = Probe(cj.name, statement, "proven",
+        # a sweep run in float64 is the computation's result: the
+        # mathematics is not proven by it, so the row holds
+        proven = Probe(cj.name, statement,
+                       "holds" if route.endswith(":within_float64") else "proven",
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
@@ -12535,9 +12561,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 mechanism = swept.meta.get("mathema.derive_route",
                                            "brute_force")
                 capped = mechanism.endswith(":within_float64")
-                proven = Probe(cj.name, statement, "proven",
+                proven = Probe(cj.name, statement,
+                               "holds" if capped else "proven",
                                sketch=swept.sketch,
                                note=(f"{note}; {swept.sketch}".lstrip("; ")
+                                     + _tolerant_form_offer(cj)
                                      if capped else note),
                                condition=swept.quantifier,
                                route=f"derive:{mechanism}",
@@ -12906,7 +12934,9 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
         probe route: `falsified` with the call as the witness, else
         `holds`. On a derive route the mechanism is the one-point sweep,
         `derive:brute_force`: `falsified` with the call as an executed
-        witness, `proven` when the function is shown pure, else `holds`.
+        witness, `proven` when the function is shown pure and the call
+        has an exact value, else `holds` (a call decided within float64
+        keeps its route, `derive:brute_force:within_float64`).
     """
     cj, note = ctx.cj, ctx.note
     said = "evaluated once, at the claim's own call"
@@ -12921,9 +12951,15 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
                      sketch=None if route == "probe" else proof.sketch,
                      counterexample=proof.counterexample, note=note,
                      meta=meta)
+    mechanism = proof.meta.get("mathema.derive_route", "brute_force")
+    within = mechanism.endswith(":within_float64")
+    # a call run in float64 with no exact value is the computation's
+    # result: the row holds
     verdict = ("proven" if proof.status == "proven" and route != "probe"
-               else "holds")
+               and not within else "holds")
     note = f"{note}; {proof.sketch}"
+    if within and route != "probe":
+        note += _tolerant_form_offer(cj)
     passed = proof.meta.get("mathema.ground_pass_gap")
     if route == "probe" and passed is not None:
         # the call is the computation line: the gap its pass fell within
@@ -12940,7 +12976,6 @@ def _ground_probe(ctx: "_ClaimContext", proof, route: str) -> "Probe":
                      if k.startswith("mathema.derive_") or k == "mathema.timeout"})
         meta["mathema.derive_route"] = proof.meta.get("mathema.derive_route",
                                                       "brute_force")
-    mechanism = proof.meta.get("mathema.derive_route", "brute_force")
     return Probe(cj.name, ctx.statement, verdict,
                  route="probe" if route == "probe" else f"derive:{mechanism}",
                  sketch=None if route == "probe" else proof.sketch,

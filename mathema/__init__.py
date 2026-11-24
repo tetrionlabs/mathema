@@ -336,6 +336,11 @@ class Record:
                     # the pseudo-infinity that bounded the computation
                     shown = f"{p.condition.split(', ', 1)[0]}, {shown}"
                 line = f"  {mark} {p.name}: {shown}"
+                if p.verdict == "holds" and (p.route or "").endswith(":within_float64"):
+                    from .records import within_float64_words
+                    said = within_float64_words(p.meta)
+                    if said:
+                        line += f"  ({said})"
                 if p.verdict == "holds" and p.n:
                     from ._missing_words import count_words
                     line += f" ({count_words(p.n, (p.meta or {}).get('mathema.drawn'))})"

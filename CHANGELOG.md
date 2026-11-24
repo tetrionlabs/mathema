@@ -2,6 +2,12 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
+## Unreleased
+
+### Fixes
+- A missing-value policy row taken from a library function's own row (`from math.sqrt's own policy row, which f calls`) is `proven` only where the function's body is that one call: `return math.sqrt(x)`, or `return xs.mean()`. A body that does anything more (a guard or another statement before the call, a conversion of its result) has the row at `holds`, confirmed on the calls made, and `is_missing_safe(f)` is no higher than the row.
+- A claim decided on the route `derive:brute_force:within_float64` is `holds`, where it read `proven`: every point ran in float64, which does not prove the mathematics. The route, the measurement and the note are kept; the note of an equality offers the tolerant relation `~=`. A claim that rests on such a row holds too.
+
 ## 0.6.6.2
 
 ### Highlights

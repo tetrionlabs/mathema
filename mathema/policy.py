@@ -2018,11 +2018,67 @@ def composed_policies(fn, facts) -> dict:
     return {param: (key, restated)}
 
 
+def body_is_the_library_call(facts, param: str, key: str) -> bool:
+    """Intent:
+        Whether the function's body is read as handing `param` to the
+        one library call `key` (`math.sqrt`) on every path, so the
+        library's own policy row for that argument is the function's.
+
+    The reading, exactly: the function is a plain `def` with no
+    decorator; its body, a docstring aside, is the single statement
+    `return <call>`; `<call>` is `module.name(param)` with `param` its
+    only argument and no keyword, or `param.name()` with no argument;
+    and `module` is not itself a parameter. The one statement allowed
+    before the return is `import module`, with no `as`, where `key` is
+    `module.name`: it binds the name the call reads to that module and
+    reads no parameter. Nothing else runs before the call, so no branch,
+    raise or return can come first, and nothing is done with what the
+    call gives back.
+
+    Returns:
+        True for that body. False for every other, a body that reaches
+        the same call after a guard or another statement, or converts
+        its result (`float(...)`), included.
+    """
+    import ast
+    tree = getattr(facts, "tree", None)
+    fdef = next((n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))),
+                None) if tree is not None else None
+    if not isinstance(fdef, ast.FunctionDef) or fdef.decorator_list:
+        return False
+    body = list(fdef.body)
+    if body and isinstance(body[0], ast.Expr) \
+            and isinstance(body[0].value, ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]
+    if not body or not isinstance(body[-1], ast.Return):
+        return False
+    call = body[-1].value
+    if not isinstance(call, ast.Call) or call.keywords \
+            or not isinstance(call.func, ast.Attribute) \
+            or not isinstance(call.func.value, ast.Name):
+        return False
+    owner = call.func.value.id
+    if not call.args:
+        return len(body) == 1 and owner == param
+    imports_owner = all(
+        isinstance(stmt, ast.Import) and len(stmt.names) == 1
+        and stmt.names[0].name == owner and stmt.names[0].asname is None
+        and key == f"{owner}.{call.func.attr}" for stmt in body[:-1])
+    return (imports_owner and len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == param and owner not in facts.params)
+
+
 def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
                   name_of, stated: "set | None" = None) -> list:
     """The rows a parameter carries from a library's composed policy rows,
     each decided on the calls the check made: `proven` where the calls
-    confirm it, `falsified` with the executed witness where they do not.
+    confirm it and the body is that one library call
+    (`body_is_the_library_call`), `holds` where the calls confirm it and
+    the body does anything more, `falsified` with the executed witness
+    where they do not.
     A class row is decided on the members no stated row with the same
     premise covers (`stated`, a set of `(member, premise)`)."""
     from .records import Probe
@@ -2057,9 +2113,15 @@ def composed_rows(fn, facts, param: str, kind: str, key: str, policies: list,
         statement = policy_text(policy)
         if wrong is None:
             reason = f"from {key}'s own policy row, which f calls; {evidence}"
+            read = body_is_the_library_call(facts, param, key)
+            if not read:
+                reason += ("; f does more than make that call, so "  # :draft
+                           "a path no call took is not covered")  # :draft
             meta_policy["reason"] = reason
-            rows.append(Probe(name_of(policy), statement, "proven", n=len(calls),
-                              route="examine", note=reason, meta=meta))
+            rows.append(Probe(name_of(policy), statement,
+                              "proven" if read else "holds", n=len(calls),
+                              route="examine" if read else "probe:counterfactual",
+                              note=reason, meta=meta))
             continue
         did = _behaviour_of(wrong)
         did_words = f"raises {wrong.raised}" if did == "raises" else did
@@ -2562,10 +2624,11 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
         parameter's `is_absent_safe(x)`): every parameter that admits
         the kind has a policy the code follows at every member, reaching
         into a container's slots. `proven` when each member's policy is
-        derived (a guard in the body, a library's own policy row f
-        calls) or stated and confirmed; `holds` when some member is
-        confirmed by execution alone (a lone scalar called at every
-        member included); `falsified` on a policy the code contradicts, a
+        derived (a guard in the body, a library's own policy row where
+        the body is that one library call) or stated and confirmed;
+        `holds` when some member is confirmed by execution alone (a lone
+        scalar called at every member, and a library's row the body
+        reaches after doing anything else, included); `falsified` on a policy the code contradicts, a
         member treated more than one way, a raise no claim accounts for,
         or an absence f returns from present inputs that its return type
         does not declare. The absence gate also calls f at inputs with
@@ -2800,6 +2863,12 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                            f"{_and(library_follows)} "
                            f"{words if len(library_follows) == 1 else _plural(words)}, "
                            f"from {key}'s own policy row")
+            if not body_is_the_library_call(facts, p, key):
+                # the row was followed on the calls made, and the body
+                # is not read as that one call
+                clauses[-1] += ", confirmed at the points tried"  # :draft
+                if weakest == "proven":
+                    weakest = "holds"
         for m, c, pol in library_breaks:
             key = composed[p][0]
             clauses.append(f"{m} does not: f {_did(c)} {_where(c, p, m)}"
