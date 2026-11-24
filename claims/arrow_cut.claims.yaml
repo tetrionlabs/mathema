@@ -1,0 +1,26 @@
+mathema.spec._before_region_arrow:
+  claims:
+    - name: the_result_contains_no_arrow
+      statement: 'let free = claims.smt_support.arrow_free, for part in {"", "a", "  a  ", "a b", "a-b", "a-", "a=b", "a>b", "a --> b", "a=>b", "a ⟹ b", "a --> b => c", "a ⟹ b --> c", "a => b ⟹ c", "--> b", "   => b", "x == 1", "x > 1 and y", "a -- > b", "a = > b", "a --> b --> c", "  a  --> b"}, free(f(part)) == True'
+    - name: the_result_has_no_surrounding_whitespace
+      statement: 'let tidy = claims.smt_support.is_stripped, for part in {"", "a", "  a  ", "a b", "a-b", "a-", "a=b", "a>b", "a --> b", "a=>b", "a ⟹ b", "a --> b => c", "a ⟹ b --> c", "a => b ⟹ c", "--> b", "   => b", "x == 1", "x > 1 and y", "a -- > b", "a = > b", "a --> b --> c", "  a  --> b"}, tidy(f(part)) == True'
+    - name: a_text_with_no_arrow_comes_back_stripped
+      statement: 'let free = claims.smt_support.arrow_free, let strip = claims.smt_support.stripped, for part in {"", "a", "  a  ", "a b", "a-b", "a-", "a=b", "a>b", "a --> b", "a=>b", "a ⟹ b", "a --> b => c", "a ⟹ b --> c", "a => b ⟹ c", "--> b", "   => b", "x == 1", "x > 1 and y", "a -- > b", "a = > b", "a --> b --> c", "  a  --> b"}, assuming free(part) == True, f(part) == strip(part)'
+    - name: the_text_before_the_first_arrow_is_kept
+      statement: 'let cut = claims.smt_support.after_two_arrows, for part in {"a", "x y", "p"}, f(cut(part)) == part'
+    - name: every_arrow_spelling_is_cut_dash
+      statement: 'for part in {"a --> b", "a-->b", "a   --> b c"}, f(part) == "a"'
+    - name: every_arrow_spelling_is_cut_equals
+      statement: 'for part in {"a => b", "a=>b", "a   => b c"}, f(part) == "a"'
+    - name: every_arrow_spelling_is_cut_unicode
+      statement: 'for part in {"a ⟹ b", "a⟹b", "a   ⟹ b c"}, f(part) == "a"'
+    - name: a_newline_after_the_arrow_is_cut_dash
+      statement: 'f("a -->\nb\nc") == "a"'
+    - name: a_newline_after_the_arrow_is_cut_equals
+      statement: 'f("a =>\nb\nc") == "a"'
+    - name: a_newline_after_the_arrow_is_cut_unicode
+      statement: 'f("a ⟹\nb\nc") == "a"'
+    - name: whitespace_of_every_kind_before_the_arrow_is_cut
+      statement: 'f("a \t\n --> b") == "a"'
+    - name: it_agrees_with_the_reference
+      statement: 'let stated = claims.smt_support.before_region_arrow_reference, for part in {"", "a", "  a  ", "a b", "a-b", "a-", "a=b", "a>b", "a --> b", "a=>b", "a ⟹ b", "a --> b => c", "a ⟹ b --> c", "a => b ⟹ c", "--> b", "   => b", "x == 1", "x > 1 and y", "a -- > b", "a = > b", "a --> b --> c", "  a  --> b"}, f(part) == stated(part)'
