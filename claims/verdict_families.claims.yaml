@@ -1,0 +1,54 @@
+claims.verdict_families_support.classify_code:
+  claims:
+    - name: the_class_is_the_first_stated_condition_a_row_meets
+      statement: 'let stated = claims.verdict_families_support.stated_class, for base in {0, 1, 2, 3, 4}, base_wrong in {0, 1}, head in {0, 1, 2, 3, 4}, head_wrong in {0, 1}, truth in {0, 1, 2}, f(base, base_wrong, head, head_wrong, truth) == stated(base, base_wrong, head, head_wrong, truth)'
+claims.verdict_families_support.is_fixed:
+  claims:
+    - name: fixed_exactly_when_wrong_only_on_base
+      statement: 'for base in {0, 1, 2, 3, 4}, base_wrong in {0, 1}, head in {0, 1, 2, 3, 4}, head_wrong in {0, 1}, truth in {0, 1, 2}, f(base, base_wrong, head, head_wrong, truth) == (base_wrong == 1 and head_wrong == 0)'
+claims.verdict_families_support.is_newly_wrong:
+  claims:
+    - name: newly_wrong_exactly_when_wrong_only_on_head
+      statement: 'for base in {0, 1, 2, 3, 4}, base_wrong in {0, 1}, head in {0, 1, 2, 3, 4}, head_wrong in {0, 1}, truth in {0, 1, 2}, f(base, base_wrong, head, head_wrong, truth) == (head_wrong == 1 and base_wrong == 0)'
+claims.verdict_families_support.is_lost:
+  claims:
+    - name: a_proof_of_a_claim_known_false_is_never_lost
+      statement: 'for base_wrong in {0, 1}, head in {1, 2, 3, 4}, head_wrong in {0, 1}, f(0, base_wrong, head, head_wrong, 2) == False'
+    - name: a_proof_kept_is_never_lost
+      statement: 'for base_wrong in {0, 1}, head_wrong in {0, 1}, truth in {0, 1, 2}, f(0, base_wrong, 0, head_wrong, truth) == False'
+    - name: a_true_proof_that_weakens_without_a_wrong_row_is_lost
+      statement: 'for head in {1, 2, 3, 4}, truth in {0, 1}, f(0, 0, head, 0, truth) == True'
+claims.verdict_families_support.tried_points_inside:
+  claims:
+    - name: every_point_tried_lies_in_the_domain
+      statement: 'for i in [0, 16] subset Z, f(i) == True'
+claims.verdict_families_support.outside_points_outside:
+  claims:
+    - name: every_point_tried_outside_lies_outside_and_is_no_missing_value
+      statement: 'for i in [0, 16] subset Z, f(i) == True'
+claims.verdict_families_support.closed_ends_tried:
+  claims:
+    - name: closed_ends_are_tried_and_open_ends_are_not
+      statement: 'for i in [0, 16] subset Z, f(i) == True'
+claims.verdict_families_support.missing_listed_tried:
+  claims:
+    - name: each_missing_value_a_domain_names_is_tried
+      statement: 'for i in [0, 16] subset Z, f(i) == True'
+claims.verdict_families_support.witness_reads_back:
+  claims:
+    - name: a_printed_witness_reads_back_as_its_point
+      statement: 'for i in [0, 7] subset Z, f(i) == True'
+claims.verdict_families_support.ground_truth_as_stated:
+  claims:
+    - name: each_table_row_has_its_stated_ground_truth
+      statement: 'for i in [0, 9] subset Z, f(i) == True'
+claims.verdict_families_support.false_point_as_stated:
+  claims:
+    - name: a_false_row_is_false_at_its_stated_point
+      statement: 'for i in [0, 9] subset Z, f(i) == True'
+claims.verdict_families_support.replays:
+  claims:
+    - name: a_witness_at_the_failing_point_replays
+      statement: 'for i in {1, 3}, f(i, 0) == True'
+    - name: a_witness_where_the_claim_holds_does_not_replay
+      statement: 'for i in {0, 2, 5}, x in {-1, 0, 1}, f(i, x) == False'
