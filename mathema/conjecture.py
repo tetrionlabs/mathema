@@ -12478,7 +12478,8 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # other undecidable derive claim.
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
                                  domain=cj_domain,
-                                 bound_names=frozenset(bound_funcs or ()))
+                                 bound_names=frozenset(bound_funcs or ()),
+                                 missing=ctx.missing)
     else:
         exact_law = True
         with _lengths_scope(cj, family, facts):

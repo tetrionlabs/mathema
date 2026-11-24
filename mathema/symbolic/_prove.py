@@ -4769,7 +4769,8 @@ def suspended_call_refusal(fn) -> "str | None":
 
 
 def _unread_parameters(fn, facts, domain: "dict | None" = None,
-                       structures_admit: bool = False) -> frozenset:  # :draft
+                       structures_admit: bool = False,
+                       missing: "dict | None" = None) -> frozenset:  # :draft
     """Intent:
         The parameters no value passed for changes what the call does: the
         function's body never names them, or names one only as the target
@@ -4779,7 +4780,9 @@ def _unread_parameters(fn, facts, domain: "dict | None" = None,
         `locals`, `vars`, `eval` or `exec`, which can read its parameters
         without naming them, has none. With `domain`, a parameter a domain
         guard judges and lets through at every member of its finite set
-        counts too: no value of that set changes what the call does.
+        counts too: no value of that set changes what the call does, a
+        missing value it lists realised by the parameter's resolution in
+        `missing`.
     """
     from ._base import parameters_no_wrapper_reads
     tree = getattr(facts, "tree", None)
@@ -4794,7 +4797,8 @@ def _unread_parameters(fn, facts, domain: "dict | None" = None,
     only_deleted = {t.id for t in deleted
                     if sum(1 for n in names if n.id == t.id) == 1}
     unnamed = frozenset(p for p in facts.params if p not in named or p in only_deleted)
-    return unnamed and parameters_no_wrapper_reads(fn, unnamed, domain, structures_admit)
+    return unnamed and parameters_no_wrapper_reads(fn, unnamed, domain, structures_admit,
+                                                   missing)
 
 
 def _listed_missing(domain: dict) -> list:
@@ -4824,7 +4828,8 @@ def _listed_missing(domain: dict) -> list:
 
 def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
                      domain: dict | None = None, max_callee_depth: int = 3,
-                     bound_names: frozenset = frozenset()) -> ProofResult:
+                     bound_names: frozenset = frozenset(),
+                     missing: "dict | None" = None) -> ProofResult:
     """A raises(...) claim on the derive route, only ever reachable via
     domain-conditioned branch pruning: a raises claim with no declared
     domain specific enough to determine which branch runs stays
@@ -4834,7 +4839,9 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     stands only when the call passes each parameter the value the domain
     gives it (`_call_departs_from_domain`). `bound_names` are the names
     the claim binds besides its domain's (a function letter), none of
-    which reads as a constant of the claim language. `max_callee_depth` is
+    which reads as a constant of the claim language. `missing` maps a
+    parameter to the resolution of the missing values its set lists, the
+    values the claim's points give it. `max_callee_depth` is
     forwarded to lift_conditioned(), see lift()'s own docstring."""
     from ._base import call_keywords, hashes_its_arguments, parameters_no_wrapper_reads
     try:
@@ -4850,7 +4857,7 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
         params=params, domain=domain or {},
         taken=frozenset(facts.params) | frozenset(domain or {}) | frozenset(bound_names))
     with call_keywords(call_src), call_constants(_scalar_constants(tree.body, reading)):
-        proof = _raises_read(fn, facts, exc_name, domain, max_callee_depth)
+        proof = _raises_read(fn, facts, exc_name, domain, max_callee_depth, missing)
         if proof.status != "proven":
             return proof
         refused = _structure_guard_refusal(fn, tree.body, reading)  # :draft
@@ -5591,7 +5598,7 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
 
 
 def _raises_read(fn, facts, exc_name: str | None, domain: dict | None,
-                 max_callee_depth: int) -> ProofResult:
+                 max_callee_depth: int, missing: "dict | None" = None) -> ProofResult:
     """Intent:
         The derive reading of a `raises(...)` claim for the function's
         own parameters bound to `domain`, as `try_prove_raises` returns
@@ -5601,7 +5608,7 @@ def _raises_read(fn, facts, exc_name: str | None, domain: dict | None,
     if suspended is not None:
         return ProofResult("unliftable", sketch=suspended)
 
-    unread = _unread_parameters(fn, facts, domain)
+    unread = _unread_parameters(fn, facts, domain, missing=missing)
     listed = _listed_missing({p: b for p, b in (domain or {}).items()
                               if p not in unread})  # :draft
     if listed:

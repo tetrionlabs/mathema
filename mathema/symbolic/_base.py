@@ -1816,18 +1816,20 @@ def _guard_reading(fn) -> "_GuardReading | None":  # :draft
     return None
 
 
-def _guard_admits(violation, param: str, bound) -> bool:  # :draft
+def _guard_admits(violation, param: str, bound, resolution=None) -> bool:  # :draft
     """Intent:
         Whether an `enforce_domain` guard lets through every value the
         finite set `bound` gives the parameter: the guard's own judgement
         (`violation`) is None for each member, a missing value the set
-        lists being judged at every value it can stand for (each known
-        spelling of a hole, each known spelling of absence). False for a
+        lists being judged at every value the parameter's `resolution`
+        (a `MissingDefaults`, `NO_ANNOTATION` when not given) realises it
+        as, the values the claim's own points give it. False for a
         domain that is not a finite set, and for a listed missing value
         none of whose values can be built here.
     """
-    from ..domain import (_ABSENCE_VALUES, _SPELLING_VALUES, ABSENT, Domain, _as_domain,
-                          _is_enumerated, _Sentinel, realise_sentinel)
+    from ..domain import (ABSENT, NO_ANNOTATION, Domain, _as_domain, _is_enumerated,
+                          _Sentinel, realise_sentinel)
+    resolution = resolution if resolution is not None else NO_ANNOTATION
     try:
         dom = _as_domain(bound)
         if not _is_enumerated(dom):
@@ -1838,8 +1840,8 @@ def _guard_admits(violation, param: str, bound) -> bool:  # :draft
         for member in members:
             values = [member]
             if isinstance(member, _Sentinel):
-                values = realise_sentinel(member, tuple(_SPELLING_VALUES),
-                                          tuple(_ABSENCE_VALUES))
+                values = realise_sentinel(member, resolution.members,
+                                          resolution.absence)
                 if not values:
                     return False
             if any(violation(param, value) is not None for value in values):
@@ -1850,7 +1852,8 @@ def _guard_admits(violation, param: str, bound) -> bool:  # :draft
 
 
 def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None,
-                                structures_admit: bool = False) -> frozenset:  # :draft
+                                structures_admit: bool = False,
+                                missing: "dict | None" = None) -> frozenset:  # :draft
     """Intent:
         The parameters among `params` whose argument reaches the function's
         body untouched by anything between the call of `fn` and that body:
@@ -1868,6 +1871,8 @@ def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None,
         `enforce_domain` guard judges against its domain also stays when
         the guard lets through every member of the parameter's finite set
         (`_guard_admits`): the guard reads each value and hands it on.
+        `missing` maps a parameter to the resolution its listed missing
+        values are realised with (`NO_ANNOTATION` for one not in it).
         `structures_admit` says the same of every `enforce_structure`
         guard: each is already shown to let through the value the call
         passes, so the parameters it judges stay.
@@ -1903,7 +1908,8 @@ def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None,
                 admitted = frozenset(
                     p for p in reading.judged_by_domain & left
                     if domain is not None and p in domain
-                    and _guard_admits(reading.violation, p, domain[p]))
+                    and _guard_admits(reading.violation, p, domain[p],
+                                      (missing or {}).get(p)))
                 left -= reading.covered - admitted
             elif not _passes_through(fn):
                 return frozenset()
