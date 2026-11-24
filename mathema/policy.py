@@ -2781,6 +2781,13 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     if rest:
                         pieces.append(f"{_library_words(rest)}, from "
                                       f"{composed[p][0]}'s own policy row")
+                        if not body_is_the_library_call(facts, p, composed[p][0]):
+                            # the library's row for the premise no claim
+                            # states was followed on the calls made, and
+                            # the body is not read as that one call
+                            pieces[-1] += ", confirmed at the points tried"  # :draft
+                            if weakest == "proven":
+                                weakest = "holds"
                     pieces.append(f"{_library_words(stated_pols)}, stated")
                     said.append(f"{m} " + "; ".join(pieces))
                 else:

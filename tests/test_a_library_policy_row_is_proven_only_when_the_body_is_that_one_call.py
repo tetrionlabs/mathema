@@ -175,3 +175,78 @@ def test_a_guard_that_decides_the_missing_value_takes_the_row_from_the_library()
         p.verdict == "proven" and "math.sqrt's own policy row" in
         (((p.meta or {}).get("mathema.policy") or {}).get("reason") or "")
         for p in rows.values()), [(p.name, p.verdict) for p in rows.values()]
+
+
+def early_return(x: float, y: float) -> float:
+    if y > 2:
+        return 0.0
+    return math.sqrt(x)
+
+
+def call_in_a_try(x: float) -> float:
+    try:
+        return math.sqrt(x)
+    except ValueError:
+        return 0.0
+
+
+def parameter_rebound(x: float) -> float:
+    x = x + 0
+    return math.sqrt(x)
+
+
+def call_in_a_conditional(x: float, y: float) -> float:
+    return math.sqrt(x) if y < 2 else 0.0
+
+
+def two_library_calls(x: float, y: float) -> float:
+    return math.sqrt(x) + math.sqrt(y)
+
+
+def call_of_a_call(x: float) -> float:
+    return math.sqrt(math.sqrt(x))
+
+
+def library_call_without_a_row(x: float) -> float:
+    return math.exp(x)
+
+
+@pytest.mark.parametrize("fn", [
+    early_return, call_in_a_try, parameter_rebound, call_in_a_conditional,
+    two_library_calls, call_of_a_call, library_call_without_a_row,
+])
+def test_a_body_that_is_more_than_the_one_call_proves_no_library_row(fn):
+    law = TWO if fn.__code__.co_argcount == 2 else ONE
+    rows = _rows(fn, law)
+    assert not any(
+        p.verdict == "proven" for p in rows.values()
+        if p.name.startswith(("missing[", "absent[", "is_missing_safe["))), \
+        [(p.name, p.verdict) for p in rows.values()]
+
+
+def test_a_stated_row_beside_a_library_row_leaves_the_gate_at_holds():
+    # the gate reads the library's row for the premise no claim states:
+    # a guard on another parameter before the call caps it as it caps
+    # the row itself
+    pd = pytest.importorskip("pandas")
+
+    def guarded_mean(xs: pd.Series, k: int) -> float:
+        if k > 5:
+            raise ValueError("k is too large")
+        return xs.mean()
+
+    def plain_mean(xs: pd.Series) -> float:
+        return xs.mean()
+
+    stated = "assuming count(xs) >= 1, missing(f, xs) drops"
+    for fn, law, want in [
+            (guarded_mean, "for xs in [-1, 1]^n, k in {0, 1, 2}, "
+                           "-1 <= f(xs, k) <= 1", "holds"),
+            (plain_mean, "for xs in [-1, 1]^n, -1 <= f(xs) <= 1", "proven")]:
+        rows = {p.name: p for p in mathema.check(fn, claims=[
+            mathema.claim(law, name="c"), mathema.claim(stated, name="d"),
+            mathema.claim("is_missing_safe(f)")]).probes}
+        assert rows["missing[xs, count == 0]"].verdict == want
+        gate = rows["is_missing_safe[f]"]
+        assert gate.verdict == want, (fn.__name__, gate.verdict, gate.note)
+        assert ("confirmed at the points tried" in gate.note) == (want == "holds")
