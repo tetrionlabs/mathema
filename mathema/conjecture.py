@@ -11893,6 +11893,64 @@ def _text_set_members(bound) -> "list | None":
     return sorted(set(values))
 
 
+def _proven_through_a_wrapper_that_only_catches(ctx: "_ClaimContext", fn) -> "Probe | None":  # :draft
+    """Intent:
+        The proven row for a comparison of values claimed on a wrapper
+        that returns the wrapped function's own value wherever that
+        function returns (`only_catches`), or None. Two claims are put to
+        derive on the wrapped function, each as its own claim through
+        every gate of the derive stage: the claim itself, and, for each
+        side that calls `f`, that side equal to itself, which derive
+        proves only where the function returns on the whole domain (a
+        value claim has no value where a call raises). Both proven by
+        derive, the wrapper returns the same values and the claim holds on
+        it.
+
+    Notes:
+        Not attempted for a claim with a premise, a tolerance, bound
+        functions, a family of its own, a negation, or one that assumes
+        the function is defined or sets its own guards aside: those are
+        proofs over part of the domain, where the wrapper may return an
+        `except` clause's value.
+    """
+    from .symbolic._base import only_catches
+    cj = ctx.cj
+    if cj.relation not in ("==", "!=", "<=", ">=", "<", ">") or cj.route not in ("derive", "best") \
+            or ctx.family is not None or ctx.extra or ctx.assumption is not None \
+            or ctx.assume_defined or ctx.exclude_own_guards or cj.tolerance is not None \
+            or cj.negated or getattr(cj, "funcs", None):
+        return None
+    inner = only_catches(fn)
+    if inner is None:
+        return None
+    steps = [(_dc_replace(cj, route="derive"), "the same claim")]
+    for side in (cj.lhs, cj.rhs):
+        if re.search(r"\bf\(", side):
+            steps.append((_dc_replace(
+                cj, route="derive", rhs=side, lhs=side, relation="==",
+                name=f"{cj.name}_returns_{len(steps)}"),
+                "that it returns on the whole domain"))
+    if len(steps) < 2:
+        return None
+    said = []
+    for step, words in steps:
+        try:
+            (row,) = check_conjectures(inner, [step])
+        except Exception:
+            return None
+        if row.verdict != "proven" or not str(row.route or "").startswith("derive"):
+            return None
+        said.append(f"{words} ({row.sketch or row.route})")
+    name = getattr(fn.__code__, "co_qualname", fn.__code__.co_name)
+    return Probe(
+        cj.name, ctx.statement, "proven", route="derive", note=ctx.note,
+        # :draft
+        sketch=(f"the wrapper `{name}` returns what `{inner.__name__}` returns "
+                f"wherever it returns; derive proves of `{inner.__name__}` "
+                + " and ".join(said)),
+        meta={"mathema.derive_route": "derive"})
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -11915,6 +11973,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     with call_keywords(cj.lhs if cj.relation == "raises" else None):
         suspended = suspended_call_refusal(fn)
     if suspended is not None:
+        through = _proven_through_a_wrapper_that_only_catches(ctx, fn)  # :draft
+        if through is not None:
+            return through
         ctx.derive_undecided = Probe(
             cj.name, statement, "unknown", route="derive",
             note=f"{note}; {suspended}".lstrip("; "),

@@ -1499,6 +1499,79 @@ def _wrapper_is_read(fn) -> bool:  # :draft
         or _passes_through(fn) or _dispatches_to_wrapped(fn)  # :draft
 
 
+def only_catches(fn):  # :draft
+    """Intent:
+        The function `fn` wraps, when `fn` is a wrapper that returns that
+        function's own value wherever the function returns; None for
+        anything else. The wrapper's definition is, after its docstring,
+        one `try` statement: its body is the single statement `return
+        g(*args, **kwargs)`, it has one or more `except` clauses, each of
+        them the single statement `return <literal>`, and no `else` or
+        `finally`. It takes nothing but `*args` and `**kwargs`, and `g` is
+        a variable of an enclosing function holding the plain Python
+        function `fn` links as `__wrapped__`.
+
+    Notes:
+        Where the wrapped function raises, the wrapper returns a clause's
+        literal or lets the exception through, so nothing is read of a
+        call that raises. The definition is read from the source of
+        `fn`'s own code object, whose names must match it.
+    """
+    import textwrap
+    if type(fn) is not types.FunctionType or fn.__closure__ is None:
+        return None
+    wrapped = vars(fn).get("__wrapped__")
+    if type(wrapped) is not types.FunctionType or "__wrapped__" in vars(wrapped) \
+            or call_suspends(fn) is not None or call_suspends(wrapped) is not None \
+            or fn.__defaults__ or fn.__kwdefaults__:
+        return None
+    code = fn.__code__
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(code)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return None
+    fdef = tree.body[0] if tree.body else None
+    if not isinstance(fdef, ast.FunctionDef) or fdef.name != code.co_name:
+        return None
+    args = fdef.args
+    if args.posonlyargs or args.args or args.kwonlyargs or args.defaults \
+            or args.vararg is None or args.kwarg is None:
+        return None
+    body = strip_docstring(fdef.body)
+    if len(body) != 1 or type(body[0]) is not ast.Try:
+        return None
+    attempt = body[0]
+    if attempt.orelse or attempt.finalbody or not attempt.handlers \
+            or len(attempt.body) != 1 or not isinstance(attempt.body[0], ast.Return):
+        return None
+    call = attempt.body[0].value
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and len(call.args) == 1 and isinstance(call.args[0], ast.Starred)
+            and isinstance(call.args[0].value, ast.Name)
+            and call.args[0].value.id == args.vararg.arg
+            and len(call.keywords) == 1 and call.keywords[0].arg is None
+            and isinstance(call.keywords[0].value, ast.Name)
+            and call.keywords[0].value.id == args.kwarg.arg):
+        return None
+    caught = []
+    for handler in attempt.handlers:
+        if len(handler.body) != 1 or not isinstance(handler.body[0], ast.Return) \
+                or not isinstance(handler.body[0].value, ast.Constant):
+            return None
+        if handler.name is not None and handler.name not in caught:
+            caught.append(handler.name)
+    held = call.func.id
+    if code.co_varnames != (args.vararg.arg, args.kwarg.arg, *caught) \
+            or held not in code.co_freevars or held in (args.vararg.arg, args.kwarg.arg):
+        return None
+    try:
+        if _cell(fn, held) is not wrapped:
+            return None
+    except (ValueError, IndexError):
+        return None
+    return wrapped
+
+
 def _dispatches_to_wrapped(fn) -> bool:  # :draft
     """Intent:
         Whether `fn` is the wrapper `functools.singledispatch` builds, with

@@ -809,3 +809,25 @@ def test_a_true_claim_proven_before_is_still_proven(fn, texts, route, call, exce
     row = check_conjectures(fn, made)[-1]
     assert _STRENGTH.get(row.verdict, 0) >= _STRENGTH[base], \
         (row.verdict, row.route, row.sketch, row.note)
+
+
+#: a true value claim on a wrapper that only catches, proven at BASE:
+#: (module, function, claim, points, verdict at BASE)
+VALUE_CLAIMS = [
+    ("raise_review_three_cases2", "pol_wrapped",
+     "for x in [0, 1], y in [-1, 1], f(x, y) == x * y",
+     [(0.0, -1.0), (0.5, 0.25), (1.0, 1.0), (1, -1), (0.25, 0.75)], "proven"),
+    ("test_a_value_claim_is_proven_through_a_wrapper_that_only_catches",
+     "_catches(product)", "for x in [0, 1], y in [-1, 1], f(x, y) == x * y",
+     [(0.0, -1.0), (0.5, 0.25), (1.0, 1.0), (1, -1), (0.25, 0.75)], "proven"),
+]
+
+
+@pytest.mark.parametrize("module,name,text,points,base", VALUE_CLAIMS,
+                         ids=[f"{c[0]}:{c[1]}" for c in VALUE_CLAIMS])
+def test_a_true_value_claim_proven_before_is_still_proven(module, name, text, points, base):
+    fn = eval(name, vars(_module(module)))
+    assert all(fn(x, y) == x * y for x, y in points)
+    (row,) = check_conjectures(fn, [claim(text, route="derive")])
+    assert _STRENGTH.get(row.verdict, 0) >= _STRENGTH[base], \
+        (row.verdict, row.route, row.sketch, row.note)
