@@ -4,6 +4,10 @@ Notable changes to mathema are recorded here from its first public release onwar
 
 ## Unreleased
 
+### Upgrading from 0.6.6.2
+- Every record is checked again once. mathema's reasoning version (`mathema._rules.REASONING_VERSION`) is 2 in this release; the table in `mathema/_rules.py` names each rule that changed.
+- The number 0.6.6.2 called the rules number is called the reasoning version; `mathema._rules.RULES` still reads as an alias.
+
 ### Fixes
 - A missing-value policy row taken from a library function's own row (`from math.sqrt's own policy row, which f calls`) is `proven` only where the function's body is that one call: `return math.sqrt(x)`, or `return xs.mean()`. A body that does anything more (a guard or another statement before the call, a conversion of its result) has the row at `holds`, confirmed on the calls made, and `is_missing_safe(f)` is no higher than the row.
 - A claim decided on the route `derive:brute_force:within_float64` is `holds`, where it read `proven`: every point ran in float64, which does not prove the mathematics. The route, the measurement and the note are kept; the note of an equality offers the tolerant relation `~=`. A claim that rests on such a row holds too.

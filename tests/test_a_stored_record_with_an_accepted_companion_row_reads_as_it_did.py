@@ -76,7 +76,7 @@ def test_the_integrity_checksum_matches_and_is_the_pinned_value(project, key):
 @pytest.mark.parametrize("key", [RISK, EVIDENCE])
 def test_the_claims_fingerprint_recomputes_to_the_pinned_value(project, key):
     entry = _record(project, key)
-    assert _claims_fingerprint_now(str(project), key, entry) == "964c0df18a85"
+    assert _claims_fingerprint_now(str(project), key, entry) == "cfcb18d379e0"
 
 
 def test_the_fingerprint_covers_the_claims_name_and_not_the_row_the_run_added():

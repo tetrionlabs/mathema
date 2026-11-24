@@ -709,17 +709,17 @@ def stored_claims_fingerprint(raw_claims: list, grammar: str = "mathema",
     """Intent:
         The value a record stores as `identity.claims_fingerprint`, the
         one a sweep compares to decide freshness: the claim set's
-        `claims_fingerprint` combined with mathema's rules number
-        (`_rules.rules_in_force`). Under rules 0 it is the claims
-        fingerprint itself, so a record written before the rules number
+        `claims_fingerprint` combined with mathema's reasoning version
+        (`_rules.reasoning_version_in_force`). Under version 0 it is the claims
+        fingerprint itself, so a record written before the reasoning version
         existed reads as written under 0; raising the number moves
         every stored value, so each record is checked again once.
     """
     import hashlib
 
-    from ._rules import rules_in_force
+    from ._rules import reasoning_version_in_force
     pure = claims_fingerprint(raw_claims, grammar, fn)
-    rules = rules_in_force()
+    rules = reasoning_version_in_force()
     if not rules:
         return pure
     return hashlib.sha256(f"{pure}|rules={rules}".encode()).hexdigest()[:12]
@@ -773,8 +773,8 @@ def recorded_claims_fingerprint(entry: "dict | None", fn=None) -> "str | None":
 # :draft
 def written_under_earlier_rules(entry: "dict | None", fn=None) -> bool:
     """Intent:
-        Whether a verified record was written under an earlier rules
-        number than the one in force (`_rules`): its stored claims
+        Whether a verified record was written under an earlier reasoning
+        version than the one in force (`_rules`): its stored claims
         fingerprint is not the fingerprint, under the rules now, of the
         claims it holds. A record with no stored fingerprint, or whose
         claims cannot be fingerprinted, reads as earlier.
