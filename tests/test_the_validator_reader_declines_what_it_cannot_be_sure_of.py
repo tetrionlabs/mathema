@@ -442,8 +442,9 @@ def test_a_retargeted_jump_is_declined():
     code = fn.__code__
     raw = bytearray(code.co_code)
     for step in dis.get_instructions(code):
-        if step.opname.startswith("POP_JUMP_IF"):
+        if step.opname.startswith("POP_JUMP") and "_IF_" in step.opname:
             raw[step.offset + 1] = 0
+    assert bytes(raw) != code.co_code
     fn.__code__ = code.replace(co_code=bytes(raw))
     assert "its source text is not the code it runs" in read_validator(fn)
 
