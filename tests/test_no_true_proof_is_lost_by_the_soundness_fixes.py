@@ -4,12 +4,14 @@
 of `TRUE` is a claim that is true of its function, with the verdict
 the release before these fixes gave it: the verdict now is at least as
 strong. Each row of `FALSE` is a false claim one step beside a true
-one, and stays falsified. Each row of `NOT_PROVEN` is a claim one step
-beside a proof, where no call was run that wrote and the source does
-not show the write runs, and is not proven. Each row of `EXCEPTIONS` is a true claim
-that was proven before and is unknown now, with the reason the row
-gives: the function cannot be run contained, or the run did not finish
-within its budget.
+one, and stays falsified. Each row of `NOT_PROVEN` is a false claim one
+step beside a proof (the write never runs over the domain, or the
+statement changes nothing), and is not proven. Each row of `EXCEPTIONS`
+is a true claim that was proven before and is unknown now, with the
+reason the row gives: the function cannot be run contained, the run
+did not finish within its budget, the function opens a file for
+writing and file writers are not run, or what it writes is not
+something a child process's witness watches.
 
 Three rows were proven before the fixes, lost to the reading of a
 `None` or nan argument, and are proven again. `for x in [0, 1],
@@ -32,6 +34,16 @@ _SOURCE = "test_a_write_every_call_makes_is_read_from_the_source"
 _NUMBERS = "test_a_parameter_the_claim_binds_to_numbers_is_drawn_as_a_number"
 _LET = "test_a_let_bound_function_passed_as_an_argument_is_itself"
 _CHILD = "test_a_witness_call_runs_in_a_child_process"
+_SHOWN = "test_a_witness_names_what_changed_and_shows_no_value"
+_ENDS = "test_an_enforced_domain_inside_the_claims_is_read_with_exact_ends"
+_EMPTY = "test_is_empty_safe_runs_every_empty_value_the_parameter_admits"
+_STATE = "test_is_state_safe_sees_process_state"
+_FILE = ("a file is opened for writing; whether it is changed is not decided "
+         "without running, and file writers are not run")
+_LOCAL_REASON = ("f cannot be run contained (it is defined inside another "
+                 "function")
+_UNWATCHED = ("the positive claim is falsified only from the source, and "
+              "that line was not executed, so its negation is not proven")
 
 
 def one_unless_y_is_a_number(x, y=0.0):
@@ -55,9 +67,14 @@ def _local_functions() -> dict:
         import random
         return x + random.random()
 
+    def sets_the_environment_locally(x):
+        import os
+        os.environ["MATHEMA_TEST_NO_PROOF_LOST_NOT_RUN"] = "1"
+        return x * 2.0
+
     return {fn.__name__: fn for fn in (
         appends_past_a_half, appends_where_the_square_is_large,
-        draws_locally)}
+        draws_locally, sets_the_environment_locally)}
 
 
 _LOCAL = _local_functions()
@@ -183,10 +200,6 @@ TRUE = [
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_SOURCE, 'imports_then_sets_the_environment',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
-    (_SOURCE, 'opens_to_write',
-     'for x in [0, 1], not is_state_safe(f)', 'proven'),
-    (_SOURCE, 'opens_to_append',
-     'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_SOURCE, 'sets_past_a_half',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_SOURCE, 'sets_past_a_half',
@@ -199,14 +212,51 @@ TRUE = [
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_SOURCE, 'sets_after_an_early_return',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
-    (_SOURCE, 'opens_past_a_half',
-     'for x in [0, 1], not is_state_safe(f)', 'proven'),
-    (_SOURCE, 'opens_in_the_else',
-     'for x in [0, 1], not is_state_safe(f)', 'proven'),
     (_CHILD, 'sets_the_environment',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
-    (_CHILD, 'writes_a_file',
+    # a write before a raise, integer points, every member of a set
+    (_SHOWN, 'writes_then_raises',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'always_writes',
+     'for x in Z, not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'always_writes',
+     'for x in N, not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'writes_past_three_tenths',
+     'for x in Z, not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'writes_past_three_tenths',
+     'for x in {0, 1}, not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'writes_past_two',
+     'for x in {0, 1, 2, 3}, not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'writes_below_a_half_chained',
+     'for x in (0, 1], not is_state_safe(f)', 'proven'),
+    # process state the child has its own copy of
+    (_SHOWN, 'draws_and_drops',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'prints_a_line',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'sets_a_module_entry',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    # an object whose state changed, compared by what it holds
+    (_SHOWN, 'moves_the_point',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SHOWN, 'a_later_point_after_reading_the_clock',
+     'for x in [0, 1], not is_deterministic(f)', 'proven'),
+    # an enforced domain inside the claim's, ends read exactly
+    (_ENDS, 'two_points',
+     'for x in [0, 1], excluded_outside_domain(x)', 'proven'),
+    (_ENDS, 'two_points',
+     'for x in [0, 100], excluded_outside_domain(x)', 'proven'),
+    (_ENDS, 'two_points',
+     'for x in {0, 1}, excluded_outside_domain(x)', 'proven'),
+    (_ENDS, 'opened',
+     'for x in [0, 1], excluded_outside_domain(x)', 'proven'),
+    (_ENDS, 'open_above',
+     'for x in [0, 1], excluded_outside_domain(x)', 'proven'),
+    (_ENDS, 'closed',
+     'for x in [0, 1], excluded_outside_domain(x)', 'proven'),
+    # every empty value of a union handled
+    (_EMPTY, 'size_ratio_or_zero_text', 'is_empty_safe(xs)', 'proven'),
+    (_EMPTY, 'size_ratio_or_zero_many', 'is_empty_safe(xs)', 'proven'),
     (_HERE, 'appends_past_a_half',
      'for x in [0, 1], not is_state_safe(f)', 'proven'),
     # a marked parameter the claim binds to numbers
@@ -297,19 +347,52 @@ FALSE = [
     (_NUMBERS, "plus_one_finite", "for x in [0, oo], f(x) == x + 1"),
     (_LET, "describe",
      f'let stage = {_LET}.halve, describe(stage) == "(int) -> int"'),
+    # the empty value of a union member that the guard does not catch
+    (_EMPTY, "size_ratio_text", "is_empty_safe(xs)"),
+    (_EMPTY, "size_ratio_dict", "is_empty_safe(xs)"),
+    (_EMPTY, "size_ratio_set", "is_empty_safe(xs)"),
+    (_EMPTY, "size_ratio_bytes", "is_empty_safe(xs)"),
+    (_EMPTY, "size_ratio_bar", "is_empty_safe(xs)"),
+    (_EMPTY, "size_ratio_optional", "is_empty_safe(xs)"),
 ]
 
-#: module, function, claim: no call was run that wrote, and the source
-#: does not show the write runs
+#: module, function, claim: false (no call changes anything over the
+#: domain), and not proven
 NOT_PROVEN = [
     (_SOURCE, "sets_under_arithmetic",
      "for x in [0, 1], not is_state_safe(f)"),
     (_SOURCE, "opens_under_arithmetic",
      "for x in [0, 1], not is_state_safe(f)"),
-    (_SOURCE, "opens_after_a_division",
+    # a file opened in a mode or at a path that changes nothing
+    (_SOURCE, "opens_to_update",
      "for x in [0, 1], not is_state_safe(f)"),
-    (_SOURCE, "opens_after_an_early_return",
+    (_SOURCE, "opens_what_exists_exclusively",
      "for x in [0, 1], not is_state_safe(f)"),
+    (_SOURCE, "opens_in_a_missing_directory",
+     "for x in [0, 1], not is_state_safe(f)"),
+    # a value written back as it was, an equal object returned twice
+    (_SHOWN, "writes_the_point_back",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SHOWN, "writes_the_slot_back",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SHOWN, "binds_a_fresh_nan_list",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SHOWN, "an_equal_point_after_reading_the_clock",
+     "for x in [0, 1], not is_deterministic(f)"),
+    (_SHOWN, "raises_before_the_write",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SHOWN, "prints_nothing",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SHOWN, "writes_a_module_entry_back",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SHOWN, "writes_past_two",
+     "for x in {0, 1, 2}, not is_state_safe(f)"),
+    # the wrapper accepts an end the claim's domain leaves out
+    (_ENDS, "closed", "for x in (0, 1), excluded_outside_domain(x)"),
+    (_ENDS, "closed", "for x in [0, 1), excluded_outside_domain(x)"),
+    (_ENDS, "closed", "for x in (0, 1], excluded_outside_domain(x)"),
+    (_ENDS, "open_above", "for x in (0, 1), excluded_outside_domain(x)"),
+    (_ENDS, "open_below", "for x in (0, 1), excluded_outside_domain(x)"),
     (_SOURCE, "sets_after_a_rebinding",
      "for x in [0, 1], not is_state_safe(f)"),
     (_HERE, "appends_where_the_square_is_large",
@@ -320,8 +403,45 @@ NOT_PROVEN = [
 #: the row gives now
 EXCEPTIONS = [
     (_HERE, "draws_locally",
-     "for x in [0, 1], not is_deterministic(f)", "proven",
-     "f cannot be run contained (it is defined inside another function"),
+     "for x in [0, 1], not is_deterministic(f)", "proven", _LOCAL_REASON),
+    # reading alone does not show that an environment item assigned
+    # differs from what the variable holds, and no child can import f
+    (_HERE, "sets_the_environment_locally",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _LOCAL_REASON),
+    # a file opened for writing: never run, and the source does not
+    # show that the path can be written
+    (_SOURCE, "opens_to_write",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_to_append",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_past_a_half",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_past_a_half",
+     "not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_in_the_else",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_in_the_else",
+     "for x in [0, 0.25], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_in_a_band",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_after_a_division",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_SOURCE, "opens_after_an_early_return",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    (_CHILD, "writes_a_file",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _FILE),
+    # process state no witness watches, and a write beside something
+    # the examination cannot read: the function is not run
+    (_STATE, "change_dir",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _UNWATCHED),
+    (_STATE, "extend_path",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _UNWATCHED),
+    (_STATE, "reseed",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _UNWATCHED),
+    (_STATE, "put_env",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _UNWATCHED),
+    (_SHOWN, "appends_after_an_exec",
+     "for x in [0, 1], not is_state_safe(f)", "proven", _UNWATCHED),
     (_CHILD, "writes_then_never_returns",
      "for x in [0, 1], not is_state_safe(f)", "proven",
      "the run did not finish within its budget"),

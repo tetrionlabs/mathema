@@ -6,9 +6,9 @@ interpreter imports f's module, calls f, and reports what it saw. The
 checking process's own module values are as they were, so one row never
 shows what another row's witness wrote. A child that runs past its
 budget leaves the row unknown, saying so. A function no child
-can import, or one that writes a file, is not called at all: a write
-the source shows a call making is read, and anything else is unknown
-with the reason. A function that writes the environment is called in
+can import, or one that opens a file for writing, is not called at all:
+a write the source shows every call making is read, and anything else
+is unknown with the reason. A function that writes the environment is called in
 the child, which has its own copy of it."""
 import os
 import re
@@ -77,7 +77,8 @@ def test_a_witnessed_write_leaves_the_checking_process_as_it_was():
     assert _log == []
     p = _row(counts, "for x in [0, 1], not is_state_safe(f)")
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
-    assert "_calls was 0 before it and 1 after it" in p.sketch, p.sketch
+    assert "_calls changed (an int before it, an int after it)" in p.sketch, \
+        p.sketch
     assert _calls == 0
 
 
@@ -87,7 +88,8 @@ def test_a_second_row_does_not_see_what_the_first_rows_witness_wrote():
     again = _row(always_writes, "for x in [0, 1], not is_state_safe(f)")
     for p in (first, second, again):
         assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
-        assert "_log was [] before it" in p.sketch, p.sketch
+        assert "_log changed (a list of 0 items before it" in p.sketch, \
+            p.sketch
     assert first.sketch == again.sketch
     assert _log == []
 
@@ -115,8 +117,9 @@ def test_the_environment_is_written_only_in_the_child_and_a_file_never():
     assert "child process" in p.sketch, p.sketch
     assert "MATHEMA_TEST_CHILD_WITNESS_NOT_RUN" not in os.environ
     p = _row(writes_a_file, "for x in [0, 1], not is_state_safe(f)")
-    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
-    assert "not run" in p.sketch and "child process" not in p.sketch, p.sketch
+    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    assert "file writers are not run" in (p.note or ""), p.note
+    assert "child process" not in (p.note or ""), p.note
     assert not os.path.exists(_PATH)
 
 

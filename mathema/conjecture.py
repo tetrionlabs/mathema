@@ -11093,16 +11093,47 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
         every parameter at its bound's upper end, at its lower end, at
         its midpoint, and at one ordinary value (`_an_ordinary_value`),
         a parameter with no interval at its ordinary value throughout;
+        then each parameter at every number its bound lists (the
+        members of a finite set), and, for a bound over the integers,
+        at a few small integers it admits;
         then each parameter at each missing value its bound admits
         (`domain.admitted`, realised: nan, None);
         then, for each number an `if` test in `tests` (sources) compares
-        a parameter with, that parameter at the number and at the float
-        on each side of it, where its bound admits them. Empty when some
-        parameter has no ordinary value.
+        a parameter with (in a chained comparison, each number in the
+        chain), that parameter at the number and at the float
+        on each side of it, and for a bound over the integers at the
+        integers around it, where its bound admits them. No more than
+        `WITNESS_POINTS` points. Empty when some parameter has no
+        ordinary value.
+
+    Notes:
+        A parameter over the integers has an integer for its ordinary
+        value: the first of 0, 1, -1 its bound admits.
     """
-    from .domain import ABSENT, admitted, domain_contains, realise_sentinel
+    import itertools
+    from .domain import (ABSENT, _as_domain, _Sentinel, admitted,
+                         domain_contains, realise_sentinel)
+
+    def inside(value, bound) -> bool:
+        try:
+            return bound is None or bool(domain_contains(value, bound))
+        except Exception:
+            return False
+
+    def over_integers(bound) -> bool:
+        try:
+            return bound is not None and \
+                _as_domain(bound).base_type in ("Z", "N")
+        except Exception:
+            return False
+
     base = {p: _an_ordinary_value((cj_domain or {}).get(p))
             for p in facts.params}
+    for p, value in base.items():
+        bound = (cj_domain or {}).get(p)
+        if value is _NO_VALUE and over_integers(bound):
+            base[p] = next((k for k in (0, 1, -1) if inside(k, bound)),
+                           _NO_VALUE)
     if any(v is _NO_VALUE for v in base.values()):
         return []
     points = []
@@ -11130,6 +11161,24 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
         if bound is None:
             continue
         try:
+            pieces = _as_domain(bound).pieces
+        except Exception:
+            pieces = ()
+        listed = sorted(
+            (v for piece in pieces if isinstance(piece, frozenset)
+             for v in piece
+             if type(v) in (int, float) and not isinstance(v, _Sentinel)
+             and math.isfinite(v)), key=lambda v: (v, repr(v)))
+        small = [0, 1, -1, 2, -2] if over_integers(bound) else []
+        for value in [*listed, *small]:
+            point = {**base, p: value}
+            if inside(value, bound) and point not in points:
+                points.append(point)
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        try:
             absent, holes = admitted(bound)
             missing = [v for s in ([ABSENT] if absent else []) + list(holes)
                        for v in realise_sentinel(s)]
@@ -11145,27 +11194,31 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
         except SyntaxError:
             continue
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
+            if not isinstance(node, ast.Compare):
                 continue
-            sides = [node.left, node.comparators[0]]
-            for name, number in (sides, sides[::-1]):
+            sides = [node.left, *node.comparators]
+            for name, number in itertools.permutations(sides, 2):
                 if not (isinstance(name, ast.Name) and name.id in base
                         and isinstance(number, ast.Constant)
                         and type(number.value) in (int, float)
                         and math.isfinite(number.value)):
                     continue
                 at = float(number.value)
-                for value in (math.nextafter(at, math.inf), at,
-                              math.nextafter(at, -math.inf)):
-                    bound = (cj_domain or {}).get(name.id)
-                    try:
-                        inside = bound is None or domain_contains(value, bound)
-                    except Exception:
-                        inside = False
+                bound = (cj_domain or {}).get(name.id)
+                around = [math.nextafter(at, math.inf), at,
+                          math.nextafter(at, -math.inf)]
+                if over_integers(bound):
+                    around += [math.floor(at) + 1, math.ceil(at),
+                               math.floor(at), math.ceil(at) - 1]
+                for value in around:
                     point = {**base, name.id: value}
-                    if inside and point not in points:
+                    if inside(value, bound) and point not in points:
                         points.append(point)
-    return points[:24]
+    return points[:WITNESS_POINTS]
+
+
+# :draft how many points one witness search tries: a budget of calls
+WITNESS_POINTS = 24
 
 
 def _same_point(a: dict, b: dict) -> bool:
@@ -11187,19 +11240,26 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
         arguments whose results differ. The calls are made in a child
         process (`_contained.witness`) at a few points of the claim's
         domain (`_witness_points`); the sketch names the point and what
-        the child saw, and nothing in this process is called or changed.
+        changed, describes each value by its type and size and never
+        shows one, and says the child imported the module afresh.
+        Nothing in this process is called or changed.
 
     Notes:
         The function is run only when its examination read everything
         and found no write other than to module-level values of its
-        project, draws from the shared random generator and items of
-        `os.environ`, of which the child has its own copy, so that the
-        calls change nothing outside the child. A call that raises is
-        no witness. A function that writes anything else, or that no
-        child can import, is not called: `not is_state_safe(f)` is then
-        read from the source where it shows a call that writes
-        (`_write_read_as_run`), and a function no child can import is
-        undecided with the reason otherwise.
+        project, draws from the shared random generator, items of
+        `os.environ`, text printed to standard output and an entry of
+        `sys.modules` assigned under a key written out, of each of
+        which the child has its own, so that the calls change nothing
+        outside the child. A call that raises has written what it wrote
+        before the raise, and returns no result to compare. A function
+        that writes anything else, or that no child can import, is not
+        called: `not is_state_safe(f)` is then read from the source
+        where it shows a call that writes (`_write_read_as_run`), a
+        function that opens a file for writing is undecided, saying
+        that file writers are not run, and a function no child can
+        import is undecided with the reason otherwise. An environment
+        variable is named only when the source writes its name out.
     """
     from . import _contained
     from ._examine import _unwrapped, examine
@@ -11214,10 +11274,20 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
     # an item of os.environ written is written in the child's own copy
     in_environ = [site for site in effects.writes
                   if " changes os.environ (" in site.text]
+    drawn = [site for site in effects.writes
+             if "the shared random generator" in site.text]
+    printed = [site for site in effects.writes
+               if site.text.endswith(" calls print(), which writes to "
+                                     "standard output")]
+    entered = {site: ast.literal_eval(found.group(1))
+               for site in effects.writes
+               if (found := re.search(
+                   r" changes sys\.modules \(sys\.modules\[('[^'\\]*'"
+                   r"|\"[^\"\\]*\")\] = \.\.\.\)$", site.text))}
     runnable = not (effects.unknowns or effects.unknown_writes) and all(
         "module-level" in site.text
-        or "the shared random generator" in site.text
-        or site in in_environ
+        or site in drawn or site in in_environ or site in printed
+        or site in entered
         for site in effects.writes)
     cj_domain = ctx.cj_domain or {}
     names = list(facts.params)
@@ -11245,6 +11315,15 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
                         + f"; read from the source and not run: f {what} "  # :draft
                         f"as the first statement of its body, {where}"),
                 meta=meta)
+        if kind == "is_state_safe" and any(
+                site.text.endswith(" opens a file for writing")
+                for site in effects.writes):
+            return ProofResult(
+                "undecided",
+                sketch=("a file is opened for writing; whether it is "  # :draft
+                        "changed is not decided without running, and "
+                        "file writers are not run: " + shown),
+                meta=meta)
         if why_not is None:
             return None
         return ProofResult(
@@ -11267,12 +11346,15 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
     seen = _contained.witness(
         fn, kind, [[point[p] for p in names] for point in points],
         sorted(watched), _declared_elements(cj_domain),
-        environ=bool(in_environ))
-    if "failed" in seen:
+        environ=bool(in_environ), generators=bool(drawn),
+        stdout=bool(printed),
+        entries=({"sys.modules": sorted(set(entered.values()))}
+                 if entered else None))
+    if "failed" in seen or (not seen.get("seen") and seen.get("unread")):
         return ProofResult(
             "undecided",
             sketch=("no witness of the negation was seen: "  # :draft
-                    + str(seen["failed"])),
+                    + _shown(seen.get("failed") or seen.get("unread"), 240)),
             meta=meta)
     try:
         point = points[seen["point"]] if seen.get("seen") else None
@@ -11281,23 +11363,48 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
     if point is None:
         return None
     where = _fmt_point(point, names) or "the call with no arguments"
-    if kind == "is_state_safe" and seen.get("seen") == "write":
-        said = (f"the call at {where} was run in a child process, and "  # :draft
-                f"the module-level {_shown(seen.get('name'))} was "
-                f"{_shown(seen.get('before'))} before it and "
-                f"{_shown(seen.get('after'))} after it")
-    elif kind == "is_state_safe" and seen.get("seen") == "environ":
+    ran = (f"the call at {where} was run in a child process that "  # :draft
+           f"imported f's module afresh, and ")
+    what = seen.get("seen")
+    if kind == "is_state_safe" and what == "write" \
+            and seen.get("name") in {name for _module, name in watched}:
+        said = ran + (f"the module-level {_shown(seen.get('name'))} "  # :draft
+                      f"changed ({_shown(seen.get('before'))} before it, "
+                      f"{_shown(seen.get('after'))} after it)")
+    elif kind == "is_state_safe" and what == "environ":
         def length(n) -> str:
             return ("not set" if not isinstance(n, int)
                     else f"{n} character{'' if n == 1 else 's'} long")
-        said = (f"the call at {where} was run in a child process, and "  # :draft
-                f"the environment variable {_shown(seen.get('name'))} was "
-                f"{length(seen.get('before'))} before it and "
-                f"{length(seen.get('after'))} after it")
-    elif kind == "is_deterministic" and seen.get("seen") == "results":
-        said = (f"two calls at {where} were run in a child process, and "  # :draft
-                f"returned {_shown(seen.get('first'))} and "
-                f"{_shown(seen.get('second'))}")
+        name = str(seen.get("name"))
+        written_out = any(repr(name) in site.text or f'"{name}"' in site.text
+                          for site in in_environ)
+        variable = (f"the environment variable {_shown(name)}"
+                    if written_out else
+                    "an environment variable whose name the source does "  # :draft
+                    "not write out")
+        said = ran + (f"{variable} was "  # :draft
+                      f"{length(seen.get('before'))} before it and "
+                      f"{length(seen.get('after'))} after it")
+    elif kind == "is_state_safe" and what == "generator" \
+            and seen.get("name") in ("random", "numpy.random"):
+        said = ran + (f"the state of the shared random generator "  # :draft
+                      f"({_shown(seen.get('name'))}) changed")
+    elif kind == "is_state_safe" and what == "stdout" \
+            and isinstance(seen.get("count"), int):
+        count = seen["count"]
+        said = ran + (f"{count} character{'' if count == 1 else 's'} "  # :draft
+                      f"{'was' if count == 1 else 'were'} written to "
+                      f"standard output")
+    elif kind == "is_state_safe" and what == "entry" \
+            and seen.get("key") in entered.values():
+        said = ran + (f"sys.modules[{str(seen.get('key'))!r}] changed "  # :draft
+                      f"({_shown(seen.get('before'))} before it, "
+                      f"{_shown(seen.get('after'))} after it)")
+    elif kind == "is_deterministic" and what == "results":
+        said = (f"two calls at {where} were run in a child process that "  # :draft
+                f"imported f's module afresh, and returned two results "
+                f"that differ ({_shown(seen.get('first'))}, then "
+                f"{_shown(seen.get('second'))})")
     else:
         return None
     return ProofResult(
@@ -11307,12 +11414,13 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
               "mathema.witness_executed": True})
 
 
-def _shown(text) -> str:
-    """A text a child process sent back, as one line no longer than a
-    shown value is."""
+def _shown(text, limit: "int | None" = None) -> str:
+    """Words a child process sent back (a name, or a value described
+    by its type and size), as one line no longer than `limit`."""
     from ._contained import SHOWN
+    limit = limit or SHOWN
     text = " ".join(str(text).split())
-    return text if len(text) <= SHOWN else text[:SHOWN - 3] + "..."
+    return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
 def _write_read_as_run(fn, facts, effects, cj_domain) -> "tuple | None":
@@ -11416,13 +11524,13 @@ def _recognised_write(stmt, fn, tree, modules: dict,
         What a statement writes outside the call, when it is one of the
         writes read from the source: `NAME.append(arg)` on a
         module-level list; `NAME += k` under `global NAME` for a
-        module-level integer and a non-zero integer literal `k`;
-        `os.environ["K"] = "V"` with both texts written out;
-        `del os.environ["K"]` for a key set when it is read; and
-        `open(path, mode)` with a mode that writes or appends, as a
-        statement, the value of an assignment or the first item of a
-        `with`, `path` a text literal or a module-level text. None for
-        any other statement.
+        module-level integer and a non-zero integer literal `k`; and
+        `del os.environ["K"]` for a key set when it is read. Each
+        changes what it writes on every call that reaches it. None for
+        any other statement: `os.environ["K"] = "V"` changes nothing
+        when the variable already holds V, and `open(path, mode)`
+        changes a file only where the path can be written, neither of
+        which the source shows.
 
     Notes:
         `arg` is a parameter or a literal. A name is module-level when
@@ -11482,27 +11590,8 @@ def _recognised_write(stmt, fn, tree, modules: dict,
             return target.slice.value
         return None
 
-    def opens_to_write(call) -> bool:
-        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-                and value_of(call.func.id) is builtins.open
-                and 1 <= len(call.args) <= 2
-                and all(k.arg is not None and isinstance(k.value, ast.Constant)
-                        for k in call.keywords)):
-            return False
-        path = call.args[0]
-        if not (isinstance(path, ast.Constant) and isinstance(path.value, str)
-                or isinstance(path, ast.Name)
-                and type(value_of(path.id)) is str):
-            return False
-        mode = (call.args[1] if len(call.args) == 2 else next(
-            (k.value for k in call.keywords if k.arg == "mode"), None))
-        return (isinstance(mode, ast.Constant) and isinstance(mode.value, str)
-                and any(c in mode.value for c in "wax+"))
-
     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
         call = stmt.value
-        if opens_to_write(call):
-            return "opens a file to write"
         target = call.func
         if not (isinstance(target, ast.Attribute) and target.attr == "append"
                 and isinstance(target.value, ast.Name)
@@ -11526,25 +11615,11 @@ def _recognised_write(stmt, fn, tree, modules: dict,
                 and type(step.value) is int and step.value != 0):
             return f"adds to the module-level {name}"
         return None
-    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
-        key = environ_item(stmt.targets[0])
-        if key is not None and isinstance(stmt.value, ast.Constant) \
-                and isinstance(stmt.value.value, str) \
-                and "\x00" not in key + stmt.value.value and key \
-                and "=" not in key:
-            return f"assigns os.environ[{key!r}]"
-        if isinstance(stmt.targets[0], ast.Name) \
-                and opens_to_write(stmt.value):
-            return "opens a file to write"
-        return None
     if isinstance(stmt, ast.Delete) and len(stmt.targets) == 1:
         key = environ_item(stmt.targets[0])
         if key is not None and key in os.environ:
             return f"deletes os.environ[{key!r}]"
         return None
-    if isinstance(stmt, ast.With) and stmt.items \
-            and opens_to_write(stmt.items[0].context_expr):
-        return "opens a file to write"
     return None
 
 

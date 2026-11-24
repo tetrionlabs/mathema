@@ -1914,28 +1914,48 @@ def _enforced_inside(enforced, stated) -> bool:
         Whether every number the enforced domain admits is in the
         claim's stated domain for the parameter, so that the wrapper
         refuses every number outside the claim's: the claim states none
-        (the enforced domain is then the declared one), the two are
-        equal, or both are sets of reals (`conjecture._real_set`) and
-        the enforced one is a subset. False when they cannot be
-        compared.
+        (the enforced domain is then the declared one), or both read as
+        sets of reals (`_number_set`) and the enforced one is a subset,
+        an end that one includes and the other leaves out counted as
+        the number it is. Two domains that do not read as sets of reals
+        are inside one another only when they are the same domain, of
+        the same type. False when they cannot be compared.
     """
     if stated is None:
         return True
-    try:
-        if stated == enforced:
-            return True
-    except Exception:
-        pass
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    from .conjecture import _real_set
     try:
-        inner, outer = _real_set(enforced), _real_set(stated)
+        inner, outer = _number_set(enforced), _number_set(stated)
+        if inner is None and outer is None:
+            return type(stated) is type(enforced) \
+                and not isinstance(stated, tuple) \
+                and bool(stated == enforced)
         if inner is None or outer is None:
             return False
         return _with_timeout(lambda: inner.is_subset(outer),
                              FAST_TIMEOUT_SECONDS) is True
     except Exception:
         return False
+
+
+def _number_set(bound):
+    """Intent:
+        A domain bound as the sympy set of the numbers it holds: a
+        finite set of numbers written as a set (a missing value it
+        lists is no number and is left out), else what
+        `conjecture._real_set` reads, open ends kept open. None for
+        anything else.
+    """
+    from .conjecture import _real_set
+    if isinstance(bound, (set, frozenset)):
+        import sympy
+        from .domain import exact_number, is_sentinel
+        numbers = [v for v in bound if v is not None and not is_sentinel(v)]
+        if not all(type(v) in (int, float) and math.isfinite(v)
+                   for v in numbers):
+            return None
+        return sympy.FiniteSet(*[exact_number(v) for v in numbers])
+    return _real_set(bound)
 
 
 def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -2475,11 +2495,14 @@ def _empty_value(fn, facts, target: str, cj=None) -> tuple:
 def _empty_values(fn, facts, target: str, cj=None) -> list:
     """Intent:
         Every `(value, shown)` empty input `target` admits: the empty
-        container `_empty_value` builds, and, for a parameter that takes
-        a plain sequence of any kind (no annotation, a tuple, an
-        abstract `Sequence`, `Collection`, `Iterable`, `Any`, or a union
-        or optional with such a member), the empty tuple beside the
-        empty list.
+        container `_empty_value` builds, and, where that is the empty
+        list, the empty value of every other type the annotation
+        admits. A parameter that takes a plain sequence of any kind (no
+        annotation, a tuple, an abstract `Sequence`, `Collection`,
+        `Iterable`, `Any`) admits the empty tuple; a member of a union
+        or an optional's inner type that is `str`, `bytes`,
+        `bytearray`, `dict`, `set` or `frozenset` admits that type's
+        empty value.
     """
     import collections.abc as _abc
     import re
@@ -2497,26 +2520,58 @@ def _empty_values(fn, facts, target: str, cj=None) -> list:
             annotation = inspect.signature(fn).parameters[target].annotation
         except (KeyError, TypeError, ValueError):
             return [first]
-    def admits_a_tuple(note) -> bool:
+    # :draft the words each empty value is shown by
+    others = {tuple: ((), "() (an empty tuple)"),
+              str: ("", "'' (an empty str)"),
+              bytes: (b"", "b'' (an empty bytes)"),
+              bytearray: (bytearray(), "bytearray() (an empty bytearray)"),
+              dict: ({}, "{} (an empty dict)"),
+              set: (set(), "set() (an empty set)"),
+              frozenset: (frozenset(), "frozenset() (an empty frozenset)")}
+    by_word = {"tuple": tuple, "Tuple": tuple, "str": str, "bytes": bytes,
+               "bytearray": bytearray, "dict": dict, "Dict": dict,
+               "set": set, "Set": set, "frozenset": frozenset,
+               "FrozenSet": frozenset}
+    admitted: list = []
+
+    def admit(kind) -> None:
+        if kind not in admitted:
+            admitted.append(kind)
+
+    def read(note, member: bool) -> None:
+        """Note the types `note` admits; `member` when it is a member
+        of a union or optional."""
         if isinstance(note, str):
             # an annotation left as text: read by the words it names
-            return bool(re.search(r"\b(tuple|Tuple|Sequence|Collection|"
-                                  r"Iterable|Reversible|Container|Sized|"
-                                  r"Any|object)\b", note))
+            if re.search(r"\b(Sequence|Collection|Iterable|Reversible|"
+                         r"Container|Sized|Any|object)\b", note):
+                admit(tuple)
+            joined = bool(re.search(r"\||\b(Union|Optional)\b", note))
+            for word, kind in by_word.items():
+                if re.search(rf"\b{word}\b", note) \
+                        and (kind is tuple or joined):
+                    admit(kind)
+            return
         origin = typing.get_origin(note) or note
         if origin is typing.Union or isinstance(note, types.UnionType):
-            return any(admits_a_tuple(member)
-                       for member in typing.get_args(note))
-        return (note is inspect.Parameter.empty or origin is tuple
+            for inner in typing.get_args(note):
+                read(inner, True)
+            return
+        if origin is typing.Annotated:
+            read(typing.get_args(note)[0], member)
+            return
+        if (note is inspect.Parameter.empty or origin is tuple
                 or origin in (typing.Any, object)
                 or origin in (_abc.Sequence, _abc.Collection,
                               _abc.Iterable, _abc.Reversible,
-                              _abc.Container, _abc.Sized))
+                              _abc.Container, _abc.Sized)):
+            admit(tuple)
+        elif member and origin in others:
+            admit(origin)
 
-    takes_tuples = admits_a_tuple(annotation)
-    if not takes_tuples:
-        return [first]
-    return [first, ((), f"{target} = () (an empty tuple)")]  # :draft
+    read(annotation, False)
+    return [first, *((others[kind][0], f"{target} = {others[kind][1]}")
+                     for kind in others if kind in admitted)]
 
 
 def _realised(fn, facts, target: str, cells: list, cj=None):

@@ -35,8 +35,12 @@ value  what it changed
        only under a constant test, or a test of one parameter that
        nothing binds again against numeric literals
 2      the source reading of a write: where no call is run, a
-       negated `is_state_safe` is proven from a write the source
-       shows a call making
+       negated `is_state_safe` is proven from a statement the source
+       shows changing state on every call that reaches it; a file
+       opened for writing and an environment item assigned are not
+       such statements
+2      the shown change: a witness is a change shown by comparing
+       what two values hold, described by type and size, never shown
 2      the number reading: a parameter the claim binds to numbers is
        drawn and derived as a number, whatever marker its annotation
        carries
