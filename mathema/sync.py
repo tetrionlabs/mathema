@@ -224,8 +224,10 @@ def _legacy_renderings() -> dict:
         `{move name: context manager}` for each earlier rendering of
         stored claim text this release can reproduce.
     """
-    from ._scan import legacy_not_parentheses, legacy_quoting
+    from ._scan import (legacy_named_filled, legacy_not_parentheses,
+                        legacy_quoting)
     return {"literal-quoting": legacy_quoting,
+            "named-missing-value": legacy_named_filled,
             "not-parentheses": legacy_not_parentheses}
 
 
@@ -272,7 +274,7 @@ def _renders_as(cj, statement: str, names: tuple) -> "tuple | None":
 def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
     """Intent:
         The earlier renderings, by move name, under which releases up to
-        0.6.6.1 wrote a verified row's statement for the authored claim
+        0.6.6.2 wrote a verified row's statement for the authored claim
         `c`, or None when the row's statement is the canonical text
         written now or no earlier rendering (alone or together) gives
         it. A row a move names records `c`, whether or not its old text
@@ -283,8 +285,10 @@ def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
     from .grammar import complex_in_view
     from .spec import _declared_conjecture
     statement = row.get("statement") or ""
+    # an earlier rendering differs from today's only at a string
+    # literal, a `not`, or a domain's missing values (written after `|`)
     if not statement or ("'" not in statement and '"' not in statement
-                         and "not" not in statement):
+                         and "not" not in statement and "|" not in statement):
         return None
     try:
         with complex_in_view(complex_parameters(fn) if fn is not None else ()):

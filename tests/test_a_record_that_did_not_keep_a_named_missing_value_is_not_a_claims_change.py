@@ -111,7 +111,9 @@ def test_an_old_record_of_a_claim_naming_none_is_a_rules_change(project):
 def test_it_is_re_recorded_once_then_fresh(project):
     from mathema.verify import verify_project
     _old_records(project)
-    verify_project(root=str(project))
+    once = verify_project(root=str(project))
+    assert not once.problems, once.problems
+    assert "fresh" not in _why(once).values(), _why(once)
     again = verify_project(root=str(project))
     assert set(_why(again).values()) == {"fresh"}, _why(again)
     assert not any(_NOTE in ln for ln in again.lines), again.lines

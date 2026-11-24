@@ -1978,6 +1978,10 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
     # claims whose record differs only in an earlier release writing a
     # negated relation without its parentheses, reported once for the run
     negation_moved: list = []
+    # claims whose record differs only in an earlier release's stored
+    # text not keeping a missing value the claim names beside an
+    # interval or a named type, reported once for the run
+    named_moved: list = []
     # per key, the claims whose record row stores a statement that does
     # not parse: each is adjudicated again and its row rewritten
     stale_rows: dict = {}
@@ -2158,6 +2162,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         release_moved[:] = [m for m in release_moved if m[0] != key]
         quoting_moved[:] = [m for m in quoting_moved if m[0] != key]
         negation_moved[:] = [m for m in negation_moved if m[0] != key]
+        named_moved[:] = [m for m in named_moved if m[0] != key]
         stale_rows.pop(key, None)
         unchecked_rows.pop(key, None)
         ambiguous_rows.pop(key, None)
@@ -2297,6 +2302,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                             quoting_moved.append((key, conflict["claim"]))
                         if "not-parentheses" in moves:
                             negation_moved.append((key, conflict["claim"]))
+                        if "named-missing-value" in moves:
+                            named_moved.append((key, conflict["claim"]))
                         if not moves:
                             release_moved.append((key, conflict["claim"]))
                         continue
@@ -2485,7 +2492,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             # earlier reasoning version, or differs from them only in a
             # spelling an earlier release wrote: only the reasoning version moved
             spelled_earlier = any(k == key for k, _c in
-                                  release_moved + quoting_moved + negation_moved)
+                                  release_moved + quoting_moved + negation_moved
+                                  + named_moved)
             from .spec import recorded_claims
             same_names = ({c.get("name") for c in recorded_claims(verified_entry)}
                           == {c.get("name") for c in current_claims})
@@ -2963,6 +2971,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
         out.lines.append(quoting_moved_note(len(quoting_moved)))
     if negation_moved:
         out.lines.append(negation_moved_note(len(negation_moved)))
+    if named_moved:
+        out.lines.append(named_moved_note(len(named_moved)))
     return out
 
 
@@ -3151,6 +3161,22 @@ def negation_moved_note(count: int) -> str:
             f"parentheses of its own; {'each is' if many else 'it is'} "
             f"checked again and re-recorded under the text this release "
             f"writes; nothing the author wrote changed")
+
+
+def named_moved_note(count: int) -> str:
+    """Intent:
+        The run's note for `count` claims that name a missing value
+        beside an interval or a named type, whose record an earlier
+        release wrote in text that did not keep the named value.
+    """
+    many = count != 1
+    # :draft
+    return (f"note: {count} claim{'s' if many else ''} recorded by an "
+            f"earlier release name{'' if many else 's'} a missing value "
+            f"(such as None or nan) that the earlier stored text did not "
+            f"keep; {'each is' if many else 'it is'} checked again as "
+            f"written and re-recorded under text that keeps the named "
+            f"value")
 
 
 # :draft
