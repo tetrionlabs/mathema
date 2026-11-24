@@ -13,6 +13,7 @@ import ast
 import pytest
 
 import _text_validators as T
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 
 pytest.importorskip("z3")
 
@@ -73,7 +74,7 @@ def test_the_reading_is_checked_on_members_of_the_variables_language():
     reading = [a for a in row.meta["mathema.assumptions"]["definitions"]
                if a["statement"].startswith("is_person accepts a text")]
     assert reading and reading[0]["status"] == "assumed", reading
-    assert reading[0]["corroboration"]["disagreed"] == 0, reading
+    assert _agreed_on_every_value(reading[0]), reading
     assert reading[0]["artefact"]["texts run"] >= 100
 
 

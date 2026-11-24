@@ -14,6 +14,7 @@ import re
 import pytest
 
 from mathema.conjecture import check_conjectures, claim
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 from mathema.languages import (PredicateWord, StringLanguage, register_language,
                                register_predicate, unregister_language, unregister_predicate)
 
@@ -134,7 +135,7 @@ def test_a_proven_row_lists_each_definition_it_read_and_how_it_stands(served):
     for text, entry in stated.items():
         assert entry["statement"] == f"{text} == its stated definition"
         assert entry["status"] == "assumed"
-        assert entry["corroboration"]["disagreed"] == 0
+        assert _agreed_on_every_value(entry)
         assert entry["artefact"]["members drawn"] >= 1
         assert isinstance(entry["artefact"]["seed"], int)
     assert row.sketch.endswith(
@@ -217,7 +218,7 @@ def test_a_checked_definition_says_what_was_enumerated(served):
     defined = domain_relations.defined_bound(parse_binding("s in L[right]")[1])
     (text, language, most, least), = defined.read
     checked = domain_relations.check_definition(text, language, most, least, defined.alphabet)
-    assert checked["status"] == "assumed" and checked["corroboration"]["disagreed"] == 0
+    assert checked["status"] == "assumed" and _agreed_on_every_value(checked)
     artefact = checked["artefact"]
     assert artefact["atoms"] == 2 and artefact["length bound"] >= 6
     assert artefact["strings compared"] > 9000 and artefact["members drawn"] >= 1

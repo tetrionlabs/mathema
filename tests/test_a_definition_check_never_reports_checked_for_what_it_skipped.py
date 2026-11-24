@@ -11,6 +11,7 @@ import pytest
 
 from mathema.conjecture import check_conjectures, claim
 from mathema.languages import StringLanguage, register_language, unregister_language
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 
 pytest.importorskip("z3")
 
@@ -117,7 +118,7 @@ def test_a_proof_resting_on_a_skipping_check_does_not_say_checked(served):
     assert "L[partial] == its stated definition (assumed)" not in row.sketch, row.sketch
     assert "L[partial] == its stated definition (assumed, " in row.sketch, row.sketch
     assert stated["L[overab]"]["status"] == "assumed"
-    assert stated["L[overab]"]["corroboration"]["disagreed"] == 0
+    assert _agreed_on_every_value(stated["L[overab]"])
 
 
 def test_a_definition_with_nothing_skipped_reports_no_skips(served):
@@ -126,7 +127,7 @@ def test_a_definition_with_nothing_skipped_reports_no_skips(served):
     defined = domain_relations.defined_bound(parse_binding("s in L[overab]")[1])
     (text, language, most, least), = defined.read
     result = domain_relations.check_definition(text, language, most, least, defined.alphabet)
-    assert result["status"] == "assumed" and result["corroboration"]["disagreed"] == 0
+    assert result["status"] == "assumed" and _agreed_on_every_value(result)
     assert result["artefact"]["strings skipped"] == 0
     assert result["artefact"]["skipped"] == []
 
@@ -147,7 +148,7 @@ def test_a_right_definition_with_a_literal_still_proves(served):
     row = _row('L[short] disjoint {"a-xyz"}')
     assert row.verdict == "proven", (row.verdict, row.note, row.sketch)
     assert _definitions(row)["L[short]"]["status"] == "assumed"
-    assert _definitions(row)["L[short]"]["corroboration"]["disagreed"] == 0
+    assert _agreed_on_every_value(_definitions(row)["L[short]"])
 
 
 def test_the_literal_is_compared_by_the_check_itself(served):
@@ -156,7 +157,7 @@ def test_the_literal_is_compared_by_the_check_itself(served):
     defined = domain_relations.defined_bound(parse_binding("s in L[tail]")[1])
     (text, language, most, least), = defined.read
     plain = domain_relations.check_definition(text, language, most, least, defined.alphabet)
-    assert plain["status"] == "assumed" and plain["corroboration"]["disagreed"] == 0
+    assert plain["status"] == "assumed" and _agreed_on_every_value(plain)
     with_literal = domain_relations.check_definition(text, language, most, least,
                                                      defined.alphabet, literals=("a-xyz",))
     assert with_literal["status"] == "refuted"

@@ -12,6 +12,7 @@ import pytest
 
 import _text_validators as T
 from mathema.languages import register_language, unregister_language
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 
 pytest.importorskip("z3")
 
@@ -84,7 +85,7 @@ def test_an_honest_language_of_texts_is_still_proven(fn, text):
     assert row.verdict == "proven", (row.verdict, row.note, row.sketch)
     texts = row.meta["mathema.assumptions"]["texts"]
     assert {"statement": "L[as] holds only texts", "status": "assumed"}.items() <= texts[0].items()
-    assert texts[0]["corroboration"]["disagreed"] == 0
+    assert _agreed_on_every_value(texts[0])
 
 
 def test_the_refusal_names_the_value_that_is_no_text():

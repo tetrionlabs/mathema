@@ -11,6 +11,7 @@ from mathema.conjecture import check_conjectures, claim, language_definition_sta
 from mathema.domain import parse_binding
 from mathema.domain_relations import defined_bound
 from mathema.languages import StringLanguage, register_language, unregister_language
+from mathema.domain_relations import agreed_on_every_value as _agreed_on_every_value
 
 pytest.importorskip("z3")
 
@@ -66,7 +67,7 @@ def test_the_term_is_read_and_decides_a_relation(name):
     assert row.verdict == "proven", (row.verdict, row.note)
     statuses = {a["status"] for a in row.meta["mathema.assumptions"]["definitions"]}
     assert statuses == {"assumed"}
-    assert all(a["corroboration"]["disagreed"] == 0
+    assert all(_agreed_on_every_value(a)
                for a in row.meta["mathema.assumptions"]["definitions"])
 
 
