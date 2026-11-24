@@ -1,0 +1,34 @@
+mathema.lexicon.clamp:
+  claims:
+    - name: the_result_is_inside_the_interval
+      statement: 'for x in [-10, 10], lo in [0, 1], hi in [2, 3], lo <= f(x, lo, hi) <= hi'
+    - name: the_result_is_inside_any_ordered_interval
+      statement: 'for x in [-1000, 1000], lo in [-1000, 1000], hi in [-1000, 1000], assuming lo <= hi, lo <= f(x, lo, hi) <= hi'
+    - name: clamping_twice_is_clamping_once
+      statement: 'for x in [-10, 10], lo in [0, 1], hi in [2, 3], f(f(x, lo, hi), lo, hi) == f(x, lo, hi)'
+    - name: a_value_inside_is_unchanged
+      statement: 'for x in [1, 2], lo in [0, 1], hi in [2, 3], f(x, lo, hi) == x'
+mathema.lexicon.withdraw:
+  claims:
+    - name: the_new_balance_is_the_balance_less_the_amount
+      statement: 'for balance in [0, 1000], amount in [0, 100], assuming amount <= balance, f(balance, amount) == balance - amount'
+    - name: the_new_balance_where_every_withdrawal_is_funded
+      statement: 'for balance in [100, 1000], amount in [0, 100], f(balance, amount) == balance - amount'
+    - name: the_new_balance_is_never_negative
+      statement: 'for balance in [100, 1000], amount in [0, 100], f(balance, amount) >= 0'
+    - name: an_amount_above_the_balance_is_refused
+      statement: 'for balance in [0, 100], amount in (100, 200], raises(f(balance, amount), ValueError)'
+mathema.lexicon.percent_to_fraction:
+  claims:
+    - name: a_percentage_is_a_hundredth_part
+      statement: 'for percent in [0, 100], f(percent) == percent / 100'
+mathema.lexicon.fraction_to_growth_factor:
+  claims:
+    - name: the_factor_is_one_more_than_the_fraction
+      statement: 'for fraction in [0, 1], f(fraction) == 1 + fraction'
+mathema.lexicon.growth_factor_pipeline:
+  claims:
+    - name: the_pipeline_is_the_reference
+      statement: 'let g = mathema.lexicon.growth_factor_reference, f =:= g'
+    - name: the_pipeline_is_its_stages_composed
+      statement: 'let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, for percent in [0, 100], f(percent) == load(transform(percent))'
