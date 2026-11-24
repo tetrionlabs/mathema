@@ -437,10 +437,14 @@ def test_a_proven_safety_claim_falsifies_its_negation(fn, text):
     assert p.verdict == "falsified", (p.verdict, p.sketch, p.note)
 
 
-def test_no_witness_leaves_the_negation_undecided():
-    # no call in [0, 5] writes, and the else is reachable only at nan
+def test_a_write_only_a_nan_reaches_is_witnessed_at_nan():
+    # no number in [0, 5] takes the else; nan, which the domain admits, does
     p = _row(else_a_nan_takes, "for x in [0, 5], not is_state_safe(f)")
-    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "x = nan" in p.sketch, p.sketch
+
+
+def test_no_witness_leaves_the_negation_undecided():
     # the result never reads what the call wrote: two calls agree
     p = _row(writes_and_returns_the_same,
              "for x in [0, 1], not is_deterministic(f)")

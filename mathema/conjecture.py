@@ -201,6 +201,138 @@ def _non_real_literal_args(text: str) -> list:
     return found
 
 
+def _passes_a_named_value(node) -> bool:
+    """Whether an argument is the literal `None`, or nan as written."""
+    return (isinstance(node, ast.Constant) and node.value is None
+            or _passes_nan(node))
+
+
+def _named_value_arguments(text: str, params: list) -> "dict | None":
+    """Intent:
+        How the `f(...)` calls in `text` pass `None` or nan as written:
+        `{param: [every argument some call passes for it]}` for each
+        parameter some call passes one of them to. None when a call
+        passes `...`, passes an argument where no named parameter takes
+        it, or stars its arguments.
+    """
+    try:
+        tree = ast.parse(text or "0", mode="eval")
+    except SyntaxError:
+        return None
+    passed: dict = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) \
+                or any(k.arg is None for k in node.keywords):
+            return None
+        pairs = [*zip(params, node.args),
+                 *((k.arg, k.value) for k in node.keywords)]
+        if len(node.args) > len(params):
+            return None
+        for p, arg in pairs:
+            if isinstance(arg, ast.Constant) and arg.value is Ellipsis:
+                return None
+            if p not in params:
+                return None
+            passed.setdefault(p, []).append(arg)
+    return {p: args for p, args in passed.items()
+            if any(_passes_a_named_value(a) for a in args)}
+
+
+def _never_reads(fn, facts, param: str) -> bool:
+    """Intent:
+        Whether the source shows `fn`'s result cannot depend on what is
+        passed for `param`: `fn` is a plain function with no wrapper
+        and no decorator, `param` is an ordinary named parameter, its
+        name appears nowhere in the body or in a default, and the body
+        names none of `locals`, `vars`, `eval`, `exec`, `globals`,
+        `dir`.
+    """
+    from ._examine import _project_source
+    if not inspect.isfunction(fn) or hasattr(fn, "__wrapped__") \
+            or getattr(fn, "__mathema_facts__", None) is not None:
+        return False
+    try:
+        tree = _project_source(fn)
+    except Exception:
+        return False
+    if not isinstance(tree, ast.FunctionDef) or tree.decorator_list:
+        return False
+    named = {a.arg for a in (*tree.args.posonlyargs, *tree.args.args,
+                             *tree.args.kwonlyargs)}
+    if param not in named or param not in (facts.params or ()):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in (
+                param, "locals", "vars", "eval", "exec", "globals", "dir"):
+            return False
+        if isinstance(node, (ast.Global, ast.Nonlocal)) \
+                and param in node.names:
+            return False
+    return True
+
+
+def _named_value_call(ctx: "_ClaimContext", fn, facts, assumption, statement,
+                      note):
+    """Intent:
+        The exact reading of a claim whose calls pass `None` or nan as
+        written, a named value and not a real number. "unread" when
+        every parameter given one is a parameter the function never
+        reads (`_never_reads`): the result does not depend on it, and
+        derive reads the rest of the claim as it does any other. A
+        proven row when the claim binds a finite domain and visiting
+        every point of it, each call run with the named value passed as
+        itself (`_brute_force.brute_force_proof`), proves it. None
+        otherwise: a call passing `...`, a claim over other functions,
+        a literal with more digits than a double carries, or a sweep
+        that does not prove it, which the probe decides.
+    """
+    cj = ctx.cj
+    if ctx.extra or cj.negated or overlong_literals(cj.raw or ""):
+        return None
+    passed: dict = {}
+    for text in (cj.lhs, cj.rhs or ""):
+        found = _named_value_arguments(text, list(facts.params))
+        if found is None:
+            return None
+        for p, args in found.items():
+            passed.setdefault(p, []).extend(args)
+    if not passed:
+        return None
+    family = ctx.family
+    if family is not None and family.routes().get("derive") is not None:
+        return None
+    if cj.relation in routes.examine_predicates() or cj.relation == "raises":
+        return None
+    if all(all(_passes_a_named_value(a) for a in args)
+           and _never_reads(fn, facts, p)
+           for p, args in passed.items()):
+        return "unread"
+    from ._brute_force import brute_force_proof
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+    from .runtime_types import calling
+    try:
+        swept = _with_timeout(
+            lambda: brute_force_proof(cj, calling(fn, facts), facts,
+                                      ctx.cj_domain or {}, {},
+                                      assumption=assumption or [],
+                                      resolution=ctx.missing),
+            EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    if swept is None or swept.status != "proven":
+        return None
+    mechanism = swept.meta.get("mathema.derive_route", "brute_force")
+    capped = mechanism.endswith(":within_float64")
+    return Probe(cj.name, statement, "proven", sketch=swept.sketch,
+                 note=(f"{note}; {swept.sketch}".lstrip("; ")
+                       if capped else note),
+                 condition=swept.quantifier, route=f"derive:{mechanism}",
+                 meta=_provenance_meta(swept))
+
+
 def _names_in_text(text: str) -> set:
     """The bare names a claim expression reads (its variables, not the
     functions it calls)."""
@@ -10806,12 +10938,14 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
         every parameter at its bound's upper end, at its lower end, at
         its midpoint, and at one ordinary value (`_an_ordinary_value`),
         a parameter with no interval at its ordinary value throughout;
+        then each parameter at each missing value its bound admits
+        (`domain.admitted`, realised: nan, None);
         then, for each number an `if` test in `tests` (sources) compares
         a parameter with, that parameter at the number and at the float
         on each side of it, where its bound admits them. Empty when some
         parameter has no ordinary value.
     """
-    from .domain import domain_contains
+    from .domain import ABSENT, admitted, domain_contains, realise_sentinel
     base = {p: _an_ordinary_value((cj_domain or {}).get(p))
             for p in facts.params}
     if any(v is _NO_VALUE for v in base.values()):
@@ -10836,6 +10970,20 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
             points.append(point)
     if base not in points:
         points.append(base)
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        try:
+            absent, holes = admitted(bound)
+            missing = [v for s in ([ABSENT] if absent else []) + list(holes)
+                       for v in realise_sentinel(s)]
+        except Exception:
+            continue
+        for value in missing:
+            point = {**base, p: value}
+            if not any(_same_point(point, seen) for seen in points):
+                points.append(point)
     for source in sorted(tests):
         try:
             tree = ast.parse(source, mode="eval")
@@ -10865,29 +11013,41 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
     return points[:24]
 
 
-def _negation_witnessed(ctx, fn, facts):
+def _same_point(a: dict, b: dict) -> bool:
+    """Whether two points hold the same values, nan equal to nan."""
+    return a.keys() == b.keys() and all(
+        a[k] is b[k] or a[k] == b[k]
+        or (isinstance(a[k], float) and isinstance(b[k], float)
+            and a[k] != a[k] and b[k] != b[k])
+        for k in a)
+
+
+def _negation_witnessed(ctx, fn, facts, disproof=None):
     """Intent:
         The proof of `not is_state_safe(f)` or `not is_deterministic(f)`
-        by a witness that was run, or None when none was found. Each
-        says a call exists: one after which a module-level value the
-        examination names as written has changed, or two calls with the
-        same arguments whose results differ. The calls are made at a few
-        points of the claim's domain (`_witness_points`), and the sketch
-        names the point and what was seen.
+        by a witness that was run, a result that says why none could be
+        looked for, or None when none was found. Each claim says a call
+        exists: one after which a module-level value the examination
+        names as written has changed, or two calls with the same
+        arguments whose results differ. The calls are made in a child
+        process (`_contained.witness`) at a few points of the claim's
+        domain (`_witness_points`); the sketch names the point and what
+        the child saw, and nothing in this process is called or changed.
 
     Notes:
         The function is run only when its examination read everything
         and found no write other than to module-level values of its
         project and draws from the shared random generator, so that the
-        calls change nothing else. A call that raises is no witness.
+        calls change nothing outside the child. A call that raises is
+        no witness. A function no child can import is not called: its
+        negation is read from the source where the write is the first
+        statement of its body (`_first_statement_writes`), and is
+        undecided with the reason otherwise.
     """
-    import copy
-    import sys
-
+    from . import _contained
     from ._examine import _unwrapped, examine
     from .claim_families import _generator_parameter
     from .gates import _fmt_point
-    from .runtime_types import calling
     from .symbolic._proof_support import ProofResult
     kind = getattr(ctx.family, "_base_name", None)
     if kind not in ("is_state_safe", "is_deterministic"):
@@ -10901,74 +11061,165 @@ def _negation_witnessed(ctx, fn, facts):
         return None
     cj_domain = ctx.cj_domain or {}
     names = list(facts.params)
-
-    own = getattr(_unwrapped(fn), "__globals__", None) or {}
-
-    def held():
-        out = {}
-        for module, name in sorted(effects.module_writes):
-            try:
-                scope = (own if own.get("__name__") == module
-                         else vars(sys.modules[module]))
-                out[(module, name)] = copy.deepcopy(scope[name])
-            except Exception:
-                return None
-        return out
-
-    run = calling(fn, facts, _declared_elements(cj_domain))
-    for point in _witness_points(facts, cj_domain, effects.own_tests):
-        args = [point[p] for p in names]
-        where = _fmt_point(point, names) or "the call with no arguments"
-        try:
-            if kind == "is_state_safe":
-                before = held()
-                if not before:
-                    return None
-                run(*copy.deepcopy(args))
-                after = held()
-                if after is None:
-                    return None
-                changed = [k for k in before if _differs(before[k], after[k])]
-                if not changed:
-                    continue
-                _module, name = changed[0]
-                seen = (f"the call at {where} was run, and the module-level "  # :draft
-                        f"{name} was {_short(before[changed[0]])} before it "
-                        f"and {_short(after[changed[0]])} after it")
-            else:
-                first = run(*copy.deepcopy(args))
-                second = run(*copy.deepcopy(args))
-                if not _differs(first, second):
-                    continue
-                seen = (f"two calls at {where} were run, and returned "  # :draft
-                        f"{_short(first)} and {_short(second)}")
-        except Exception:
-            continue
+    meta = dict(getattr(disproof, "meta", None) or {})
+    why_not = _contained.not_importable(fn)
+    if why_not is not None:
+        shown = (disproof.counterexample or disproof.sketch or ""
+                 if disproof is not None else "")
+        if kind == "is_state_safe" and _first_statement_writes(fn):
+            return ProofResult(
+                "proven",
+                sketch=("the positive claim is falsified, and that "
+                        "evidence proves the negation: " + shown
+                        + "; read from the source and not run: the write "  # :draft
+                        "is the first statement of f, and f cannot be "
+                        f"imported in a child process ({why_not})"),
+                meta=meta)
         return ProofResult(
-            "proven",
-            sketch=f"proven by a witness: {seen}",  # :draft
-            meta={"mathema.corroboration": "reproduced",
-                  "mathema.witness_executed": True})
-    return None
-
-
-def _differs(a, b) -> bool:
-    """Whether two values are seen to differ: unequal, and not both the
-    same not-a-number. A comparison that raises or gives no plain truth
-    value shows no difference."""
+            "undecided",
+            sketch=(f"f cannot be imported in a child process ({why_not}), "  # :draft
+                    "so no call was run to witness the negation, and the "
+                    "positive claim is falsified only from the source: "
+                    + shown),
+            meta=meta)
+    points = _witness_points(facts, cj_domain, effects.own_tests)
+    if not points:
+        return None
+    watched = set(effects.module_writes)
+    own = _unwrapped(fn)
+    rebinds = f"{getattr(own, '__name__', '')} rebinds the module-level "
+    for site in effects.writes:
+        # `global n; n += 1` in f itself: the name is in f's own module
+        if site.text.startswith(rebinds) and getattr(own, "__module__", None):
+            watched.add((own.__module__, site.text[len(rebinds):]))
+    seen = _contained.witness(
+        fn, kind, [[point[p] for p in names] for point in points],
+        sorted(watched), _declared_elements(cj_domain))
+    if "failed" in seen:
+        return ProofResult(
+            "undecided",
+            sketch=("no witness of the negation was seen: "  # :draft
+                    + str(seen["failed"])),
+            meta=meta)
     try:
-        if isinstance(a, float) and isinstance(b, float) \
-                and a != a and b != b:
-            return False
-        return bool(a != b)
+        point = points[seen["point"]] if seen.get("seen") else None
+    except (IndexError, TypeError):
+        point = None
+    if point is None:
+        return None
+    where = _fmt_point(point, names) or "the call with no arguments"
+    if kind == "is_state_safe" and seen.get("seen") == "write":
+        said = (f"the call at {where} was run in a child process, and "  # :draft
+                f"the module-level {_shown(seen.get('name'))} was "
+                f"{_shown(seen.get('before'))} before it and "
+                f"{_shown(seen.get('after'))} after it")
+    elif kind == "is_deterministic" and seen.get("seen") == "results":
+        said = (f"two calls at {where} were run in a child process, and "  # :draft
+                f"returned {_shown(seen.get('first'))} and "
+                f"{_shown(seen.get('second'))}")
+    else:
+        return None
+    return ProofResult(
+        "proven",
+        sketch=f"proven by a witness: {said}",  # :draft
+        meta={"mathema.corroboration": "reproduced",
+              "mathema.witness_executed": True})
+
+
+def _shown(text) -> str:
+    """A text a child process sent back, as one line no longer than a
+    shown value is."""
+    from ._contained import SHOWN
+    text = " ".join(str(text).split())
+    return text if len(text) <= SHOWN else text[:SHOWN - 3] + "..."
+
+
+def _first_statement_writes(fn) -> bool:
+    """Intent:
+        Whether the source shows that every call of `fn` writes a
+        module-level value before anything else can happen: `fn` is a
+        plain function with no wrapper, and the first statement of its
+        body (after a docstring, `global` and `pass`) is
+        `NAME.append(arg)` on a module-level list, or `NAME += k` under
+        `global NAME` for a module-level integer and a non-zero integer
+        literal `k`. `arg` is a parameter or a literal, and nothing in
+        the function binds `NAME`.
+
+    Notes:
+        The value's type is the one the module holds when it is read.
+    """
+    from ._examine import _project_source
+    if not inspect.isfunction(fn) or hasattr(fn, "__wrapped__") \
+            or inspect.isgeneratorfunction(fn) \
+            or inspect.iscoroutinefunction(fn) \
+            or inspect.isasyncgenfunction(fn):
+        return False
+    try:
+        tree = _project_source(fn)
     except Exception:
         return False
+    if not isinstance(tree, ast.FunctionDef) or tree.decorator_list:
+        return False
+    params = {a.arg for a in (*tree.args.posonlyargs, *tree.args.args,
+                              *tree.args.kwonlyargs)}
+    every = set(params)
+    for extra in (tree.args.vararg, tree.args.kwarg):
+        if extra is not None:
+            every.add(extra.arg)
+    declared_global: set = set()
+    body = list(tree.body)
+    if body and isinstance(body[0], ast.Expr) \
+            and isinstance(body[0].value, ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]
+    first = None
+    for stmt in body:
+        if isinstance(stmt, ast.Global):
+            declared_global.update(stmt.names)
+        elif not isinstance(stmt, ast.Pass):
+            first = stmt
+            break
+    if first is None:
+        return False
+    stored = {node.id for node in ast.walk(tree)
+              if isinstance(node, ast.Name)
+              and isinstance(node.ctx, (ast.Store, ast.Del))}
+    bound = {node.name for node in ast.walk(tree) if node is not tree
+             and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef))}
+    imported = {(alias.asname or alias.name).split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.Import, ast.ImportFrom))
+                for alias in node.names}
+    scope = getattr(fn, "__globals__", None) or {}
+    free = set(getattr(fn.__code__, "co_freevars", ()))
 
+    def module_level(name: str) -> bool:
+        return (name in scope and name not in every and name not in free
+                and name not in bound and name not in imported)
 
-def _short(value, limit: int = 60) -> str:
-    """`repr(value)`, cut to `limit` characters."""
-    text = repr(value)
-    return text if len(text) <= limit else text[:limit - 3] + "..."
+    if isinstance(first, ast.Expr) and isinstance(first.value, ast.Call):
+        call = first.value
+        target = call.func
+        if not (isinstance(target, ast.Attribute) and target.attr == "append"
+                and isinstance(target.value, ast.Name)
+                and len(call.args) == 1 and not call.keywords):
+            return False
+        name, arg = target.value.id, call.args[0]
+        if not module_level(name) or name in stored \
+                or name in declared_global or type(scope[name]) is not list:
+            return False
+        return (isinstance(arg, ast.Constant)
+                or isinstance(arg, ast.Name) and arg.id in params
+                and arg.id not in stored)
+    if isinstance(first, ast.AugAssign) and isinstance(first.op, ast.Add) \
+            and isinstance(first.target, ast.Name):
+        name, step = first.target.id, first.value
+        return (name in declared_global and module_level(name)
+                and type(scope[name]) is int
+                and isinstance(step, ast.Constant)
+                and type(step.value) is int and step.value != 0)
+    return False
 
 
 def _provenance_meta(proof) -> dict:
@@ -11094,7 +11345,7 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
                                   "the positive claim is proven, so its "
                                   "negation is falsified: " + (proof.sketch or ""))
         elif proof.status == "disproven" and not _executed_disproof(proof):
-            proof = (_negation_witnessed(ctx, fn, facts)
+            proof = (_negation_witnessed(ctx, fn, facts, proof)
                      or _unexecuted_negation(proof))
         elif proof.status == "disproven":
             proof = replace_proof(proof, "proven",
@@ -12477,7 +12728,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         return None
     non_real = sorted(set(_non_real_literal_args(cj.lhs)
                           + _non_real_literal_args(cj.rhs or "")))
-    if non_real:
+    named = (_named_value_call(ctx, fn, facts, assumption, statement, note)
+             if non_real else None)
+    if isinstance(named, Probe):
+        return named
+    if non_real and named != "unread":
         # a call passing None is one concrete call that
         # derive's real symbols do not model, so running it decides
         ctx.derive_undecided = Probe(
