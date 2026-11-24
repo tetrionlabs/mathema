@@ -4,7 +4,12 @@
 of `TRUE` is a claim that is true of its function, with the verdict
 the release before these fixes gave it: the verdict now is at least as
 strong. Each row of `FALSE` is a false claim one step beside a true
-one, and stays falsified.
+one, and stays falsified. Each row of `NOT_PROVEN` is a claim one step
+beside a proof, where the source does not show the write runs or the
+domain holds a value the function's guard refuses, and is not proven. Each row of `EXCEPTIONS` is a true claim
+that was proven before and is unknown now, with the reason the row
+gives: the function cannot be run contained, or the run did not finish
+within its budget.
 
 Three rows were proven before the fixes, lost to the reading of a
 `None` or nan argument, and are proven again. `for x in [0, 1],
@@ -21,10 +26,41 @@ from mathema.conjecture import check_conjectures, claim
 _STRENGTH = ("falsified", "unknown", "holds", "proven")
 
 
+_log: list = []
+_HERE = "test_no_true_proof_is_lost_by_the_soundness_fixes"
+_SOURCE = "test_a_write_every_call_makes_is_read_from_the_source"
+_NUMBERS = "test_a_parameter_the_claim_binds_to_numbers_is_drawn_as_a_number"
+_LET = "test_a_let_bound_function_passed_as_an_argument_is_itself"
+_CHILD = "test_a_witness_call_runs_in_a_child_process"
+
+
 def one_unless_y_is_a_number(x, y=0.0):
     if y != y:
         return 1.0
     return 0.0
+
+
+def _local_functions() -> dict:
+    def appends_past_a_half(x):
+        if x > 0.5:
+            _log.append(x)
+        return x * 2.0
+
+    def appends_where_the_square_is_large(x):
+        if x * x > 100.0:
+            _log.append(x)
+        return x * 2.0
+
+    def draws_locally(x):
+        import random
+        return x + random.random()
+
+    return {fn.__name__: fn for fn in (
+        appends_past_a_half, appends_where_the_square_is_large,
+        draws_locally)}
+
+
+_LOCAL = _local_functions()
 
 
 #: module, function, claim, the verdict before the fixes
@@ -142,6 +178,42 @@ TRUE = [
     ('test_unreachable_code_is_read_only_from_a_parameter_against_a_literal',
      'else_a_nan_takes',
      'for x in [0, 5], not is_state_safe(f)', 'proven'),
+    # a write read from the source where no call is run
+    (_SOURCE, 'sets_the_environment',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'imports_then_sets_the_environment',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'opens_to_write',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'opens_to_append',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'sets_past_a_half',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'sets_past_a_half',
+     'not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'sets_in_the_else',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_SOURCE, 'sets_in_a_band',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_CHILD, 'sets_the_environment',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_CHILD, 'writes_a_file',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    (_HERE, 'appends_past_a_half',
+     'for x in [0, 1], not is_state_safe(f)', 'proven'),
+    # a marked parameter the claim binds to numbers
+    (_NUMBERS, 'plus_one_finite',
+     'for x in [0, 5], f(x) == x + 1', 'falsified'),
+    (_NUMBERS, 'plus_one_finite',
+     'for x in {0, 1, 2.5}, f(x) == x + 1', 'falsified'),
+    (_NUMBERS, 'plus_one_finite',
+     'for x in R, f(x) == x + 1', 'falsified'),
+    # a let-bound function passed as an argument
+    (_LET, 'describe',
+     f'let stage = {_LET}.halve, describe(stage) == "(float) -> float"',
+     'falsified'),
+    (_LET, 'halve',
+     f'let g = {_LET}.also_halve, for x in [0, 1], f(x) == g(x)', 'proven'),
     # test_verdicts_beside_the_false_proofs_fixed
     ('test_verdicts_beside_the_false_proofs_fixed',
      'one_at_nan',
@@ -210,6 +282,39 @@ FALSE = [
     ("test_no_true_proof_is_lost_by_the_soundness_fixes",
      "one_unless_y_is_a_number",
      "for x in {1}, f(x, nan) == 0"),
+    (_SOURCE, "sets_past_a_half",
+     "for x in [0, 0.25], not is_state_safe(f)"),
+    (_NUMBERS, "plus_one_finite", "for x in [0, 5], f(x) == x + 2"),
+    (_LET, "describe",
+     f'let stage = {_LET}.halve, describe(stage) == "(int) -> int"'),
+]
+
+#: module, function, claim: the source does not show the write runs, or
+#: the domain holds a value the function's guard refuses
+NOT_PROVEN = [
+    (_SOURCE, "sets_under_arithmetic",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SOURCE, "sets_after_a_division",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SOURCE, "sets_after_an_early_return",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_SOURCE, "sets_after_a_rebinding",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_HERE, "appends_where_the_square_is_large",
+     "for x in [0, 1], not is_state_safe(f)"),
+    (_NUMBERS, "plus_one_finite", "for x in {0, inf}, f(x) == x + 1"),
+    (_NUMBERS, "plus_one_finite", "for x in [0, oo], f(x) == x + 1"),
+]
+
+#: module, function, claim, the verdict before the fixes, the reason
+#: the row gives now
+EXCEPTIONS = [
+    (_HERE, "draws_locally",
+     "for x in [0, 1], not is_deterministic(f)", "proven",
+     "f cannot be run contained (it is defined inside another function"),
+    (_CHILD, "writes_then_never_returns",
+     "for x in [0, 1], not is_state_safe(f)", "proven",
+     "the run did not finish within its budget"),
 ]
 
 
@@ -218,8 +323,10 @@ def _strength(verdict: str) -> int:
 
 
 def _row(module, function, text):
-    fn = (globals()[function] if module == __name__.rpartition(".")[2]
-          else getattr(importlib.import_module(module), function))
+    if module == _HERE:
+        fn = _LOCAL.get(function) or globals()[function]
+    else:
+        fn = getattr(importlib.import_module(module), function)
     rows = check_conjectures(fn, [claim(text)])
     return next(r for r in rows if not r.name.endswith("[float]"))
 
@@ -237,6 +344,24 @@ def test_a_false_claim_beside_a_true_one_stays_falsified(module, function,
                                                          text):
     p = _row(module, function, text)
     assert p.verdict == "falsified", (p.verdict, p.route, p.sketch, p.note)
+
+
+@pytest.mark.parametrize("module, function, text", NOT_PROVEN)
+def test_a_claim_beside_a_proof_is_not_proven(
+        module, function, text):
+    p = _row(module, function, text)
+    assert p.verdict != "proven", (p.verdict, p.route, p.sketch, p.note)
+
+
+@pytest.mark.parametrize("module, function, text, before, reason", EXCEPTIONS)
+def test_a_recorded_exception_is_unknown_with_its_reason(
+        module, function, text, before, reason, monkeypatch):
+    from mathema import _contained
+    monkeypatch.setattr(_contained, "FAILSAFE_WALL_CLOCK_SECONDS", 4)
+    p = _row(module, function, text)
+    assert before == "proven"
+    assert p.verdict == "unknown", (p.verdict, p.route, p.sketch, p.note)
+    assert reason in (p.note or ""), p.note
 
 
 def test_the_proofs_a_none_or_nan_argument_lost_are_proven_again():

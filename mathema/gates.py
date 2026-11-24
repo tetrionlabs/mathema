@@ -75,6 +75,34 @@ def _integer_bound(bound) -> bool:
         return False
 
 
+def passed_not_called(lhs: str, rhs: "str | None", names) -> frozenset:
+    """Intent:
+        The names among `names` (a claim's `let`-bound functions) that
+        the claim's sides pass as an argument of a call and never call:
+        `stage` in `describe(stage) == "(float) -> float"`. Such a name
+        stands for the bound object itself. A name that is called
+        anywhere (`g(x)`, `h(g, g(x))`), or only stands on a side of
+        its own (`f =:= g`), is not one.
+    """
+    import ast
+    passed: set = set()
+    called: set = set()
+    for text in (lhs, rhs):
+        try:
+            tree = ast.parse(text or "0", mode="eval")
+        except (SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name):
+                called.add(node.func.id)
+            for arg in [*node.args, *(k.value for k in node.keywords)]:
+                if isinstance(arg, ast.Name):
+                    passed.add(arg.id)
+    return frozenset((passed - called) & set(names or ()))
+
+
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                      cap=None, reach=None, sequences=False,
                      exact=False, holes=None, exact_premises=False):
@@ -390,9 +418,12 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                       **record_fills(fn, [p for p in kinds if not cj_domain.get(p)])}
     from ._missing_policy import Presence
     executed.presence = Presence(dict(kinds), {p: cj_domain.get(p) for p in kinds})
+    as_itself = passed_not_called(cj.lhs, cj.rhs, original_bound)
     base_env = {"f": _tag(fn_call, "f"), F_CALL: _tag(fn_call, "f"), **_SAFE_FUNCS,
                 **_VECTOR_FUNCS, **MATH_CONSTANTS,
-                **{name: _tag(v, name) for name, v in bound_funcs.items()},
+                **{name: (original_bound[name] if name in as_itself
+                          else _tag(v, name))
+                   for name, v in bound_funcs.items()},
                 **{name: (_bare(cj.tolerance, f"{name} in the claim")
                           if cj.tolerance is not None else 1e-9)
                    for name in eps_names},

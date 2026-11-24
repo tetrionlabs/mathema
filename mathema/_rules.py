@@ -34,6 +34,13 @@ value  what it changed
 2      the unreachable code reading: a write is in unreachable code
        only under a constant test, or a test of one parameter that
        nothing binds again against numeric literals
+2      the source reading of a write: where no call is run, a
+       negated `is_state_safe` is proven from a write the source
+       shows a call making
+2      the number draw: a parameter the claim binds to numbers is
+       drawn as a number, whatever marker its annotation carries
+2      the let argument: a `let`-bound function passed as an
+       argument is the function itself
 =====  ==========================================================
 
 A release raises the number once. Each fix in that release that could

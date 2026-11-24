@@ -23,8 +23,10 @@ import sys
 
 from ._timeout import EXTENSIVE_TIMEOUT_SECONDS
 
-#: the wall-clock limit of one child, start-up and import included
-WITNESS_SECONDS = EXTENSIVE_TIMEOUT_SECONDS
+# :draft a run's limit is a budget of work; until work is counted, this
+# wall clock, start-up and import included, is the failsafe that stops
+# a child that does not finish
+FAILSAFE_WALL_CLOCK_SECONDS = EXTENSIVE_TIMEOUT_SECONDS
 
 #: the longest `repr` the child sends back for one value
 SHOWN = 60
@@ -99,7 +101,7 @@ def witness(fn, kind: str, points: list, watched: list,
         "before": text, "after": text}`, `{"seen": "results", "point":
         i, "first": text, "second": text}`, `{"seen": None}` when no
         point showed it, or `{"failed": reason}`: the child ran past
-        `WITNESS_SECONDS`, could not import the module, or ended
+        the failsafe wall clock, could not import the module, or ended
         without an answer.
 
     Notes:
@@ -116,14 +118,14 @@ def witness(fn, kind: str, points: list, watched: list,
                "file": os.path.abspath(module.__file__),
                "qualname": fn.__qualname__, "kind": kind,
                "watched": [list(w) for w in watched], "packed": packed}
-    limit = WITNESS_SECONDS
+    limit = FAILSAFE_WALL_CLOCK_SECONDS
     try:
         done = subprocess.run([sys.executable, "-c", _BOOTSTRAP],
                               input=json.dumps(request), capture_output=True,
                               text=True, timeout=limit)
     except subprocess.TimeoutExpired:
-        return {"failed": f"the child process that called it ran past its "
-                          f"wall-clock limit of {limit:g} s and was stopped"}
+        return {"failed": "the run did not finish within its budget "  # :draft
+                          "and was stopped"}
     except Exception as exc:
         return {"failed": f"no child process could be started "
                           f"({type(exc).__name__})"}

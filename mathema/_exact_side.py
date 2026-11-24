@@ -192,6 +192,11 @@ def wrap(callee, exact_calls: bool = False, opaque: bool = False):
     `_Inexact`). With `opaque`, a result holding no number (a string, a
     bool, None) is kept as it is: it has no rounding to lose."""
     def call(*args, **kwargs):
+        if any(getattr(a, "_reads_exactly", False)
+               for a in (*args, *kwargs.values())):
+            # a function handed to another as an argument is the object
+            # itself, which this reading of it is not
+            raise _Inexact("a function passed as an argument")
         if exact_calls:
             result = callee(*args, **kwargs)
             if _exact_value(result) is None \
@@ -202,6 +207,7 @@ def wrap(callee, exact_calls: bool = False, opaque: bool = False):
             result = callee(*[to_float(a) for a in args],
                             **{k: to_float(v) for k, v in kwargs.items()})
         return to_exact(result)
+    call._reads_exactly = True
     return call
 
 

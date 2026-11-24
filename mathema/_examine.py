@@ -609,8 +609,11 @@ def examine(fn, generator: "str | None" = None,
         `constructing` reads `fn` as a class's `__init__`, whose first
         parameter is the object being made.
     """
-    key = (getattr(fn, "__code__", fn), _closure_ids(fn), generator,
-           constructing)
+    # two code objects with the same text at the same line are equal
+    # whatever file each is in, so the file is part of the key
+    code = getattr(fn, "__code__", fn)
+    key = (code, getattr(code, "co_filename", None), _closure_ids(fn),
+           generator, constructing)
     if key in _CACHE:
         return _CACHE[key]
     under_way = _UNDER_WAY

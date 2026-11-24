@@ -10194,6 +10194,39 @@ def _set_element(bound) -> "str | None":
     return None
 
 
+def _binds_numbers(bound) -> bool:
+    """Intent:
+        Whether a claim's binding of one parameter is a set of numbers:
+        a real interval, a finite set that lists a number, or R, Z or N
+        with no dimensions. False for no binding, a space of vectors or
+        matrices (`R^n`, `R^(n,n)`), and a language.
+    """
+    from .domain import _as_domain, is_sentinel
+    if bound is None:
+        return False
+    if isinstance(bound, list):
+        bound = tuple(bound)
+    try:
+        dom = _as_domain(bound)
+    except Exception:
+        return False
+    if dom.dims or dom.base_type not in ("R", "Z", "N"):
+        return False
+
+    def number(v) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    for piece in dom.pieces:
+        if isinstance(piece, frozenset):
+            members = [v for v in piece if not is_sentinel(v)]
+            if not all(number(v) for v in members):
+                return False
+        elif not (isinstance(piece, tuple) and len(piece) == 2
+                  and all(number(v) for v in piece)):
+            return False
+    return bool(dom.pieces) or dom.explicit_type or isinstance(bound, str)
+
+
 def _declared_elements(cj_domain) -> dict:
     """Intent:
         The element types a claim's bindings declare for the calls'
@@ -11039,9 +11072,10 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
         and found no write other than to module-level values of its
         project and draws from the shared random generator, so that the
         calls change nothing outside the child. A call that raises is
-        no witness. A function no child can import is not called: its
-        negation is read from the source where the write is the first
-        statement of its body (`_first_statement_writes`), and is
+        no witness. A function that writes anything else, or that no
+        child can import, is not called: `not is_state_safe(f)` is then
+        read from the source where it shows a call that writes
+        (`_write_read_as_run`), and a function no child can import is
         undecided with the reason otherwise.
     """
     from . import _contained
@@ -11054,33 +11088,44 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
         return None
     effects = examine(fn, _generator_parameter(fn, facts)
                       if kind == "is_state_safe" else None)
-    if effects.unknowns or effects.unknown_writes or not all(
-            "module-level" in site.text
-            or "the shared random generator" in site.text
-            for site in effects.writes):
-        return None
+    runnable = not (effects.unknowns or effects.unknown_writes) and all(
+        "module-level" in site.text
+        or "the shared random generator" in site.text
+        for site in effects.writes)
     cj_domain = ctx.cj_domain or {}
     names = list(facts.params)
     meta = dict(getattr(disproof, "meta", None) or {})
     why_not = _contained.not_importable(fn)
-    if why_not is not None:
+    if why_not is not None or not runnable:
         shown = (disproof.counterexample or disproof.sketch or ""
                  if disproof is not None else "")
-        if kind == "is_state_safe" and _first_statement_writes(fn):
+        read = (_write_read_as_run(fn, facts, effects, cj_domain)
+                if kind == "is_state_safe" else None)
+        if read is not None:
+            what, conditions, point = read
+            if conditions:
+                under = " and ".join(
+                    f"`{source}`" if taken else f"`not ({source})`"
+                    for source, taken in conditions)
+                where = (f"under {under}, which holds at "
+                         f"{_fmt_point(point, names)} in the claim's domain")
+            else:
+                where = "which every call executes"
             return ProofResult(
                 "proven",
                 sketch=("the positive claim is falsified, and that "
                         "evidence proves the negation: " + shown
-                        + "; read from the source and not run: the write "  # :draft
-                        "is the first statement of f, and f cannot be "
-                        f"imported in a child process ({why_not})"),
+                        + f"; read from the source and not run: f {what} "  # :draft
+                        f"as the first statement of its body, {where}"),
                 meta=meta)
+        if why_not is None:
+            return None
         return ProofResult(
             "undecided",
-            sketch=(f"f cannot be imported in a child process ({why_not}), "  # :draft
-                    "so no call was run to witness the negation, and the "
-                    "positive claim is falsified only from the source: "
-                    + shown),
+            sketch=(f"f cannot be run contained ({why_not}, so no child "  # :draft
+                    "process can import it), no call was run to witness "
+                    "the negation, and the positive claim is falsified "
+                    "only from the source: " + shown),
             meta=meta)
     points = _witness_points(facts, cj_domain, effects.own_tests)
     if not points:
@@ -11134,53 +11179,126 @@ def _shown(text) -> str:
     return text if len(text) <= SHOWN else text[:SHOWN - 3] + "..."
 
 
-def _first_statement_writes(fn) -> bool:
+def _write_read_as_run(fn, facts, effects, cj_domain) -> "tuple | None":
     """Intent:
-        Whether the source shows that every call of `fn` writes a
-        module-level value before anything else can happen: `fn` is a
-        plain function with no wrapper, and the first statement of its
-        body (after a docstring, `global` and `pass`) is
-        `NAME.append(arg)` on a module-level list, or `NAME += k` under
-        `global NAME` for a module-level integer and a non-zero integer
-        literal `k`. `arg` is a parameter or a literal, and nothing in
-        the function binds `NAME`.
+        `(what, conditions, point)` when the source of `fn` shows a call
+        that writes outside it, else None. `what` says the write, a
+        recognised one (`_recognised_write`) that is the first statement
+        of the body, or the first statement of the branch of an `if`
+        that is itself first, at any depth. `conditions` are the tests
+        on the way to it, as (source, True for the body or False for the
+        else), and `point` is a point of the claim's domain
+        (`_witness_points`) at which every one of them is taken, None
+        when there are no conditions: the write runs on every call.
 
     Notes:
-        The value's type is the one the module holds when it is read.
+        Before the write only a docstring, `global`, `pass` and the
+        import of a standard-library module already loaded may stand:
+        none can raise or return. A test is read only in the form the
+        unreachable-code rule reads (`_literal_test_region`: one
+        parameter nothing binds again against numeric literals, joined
+        by `and`, `or`, `not`), in the function's own body; it is
+        evaluated at the point as Python evaluates it, a float or an
+        integer against a literal.
     """
     from ._examine import _project_source
+    from .claim_families import _literal_test_region
     if not inspect.isfunction(fn) or hasattr(fn, "__wrapped__") \
             or inspect.isgeneratorfunction(fn) \
             or inspect.iscoroutinefunction(fn) \
             or inspect.isasyncgenfunction(fn):
-        return False
+        return None
     try:
         tree = _project_source(fn)
     except Exception:
-        return False
+        return None
     if not isinstance(tree, ast.FunctionDef) or tree.decorator_list:
-        return False
+        return None
+    modules: dict = {}
+    declared_global: set = set()
+
+    def first_of(body, top: bool = False):
+        body = list(body)
+        if top and body and isinstance(body[0], ast.Expr) \
+                and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            body = body[1:]
+        for stmt in body:
+            if isinstance(stmt, ast.Global):
+                declared_global.update(stmt.names)
+            elif isinstance(stmt, ast.Import) and all(
+                    "." not in a.name and a.name in sys.stdlib_module_names
+                    and a.name in sys.modules for a in stmt.names):
+                for a in stmt.names:
+                    modules[a.asname or a.name] = sys.modules[a.name]
+            elif not isinstance(stmt, ast.Pass):
+                return stmt
+        return None
+
+    def found(body, conditions, top=False):
+        first = first_of(body, top)
+        if first is None:
+            return None
+        what = _recognised_write(first, fn, tree, modules, declared_global)
+        if what is not None:
+            return what, conditions
+        if not isinstance(first, ast.If):
+            return None
+        source = ast.unparse(first.test)
+        read = _literal_test_region(source)
+        if read is None or read[0] not in effects.fixed_params \
+                or source not in effects.own_tests \
+                or source in effects.nested_tests:
+            return None
+        return (found(first.body, [*conditions, (source, True, read[0])])
+                or found(first.orelse, [*conditions, (source, False, read[0])]))
+
+    got = found(tree.body, [], top=True)
+    if got is None:
+        return None
+    what, conditions = got
+    if not conditions:
+        return what, [], None
+    for point in _witness_points(facts, cj_domain, effects.own_tests):
+        try:
+            if all(type(point[name]) in (int, float)
+                   and bool(eval(compile(source, "<test>", "eval"),
+                                 {"__builtins__": {}},
+                                 {name: point[name]})) == taken
+                   for source, taken, name in conditions):
+                return what, [(s, t) for s, t, _n in conditions], point
+        except Exception:
+            continue
+    return None
+
+
+def _recognised_write(stmt, fn, tree, modules: dict,
+                      declared_global: set) -> "str | None":
+    """Intent:
+        What a statement writes outside the call, when it is one of the
+        writes read from the source: `NAME.append(arg)` on a
+        module-level list; `NAME += k` under `global NAME` for a
+        module-level integer and a non-zero integer literal `k`;
+        `os.environ["K"] = "V"` with both texts written out;
+        `del os.environ["K"]` for a key set when it is read; and
+        `open(path, mode)` with a mode that writes or appends, as a
+        statement, the value of an assignment or the first item of a
+        `with`, `path` a text literal or a module-level text. None for
+        any other statement.
+
+    Notes:
+        `arg` is a parameter or a literal. A name is module-level when
+        nothing in the function binds it; `modules` holds the modules
+        the body's leading imports bind. Each value's type is the one
+        held when it is read.
+    """
+    import builtins
     params = {a.arg for a in (*tree.args.posonlyargs, *tree.args.args,
                               *tree.args.kwonlyargs)}
     every = set(params)
     for extra in (tree.args.vararg, tree.args.kwarg):
         if extra is not None:
             every.add(extra.arg)
-    declared_global: set = set()
-    body = list(tree.body)
-    if body and isinstance(body[0], ast.Expr) \
-            and isinstance(body[0].value, ast.Constant) \
-            and isinstance(body[0].value.value, str):
-        body = body[1:]
-    first = None
-    for stmt in body:
-        if isinstance(stmt, ast.Global):
-            declared_global.update(stmt.names)
-        elif not isinstance(stmt, ast.Pass):
-            first = stmt
-            break
-    if first is None:
-        return False
     stored = {node.id for node in ast.walk(tree)
               if isinstance(node, ast.Name)
               and isinstance(node.ctx, (ast.Store, ast.Del))}
@@ -11193,33 +11311,103 @@ def _first_statement_writes(fn) -> bool:
                 for alias in node.names}
     scope = getattr(fn, "__globals__", None) or {}
     free = set(getattr(fn.__code__, "co_freevars", ()))
+    missing = object()
+
+    def value_of(name: str):
+        """What a name read in the body holds: a leading import's
+        module, or the module-level value when nothing binds it."""
+        if name in modules and name not in stored and name not in every \
+                and name not in bound:
+            return modules[name]
+        if name in every or name in free or name in bound \
+                or name in imported or name in stored:
+            return missing
+        if name in scope:
+            return scope[name]
+        return getattr(builtins, name, missing)
 
     def module_level(name: str) -> bool:
         return (name in scope and name not in every and name not in free
                 and name not in bound and name not in imported)
 
-    if isinstance(first, ast.Expr) and isinstance(first.value, ast.Call):
-        call = first.value
+    def environ_item(target) -> "str | None":
+        if not (isinstance(target, ast.Subscript)
+                and isinstance(target.slice, ast.Constant)
+                and isinstance(target.slice.value, str)):
+            return None
+        holder = target.value
+        if isinstance(holder, ast.Attribute) and holder.attr == "environ" \
+                and isinstance(holder.value, ast.Name) \
+                and value_of(holder.value.id) is os:
+            return target.slice.value
+        if isinstance(holder, ast.Name) and value_of(holder.id) is os.environ:
+            return target.slice.value
+        return None
+
+    def opens_to_write(call) -> bool:
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                and value_of(call.func.id) is builtins.open
+                and 1 <= len(call.args) <= 2
+                and all(k.arg is not None and isinstance(k.value, ast.Constant)
+                        for k in call.keywords)):
+            return False
+        path = call.args[0]
+        if not (isinstance(path, ast.Constant) and isinstance(path.value, str)
+                or isinstance(path, ast.Name)
+                and type(value_of(path.id)) is str):
+            return False
+        mode = (call.args[1] if len(call.args) == 2 else next(
+            (k.value for k in call.keywords if k.arg == "mode"), None))
+        return (isinstance(mode, ast.Constant) and isinstance(mode.value, str)
+                and any(c in mode.value for c in "wax+"))
+
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+        call = stmt.value
+        if opens_to_write(call):
+            return "opens a file to write"
         target = call.func
         if not (isinstance(target, ast.Attribute) and target.attr == "append"
                 and isinstance(target.value, ast.Name)
                 and len(call.args) == 1 and not call.keywords):
-            return False
+            return None
         name, arg = target.value.id, call.args[0]
         if not module_level(name) or name in stored \
                 or name in declared_global or type(scope[name]) is not list:
-            return False
-        return (isinstance(arg, ast.Constant)
+            return None
+        if (isinstance(arg, ast.Constant)
                 or isinstance(arg, ast.Name) and arg.id in params
-                and arg.id not in stored)
-    if isinstance(first, ast.AugAssign) and isinstance(first.op, ast.Add) \
-            and isinstance(first.target, ast.Name):
-        name, step = first.target.id, first.value
-        return (name in declared_global and module_level(name)
+                and arg.id not in stored):
+            return f"appends to the module-level {name}"
+        return None
+    if isinstance(stmt, ast.AugAssign) and isinstance(stmt.op, ast.Add) \
+            and isinstance(stmt.target, ast.Name):
+        name, step = stmt.target.id, stmt.value
+        if (name in declared_global and module_level(name)
                 and type(scope[name]) is int
                 and isinstance(step, ast.Constant)
-                and type(step.value) is int and step.value != 0)
-    return False
+                and type(step.value) is int and step.value != 0):
+            return f"adds to the module-level {name}"
+        return None
+    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+        key = environ_item(stmt.targets[0])
+        if key is not None and isinstance(stmt.value, ast.Constant) \
+                and isinstance(stmt.value.value, str) \
+                and "\x00" not in key + stmt.value.value and key \
+                and "=" not in key:
+            return f"assigns os.environ[{key!r}]"
+        if isinstance(stmt.targets[0], ast.Name) \
+                and opens_to_write(stmt.value):
+            return "opens a file to write"
+        return None
+    if isinstance(stmt, ast.Delete) and len(stmt.targets) == 1:
+        key = environ_item(stmt.targets[0])
+        if key is not None and key in os.environ:
+            return f"deletes os.environ[{key!r}]"
+        return None
+    if isinstance(stmt, ast.With) and stmt.items \
+            and opens_to_write(stmt.items[0].context_expr):
+        return "opens a file to write"
+    return None
 
 
 def _provenance_meta(proof) -> dict:
@@ -11260,6 +11448,7 @@ from .gates import (  # noqa: E402
     _float_companion as _float_companion,
     _fmt_point as _fmt_point,
     _point_evaluator as _point_evaluator,
+    passed_not_called as passed_not_called,
 )
 
 def _stmt_lines(nodes) -> set:
@@ -14527,7 +14716,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a parameter's structure comes from its signature marker and from
     # an `assuming A is symmetric` premise; both narrow synthesis the
     # same way, the premise's set unioned onto the marker's
-    param_structures = dict(structures_from_signature(fn))
+    # a parameter the claim binds to numbers is drawn as a number: its
+    # marker then says something of that number, and names no matrix
+    param_structures = {p: props
+                        for p, props in structures_from_signature(fn).items()
+                        if not _binds_numbers((cj.domain or {}).get(p))}
     for _pp, _props in (ctx.premise_structures or {}).items():
         param_structures[_pp] = tuple(sorted(
             set(param_structures.get(_pp, ())) | set(_props)))
@@ -15037,6 +15230,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     bound_tagged = {name: (f_call.wrap(_tagged(v, name)) if _is_under_test(v, fn)
                            else _tagged(v, name))
                     for name, v in bound_funcs.items()}
+    # a bound function the claim only passes as an argument is passed
+    # as the object the reference names
+    for name in passed_not_called(cj.lhs, cj.rhs, original_bound):
+        bound_tagged[name] = original_bound[name]
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
     sequence_params = [p for p, k in kinds.items()

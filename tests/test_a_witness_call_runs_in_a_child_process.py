@@ -5,11 +5,12 @@
 interpreter imports f's module, calls f, and reports what it saw. The
 checking process's own module values are as they were, so one row never
 shows what another row's witness wrote. A child that runs past its
-wall-clock limit leaves the row unknown, saying so. A function no child
-can import is not called at all: a write that is the first statement
-of its body is read from the source, and anything else is unknown with
-the reason."""
+budget leaves the row unknown, saying so. A function no child
+can import, or one that writes the environment or a file, is not called
+at all: a write the source shows a call making is read, and anything
+else is unknown with the reason."""
 import os
+import re
 
 import pytest
 
@@ -97,23 +98,46 @@ def test_two_calls_that_differ_are_made_in_the_child():
     assert "child process" in p.sketch, p.sketch
 
 
-def test_a_child_past_its_wall_clock_limit_leaves_the_row_unknown(monkeypatch):
+def test_a_child_past_its_budget_leaves_the_row_unknown(monkeypatch):
     from mathema import _contained
-    monkeypatch.setattr(_contained, "WITNESS_SECONDS", 4)
+    monkeypatch.setattr(_contained, "FAILSAFE_WALL_CLOCK_SECONDS", 4)
     p = _row(writes_then_never_returns, "for x in [0, 1], not is_state_safe(f)")
     assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
-    assert "wall-clock limit" in (p.note or ""), p.note
-    assert "4 s" in (p.note or ""), p.note
+    assert "the run did not finish within its budget" in (p.note or ""), p.note
+    assert not re.search(r"\d s\b|second", p.note or ""), p.note
     assert _log == []
 
 
 def test_a_function_that_writes_the_environment_or_a_file_is_not_run():
     p = _row(sets_the_environment, "for x in [0, 1], not is_state_safe(f)")
-    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "not run" in p.sketch and "child process" not in p.sketch, p.sketch
     assert "MATHEMA_TEST_CHILD_WITNESS_NOT_RUN" not in os.environ
     p = _row(writes_a_file, "for x in [0, 1], not is_state_safe(f)")
-    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "not run" in p.sketch and "child process" not in p.sketch, p.sketch
     assert not os.path.exists(_PATH)
+
+
+def test_the_same_text_in_two_modules_is_examined_once_for_each(
+        tmp_path, monkeypatch):
+    import importlib
+
+    from mathema._examine import examine
+    source = ("_log = []\n\n\ndef appends(x):\n"
+              "    _log.append(x)\n    return x * 2.0\n")
+    for name in ("witness_twin_one", "witness_twin_two"):
+        (tmp_path / f"{name}.py").write_text(source)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    one = importlib.import_module("witness_twin_one")
+    two = importlib.import_module("witness_twin_two")
+    assert examine(one.appends).module_writes == {("witness_twin_one", "_log")}
+    assert examine(two.appends).module_writes == {("witness_twin_two", "_log")}
+    for module in (one, two):
+        p = _row(module.appends, "for x in [0, 1], not is_state_safe(f)")
+        assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+        assert "child process" in p.sketch, p.sketch
+        assert module._log == []
 
 
 def test_a_function_no_child_can_import_is_read_never_run():
@@ -132,15 +156,15 @@ def test_a_function_no_child_can_import_is_read_never_run():
     "for x in [0, 1], not is_state_safe(f)",
     "not is_state_safe(f)",
 ])
-def test_a_local_function_whose_write_is_under_a_test_is_unknown(text):
-    def appends_past_a_half(x):
-        if x > 0.5:
+def test_a_local_function_whose_write_is_under_an_unread_test_is_unknown(text):
+    def appends_where_the_square_passes_a_quarter(x):
+        if x * x > 0.25:
             _log.append(x)
         return x * 2.0
 
-    p = _row(appends_past_a_half, text)
+    p = _row(appends_where_the_square_passes_a_quarter, text)
     assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
-    assert "cannot be imported in a child process" in (p.note or ""), p.note
+    assert "cannot be run contained" in (p.note or ""), p.note
     assert "defined inside another function" in (p.note or ""), p.note
     assert _log == []
 
@@ -158,7 +182,7 @@ def test_a_local_function_is_not_called_twice_in_process_either():
 
     p = _row(draws_locally, "for x in [0, 1], not is_deterministic(f)")
     assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
-    assert "cannot be imported in a child process" in (p.note or ""), p.note
+    assert "cannot be run contained" in (p.note or ""), p.note
     p = _row(writes_under_a_return, "for x in [0, 1], not is_state_safe(f)")
     assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
     assert _log == []

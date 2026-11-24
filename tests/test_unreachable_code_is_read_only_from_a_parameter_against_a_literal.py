@@ -454,5 +454,6 @@ def test_no_witness_leaves_the_negation_undecided():
 def test_a_function_that_writes_outside_its_module_is_not_run_for_a_witness():
     import os
     p = _row(sets_the_environment, "for x in [0, 1], not is_state_safe(f)")
-    assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
+    assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
+    assert "read from the source and not run" in p.sketch, p.sketch
     assert "MATHEMA_TEST_WITNESS_NOT_RUN" not in os.environ
