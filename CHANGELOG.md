@@ -30,6 +30,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A missing-value policy is proven from a guard only when the path to the guard's raise is read, the guard's test is a real missing-value test, and calling the function runs the body the guard is in.
 - `"{²}".format(x)` in a raise message no longer stops `check_conjectures`.
 - A claim whose call takes a remainder by zero (`f(x, 1 % 0)`) gets a row that names the argument; it no longer stops `check_conjectures`.
+- A claim whose call holds an integer of more digits than Python writes out (`f(x, 2 ** 100000)`) gets a row, with its statement as written; it no longer stops `check_conjectures`.
 - Stored text an earlier release wrote for two different claims (`f(s, '}"', 's')` and `f(s, '}"", "s')`) is reported as ambiguous, naming both readings and `mathema accept ... --as superseded` for an edit; the claim is checked as written, never kept at its old verdict.
 - A key that raises after its record is written, while it is checked or while its dependencies are settled, gets the record it had before the run back, whatever stopped it (an exception, running out of memory, an interrupt or the wall-clock alarm), and a read of the store later in the same run sees what is on disk.
 - A claim whose stored text mathema cannot write fails its function's row and shows its kept row as `unchecked`; the function is checked again on every run until the text can be written.

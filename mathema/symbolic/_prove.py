@@ -5043,11 +5043,14 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
           `abs(a)`, `sqrt(a)`, `max(a, b)`, `len`, `sum`, `sorted`, `str`;
         - a power of numbers, computed here; an integer power is read only
           while its result stays within `_POWER_BITS` bits;
-        - `not a`, `a and b`, `a or b` and `b if a else c` over expressions
-          each read this way, every operand read whether or not Python
-          would reach it;
-        - a tuple, a list or a string subscripted by an integer, where the
-          index is in range;
+        - `not a`; `a and b`, `a or b` and `b if a else c`, the operands
+          Python evaluates each read this way and no other (`1 or 1 / 0` is
+          1, `0 or 1 / 0` is unread);
+        - a tuple, a list or a string subscripted by an integer or a truth
+          value, where the index is in range;
+        - a dict display of plain keys subscripted by a key it holds
+          (`_dict_display`);
+        - a string, a tuple or a list times an integer (`_constant_repeat`);
         - a tuple or a list of expressions each read this way.
 
         Anything else is not read (`_unread_form` names the form).
@@ -5086,26 +5089,40 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
         value = _constant_value(node.operand, taken)
         return _UNREAD if value is _UNREAD else not value
     if isinstance(node, ast.BoolOp):
-        values = [_constant_value(operand, taken) for operand in node.values]
-        if any(value is _UNREAD for value in values):
-            return _UNREAD
+        # operands in order, as Python runs them: the first that settles
+        # the result ends it, and none after it is evaluated  :draft
         stops = (lambda v: not v) if isinstance(node.op, ast.And) else bool
-        return next((value for value in values[:-1] if stops(value)), values[-1])
+        value = _UNREAD
+        for operand in node.values:
+            value = _constant_value(operand, taken)
+            if value is _UNREAD or stops(value):
+                break
+        return value
     if isinstance(node, ast.IfExp):
-        test, body, other = (_constant_value(part, taken)
-                             for part in (node.test, node.body, node.orelse))
-        if test is _UNREAD or body is _UNREAD or other is _UNREAD:
+        # the test, then the one branch it selects  :draft
+        test = _constant_value(node.test, taken)
+        if test is _UNREAD:
             return _UNREAD
-        return body if test else other
+        return _constant_value(node.body if test else node.orelse, taken)
     if isinstance(node, ast.Subscript):
-        held, index = _constant_value(node.value, taken), _constant_value(node.slice, taken)
-        if type(held) not in (tuple, list, str) or type(index) is not int \
+        index = _constant_value(node.slice, taken)
+        if isinstance(node.value, ast.Dict):  # :draft
+            pairs = _dict_display(node.value, taken)
+            if pairs is _UNREAD or not _is_plain_key(index) or index not in pairs:
+                return _UNREAD
+            return pairs[index]
+        held = _constant_value(node.value, taken)
+        if type(held) not in (tuple, list, str) or type(index) not in (int, bool) \
                 or not -len(held) <= index < len(held):
             return _UNREAD
         return held[index]
     if not isinstance(node, ast.BinOp):
         return _UNREAD
     a, b = _constant_value(node.left, taken), _constant_value(node.right, taken)
+    if isinstance(node.op, ast.Mult):  # :draft
+        repeated = _constant_repeat(a, b)
+        if repeated is not _UNREAD:
+            return repeated
     if not (_is_number(a) and _is_number(b)):
         return _UNREAD
     if isinstance(node.op, ast.Pow):
@@ -5128,6 +5145,55 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
     except (OverflowError, ZeroDivisionError):
         return _UNREAD
     return _UNREAD
+
+
+def _is_plain_key(value) -> bool:  # :draft
+    """Intent:
+        Whether a constant is an `int`, a `float` that is a number, a
+        `bool` or a `str`: a key whose hash and equality are the builtin
+        ones.
+    """
+    return type(value) in (int, bool, str) or (type(value) is float and value == value)
+
+
+def _dict_display(node: ast.Dict, taken: frozenset):  # :draft
+    """Intent:
+        The dict a display `{k: v, ...}` builds, where every key is a
+        plain constant (`_is_plain_key`) and every value a constant
+        (`_constant_value`), so building it cannot raise; `_UNREAD` for a
+        display that unpacks a mapping or holds anything else. Keys that
+        are equal share an entry and the last value stays, as Python
+        builds it.
+    """
+    out: dict = {}
+    for key_node, value_node in zip(node.keys, node.values):
+        if key_node is None:
+            return _UNREAD
+        key, value = _constant_value(key_node, taken), _constant_value(value_node, taken)
+        if value is _UNREAD or not _is_plain_key(key):
+            return _UNREAD
+        out[key] = value
+    return out
+
+
+#: the most items a string, tuple or list repeated as a constant may have
+_REPEAT_ITEMS = 4096
+
+
+def _constant_repeat(a, b):  # :draft
+    """Intent:
+        `a * b` where one side is a string, a tuple or a list and the
+        other an `int` or a `bool`: the sequence repeated, empty for a
+        count of zero or less, which cannot raise. Read only while the
+        result has at most `_REPEAT_ITEMS` items; `_UNREAD` for anything
+        else (`'a' * 1.5` raises TypeError).
+    """
+    if type(a) in (int, bool) and type(b) in (str, tuple, list):
+        a, b = b, a
+    if type(a) not in (str, tuple, list) or type(b) not in (int, bool) \
+            or len(a) * max(int(b), 0) > _REPEAT_ITEMS:
+        return _UNREAD
+    return a * b
 
 
 #: the most bits an integer power read as a constant may have
@@ -5229,6 +5295,14 @@ def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":
         unable to raise at these values (`1 / 0`, `0 ** -1`, `[1][2]`).
         The innermost such form, in the order Python evaluates, is named.
     """
+    if isinstance(node, ast.Lambda):
+        # nothing of a lambda's body runs where it is written
+        return "a lambda"
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Dict) \
+            and _dict_display(node.value, taken) is not _UNREAD \
+            and _constant_value(node.slice, taken) is not _UNREAD:
+        # a dict display that is read, and a key it does not hold
+        return None
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.expr_context, ast.operator, ast.unaryop, ast.boolop,
                               ast.cmpop, ast.keyword)):
@@ -5249,7 +5323,37 @@ def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":
                 and name not in ("min", "max", "Min", "Max", "dim") \
                 and not any(_SAFE_FUNCS.get(name) is known for known in (len, sum, sorted, str)):
             return f"a call of `{name}`" if name else "a call"
+        values = [_constant_value(argument, taken) for argument in node.args]
+        if any(_SAFE_FUNCS.get(name) is known for known in (sum, sorted, str)) and (
+                len(values) != 1 or (_SAFE_FUNCS.get(name) is not str and not (
+                    type(values[0]) in (tuple, list)
+                    and all(_is_number(item) for item in values[0])))
+                or (_SAFE_FUNCS.get(name) is str and type(values[0]) in (tuple, list))):
+            # `sum` and `sorted` are read over numbers alone, `str` of
+            # a scalar alone
+            return (f"a call of `{name}` on a tuple or a list" if _SAFE_FUNCS.get(name) is str
+                    else f"a call of `{name}` on anything but numbers")
         return None
+    if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+        a, b = _constant_value(node.left, taken), _constant_value(node.right, taken)
+        if not (_is_number(a) and _is_number(b)):
+            return (f"the operator `{_ARITHMETIC_TEXT[type(node.op)]}` on a value that is "
+                    f"not an integer or a float")
+        if isinstance(node.op, ast.Pow):
+            if type(a) is int and type(b) is int and b >= 0:
+                return f"an integer power of more than {_POWER_BITS} bits"
+            try:
+                if isinstance(a ** b, complex):
+                    return "a power with a complex result"
+            except (OverflowError, ZeroDivisionError):
+                return None
+        return None
+    if isinstance(node, ast.Compare) and all(
+            isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq))
+            for op in node.ops) and not all(
+            _is_number(_constant_value(side, taken)) for side in [node.left, *node.comparators]):
+        return "a comparison of values that are not integers or floats"
     if isinstance(node, ast.Name):
         return f"the name `{node.id}`"
     if isinstance(node, ast.BinOp) and isinstance(
@@ -5263,6 +5367,9 @@ def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":
         return "a membership or identity test"
     return None
 
+
+_ARITHMETIC_TEXT = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/",
+                    ast.FloorDiv: "//", ast.Mod: "%", ast.Pow: "**"}
 
 _OPERATOR_TEXT = {ast.MatMult: "@", ast.BitAnd: "&", ast.BitOr: "|", ast.BitXor: "^",
                   ast.LShift: "<<", ast.RShift: ">>"}
@@ -5299,8 +5406,10 @@ def _unread_argument(call: ast.Call,
     """Intent:
         `(source, form)` for the first argument of the call whose
         evaluation is not read as unable to raise, None when every one is
-        read: a bare name (a variable the claim binds) or a constant
-        expression of the claim language (`_constant_value`). `form` names
+        read: a bare name (a variable the claim binds), a constant
+        expression of the claim language (`_constant_value`), or
+        arithmetic on the domain's variables that cannot fail over the
+        domain (`_total_over_the_domain`). `form` names
         the form of expression the reading has no rule for
         (`_unread_form`), and is None when the forms are all read and this
         one may raise. A mapping unpacked into the call (`**k`) is not
@@ -5314,8 +5423,78 @@ def _unread_argument(call: ast.Call,
         if (isinstance(argument, ast.Name) and argument.id in taken) \
                 or _constant_value(argument, taken) is not _UNREAD:
             continue
+        if reading is not None and _names_a_variable(argument, reading):  # :draft
+            if _total_over_the_domain(argument, reading):
+                continue
+            return ast.unparse(argument), _unread_variable_form(argument, reading)
         return ast.unparse(argument), _unread_form(argument, taken)
     return None
+
+
+def _names_a_variable(node: ast.AST, reading: "_CallReading") -> bool:
+    """Intent:
+        Whether an expression names a variable the claim's domain binds.
+    """
+    return any(isinstance(n, ast.Name) and n.id in reading.domain for n in ast.walk(node))
+
+
+def _domain_kinds(reading: "_CallReading") -> dict:
+    """Intent:
+        What each variable the claim's domain binds holds, as a kind
+        (`kind_of_bound`).
+    """
+    from .._raise_reading import kind_of_bound
+    return {name: kind_of_bound(bound) for name, bound in reading.domain.items()}
+
+
+def _total_over_the_domain(node: ast.AST, reading: "_CallReading") -> bool:  # :draft
+    """Intent:
+        Whether an expression over the claim's variables is arithmetic
+        that cannot fail at any point of the domain and gives a finite
+        number there (`finite_number`): `x / 2`, `1 / (x * x + 1)`, and
+        `1 / x` only where the domain keeps `x` away from zero.
+    """
+    from .._raise_reading import finite_number
+    return finite_number(node, _domain_kinds(reading), None) is not None
+
+
+def _unread_variable_form(node: ast.AST, reading: "_CallReading") -> str:  # :draft
+    """Intent:
+        Words for the form that leaves an expression over the claim's
+        variables unread as arithmetic that cannot fail
+        (`_total_over_the_domain`): the innermost part not read, in the
+        order Python evaluates, whose own parts are all read.
+    """
+    from .._raise_reading import finite_number
+    kinds = _domain_kinds(reading)
+
+    def read(part: ast.AST) -> bool:
+        return finite_number(part, kinds, None) is not None
+
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.expr) and not read(child) \
+                and not (isinstance(node, ast.Call) and child is node.func):
+            return _unread_variable_form(child, reading)
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        return f"a call of `{name}` on a variable" if name else "a call on a variable"
+    if isinstance(node, ast.IfExp):
+        return "a conditional on a variable"
+    if isinstance(node, ast.BoolOp):
+        return "`and` or `or` on a variable"
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return "`not` on a variable"
+    if isinstance(node, ast.Compare):
+        return "a comparison on a variable"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return "a power of a variable by anything but a small literal integer"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.FloorDiv, ast.Mod)):
+        return "a floor division or remainder by a divisor that is not a literal"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return "a division by a divisor not shown to stay away from zero"
+    if isinstance(node, ast.BinOp):
+        return "arithmetic on a variable not shown to stay within the largest float"
+    return "an expression of a variable"
 
 
 def _is_literal_arithmetic(node: ast.AST) -> bool:
@@ -5350,9 +5529,11 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
         name departs from nothing, and neither does the bare name of
         another variable the domain binds in the place of a parameter
         neither the body nor any wrapper reads (`f(x, x)` where nothing
-        reads the second). Any other argument that names a variable
-        departs (`f(-x)`, `f(x + 10)`, `f(y, x)`, `f(x=y, y=x)`). A starred
-        tuple or list display fills the places its elements would.
+        reads the second), nor an expression of the domain's variables
+        there (`f(x, x / 2)`), which `_unread_argument` judges. Any other
+        argument that names a variable departs (`f(-x)`, `f(x + 10)`,
+        `f(y, x)`, `f(x=y, y=x)`). A starred tuple or list display fills
+        the places its elements would.
 
         A constant (`_constant_value`) departs from nothing in the place
         of a parameter neither the body nor any wrapper on the way reads,
@@ -5383,6 +5564,13 @@ def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
             continue
         value = _constant_value(argument, taken)
         if value is _UNREAD:
+            if param in reading.unread and _names_a_variable(argument, reading) \
+                    and not any(isinstance(n, ast.Name) and n.id in taken
+                                and n.id not in reading.domain for n in ast.walk(argument)):
+                # an expression of the domain's variables where nothing
+                # reads the parameter: whether it can fail to evaluate
+                # is `_unread_argument`'s to say  :draft
+                continue
             if any(isinstance(n, ast.Name) and n.id in taken for n in ast.walk(argument)):
                 return True
             continue

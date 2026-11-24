@@ -17,6 +17,7 @@ nothing reads, a listed missing value on a parameter a mathema guard does
 not judge or lets through, a wrapper that keeps a keyword of its own, an
 instance that hands its call over, and every `raises` claim the other
 test files of the raise reading prove."""
+import ast
 import builtins
 import functools
 import importlib
@@ -831,3 +832,147 @@ def test_a_true_value_claim_proven_before_is_still_proven(module, name, text, po
     (row,) = check_conjectures(fn, [claim(text, route="derive")])
     assert _STRENGTH.get(row.verdict, 0) >= _STRENGTH[base], \
         (row.verdict, row.route, row.sketch, row.note)
+
+
+#: argument forms in the place of a parameter nothing reads, each true at
+#: every point and proven at BASE: (argument proven here, a twin that
+#: fails to evaluate at some point, so its claim is false)
+ARGUMENT_FORMS = [
+    ("[1, 2, 3][True]", "[1, 2, 3][5]"),
+    ("1 or 1 / 0", "0 or 1 / 0"),
+    ("0 and 1 / 0", "1 and 1 / 0"),
+    ("None and 1 / 0", "[] or 1 / 0"),
+    ("2 if 1 else 1 / 0", "2 if 0 else 1 / 0"),
+    ("1 / 0 if 0 else 2", "1 / 0 if 1 else 2"),
+    ("1 if 1 < 2 else 'a' < 1", "1 if 1 > 2 else 'a' < 1"),
+    ("'a' * 3", "'a' * 1.5"),
+    ("'a' * -1", "'a' * 'b'"),
+    ("(1,) * 3", "[1] * 2.0"),
+    ("3 * 'a'", "1.5 * 'a'"),
+    ("[1] * True", "[1] * None"),
+    ("{1: 2}[1]", "{1: 2}[3]"),
+    ("x / 2", "x / (x + 1)"),
+    ("1 / (x * x + 1)", "1 / (x * x - 1)"),
+    ("1 / (x * x)", "1 / (x + 5)"),
+    ("x / x", "1 / (x + 1)"),
+    ("x % 1", "x % (x + 1)"),
+    ("x ** 2", "(x + 1) ** -1"),
+    ("x ** -1", "(x + 5) ** -2"),
+    ("1 / (2 - x - 1)", "1 / (-1 - x)"),
+    ("1 / (x + 0)", "1 / (x + 3)"),
+    ("3 / (x * 0 + 2)", "3 / (x * 0)"),
+]
+
+#: argument forms true at every point and proven at BASE that are not
+#: read here: (argument, the form the row names as not read)
+BACKLOG = [
+    ("2 ** 10000", "an integer power of more than 4096 bits"),
+    ("2 ** 100000", "an integer power of more than 4096 bits"),
+    ("(-8) ** 0.5", "a power with a complex result"),
+    ("(-8) ** (1 / 3)", "a power with a complex result"),
+    ("(-1) ** 0.5", "a power with a complex result"),
+    ("True ** 5", "the operator `**` on a value that is not an integer or a float"),
+    ("(1,) + (2,)", "the operator `+` on a value that is not an integer or a float"),
+    ("'%s' % 1", "the operator `%` on a value that is not an integer or a float"),
+    ("[1, 2, 3][1:5]", "a slice"),
+    ("[1, 2, 3][::-1]", "a slice"),
+    ("*{1: 2}", "a dict display"),
+    ("sum([[1], [2]], [])", "a call of `sum` on anything but numbers"),
+    ("sorted(['b', 'a'])", "a call of `sorted` on anything but numbers"),
+    ("sorted([[1], [2]])", "a call of `sorted` on anything but numbers"),
+    ("str([1])", "a call of `str` on a tuple or a list"),
+    ("float('nan')", "a call of `float`"),
+    ("float(2 ** 1023) * 2", "a call of `float`"),
+    ("type(1)", "a call of `type`"),
+    ("lambda: 1 / 0", "a lambda"),
+    ("lambda: 1", "a lambda"),
+    ("1 == 'a'", "a comparison of values that are not integers or floats"),
+    ("[1] < [2]", "a comparison of values that are not integers or floats"),
+    ("2 if x < 0 else 1 / 0", "a comparison on a variable"),
+    ("1 / 0 if x > 0 else 2", "a comparison on a variable"),
+    ("x < 0 or 1 / 0", "a comparison on a variable"),
+    ("x > 0 and 1 / 0", "a comparison on a variable"),
+    ("not x < 0", "a comparison on a variable"),
+    ("x or 1 / 0", "a division by a divisor not shown to stay away from zero"),
+    ("x if x else 1 / 0", "a division by a divisor not shown to stay away from zero"),
+    ("1 / (x - x + 1)", "a division by a divisor not shown to stay away from zero"),
+    ("1 / (x // 10)", "a division by a divisor not shown to stay away from zero"),
+    ("x // x", "a floor division or remainder by a divisor that is not a literal"),
+    ("x % x", "a floor division or remainder by a divisor that is not a literal"),
+    ("1 // (x + 0.0)", "a floor division or remainder by a divisor that is not a literal"),
+    ("(x + 1e308) * 10",
+     "arithmetic on a variable not shown to stay within the largest float"),
+    ("(x - 1e308) * 1e10",
+     "arithmetic on a variable not shown to stay within the largest float"),
+    ("x * 1e308 * 1e308",
+     "arithmetic on a variable not shown to stay within the largest float"),
+    ("x ** 0.5", "a power of a variable by anything but a small literal integer"),
+    ("(x + 10) ** 0.5", "a power of a variable by anything but a small literal integer"),
+    ("(x - 10) ** 0.5", "a power of a variable by anything but a small literal integer"),
+    ("abs(x) ** 400", "a call of `abs` on a variable"),
+    ("1 / abs(x)", "a call of `abs` on a variable"),
+    ("1 / abs(x + 0)", "a call of `abs` on a variable"),
+    ("1 / (abs(x) + 0.0)", "a call of `abs` on a variable"),
+    ("1 / max(x, -1)", "a call of `max` on a variable"),
+    ("1 / min(x, -1)", "a call of `min` on a variable"),
+    ("1 / min(x, -5)", "a call of `min` on a variable"),
+]
+
+_FORM_XS = (-5.0, -3.3, -1.0, -5, -3, -2, -1)
+
+
+def _python_raises(argument, x):
+    """What `plain(x, <argument>)` raises as Python evaluates the call."""
+    try:
+        eval(f"f(x, {argument})", {"f": plain, "x": x})
+    except BaseException as error:  # noqa: BLE001
+        return error
+    return None
+
+
+def _form_row(argument):
+    text = f"{_NEG}raises(f(x, {argument}), ValueError)"
+    (row,) = check_conjectures(plain, [claim(text, route="derive")])
+    return row
+
+
+@pytest.mark.parametrize("argument,twin", ARGUMENT_FORMS, ids=[a for a, _ in ARGUMENT_FORMS])
+def test_an_argument_form_that_cannot_fail_is_proven(argument, twin):
+    for x in _FORM_XS:
+        error = _python_raises(argument, x)
+        assert type(error) is ValueError and error.args == ("n",), (argument, x, error)
+    row = _form_row(argument)
+    assert row.verdict == "proven", (row.verdict, row.sketch, row.note)
+
+
+@pytest.mark.parametrize("argument,twin", ARGUMENT_FORMS, ids=[t for _, t in ARGUMENT_FORMS])
+def test_its_twin_that_fails_to_evaluate_is_not_proven(argument, twin):
+    assert any(type(_python_raises(twin, x)) is not ValueError for x in _FORM_XS), twin
+    row = _form_row(twin)
+    assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
+
+
+def nonpositive(x, y):
+    if x <= 0:
+        raise ValueError("n")
+    return x
+
+
+def test_a_division_by_the_variable_is_read_only_where_the_domain_keeps_it_from_zero():
+    assert type(_raised(nonpositive, "f(x, 1 / x)", {"x": 0})) is ZeroDivisionError
+    away, reaching = check_conjectures(nonpositive, [
+        claim("for x in [-5, -1], raises(f(x, 1 / x), ValueError)", route="derive"),
+        claim("for x in [-5, 0], raises(f(x, 1 / x), ValueError)", route="derive")])
+    assert away.verdict == "proven", (away.verdict, away.sketch, away.note)
+    assert reaching.verdict != "proven", (reaching.verdict, reaching.sketch, reaching.note)
+
+
+@pytest.mark.parametrize("argument,form", BACKLOG, ids=[a for a, _ in BACKLOG])
+def test_a_form_on_the_backlog_says_what_is_not_read(argument, form):
+    for x in _FORM_XS:
+        error = _python_raises(argument, x)
+        assert type(error) is ValueError and error.args == ("n",), (argument, x, error)
+    row = _form_row(argument)
+    shown = ast.unparse(ast.parse(f"f(x, {argument})", mode="eval").body.args[1])
+    said = f"{row.sketch} {row.note}"
+    assert f"the argument `{shown}` is not read: {form} is a form" in said, said

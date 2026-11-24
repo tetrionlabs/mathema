@@ -1031,9 +1031,11 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
                      counterexample=_witness(wrong, p), note=f"{reason}\n{nxt}",
                      meta=meta)
     guard = None
+    declined = ""
     for p in params:
         members = [stated.member] if stated.member else _members_of(fn, p, stated.kind)
         found_guards = [_guard_for(derived or {}, fn, p, stated.kind, m) for m in members]
+        declined = declined or "".join(_not_taken(g) for g in found_guards[:1])
         if found_guards and all(g and g[0] == stated.behaviour
                                 and _guard_raises_the_claimed(g, stated.exception, fn)
                                 for g in found_guards) \
@@ -1044,7 +1046,7 @@ def adjudicate(cj, fn, facts, domain: dict, derived: "dict | None" = None):
         meta["mathema.policy"]["reason"] = reason
         return Probe(cj.name, statement, "proven", n=len(calls), route="examine",
                      note=reason, meta=meta)
-    reason = f"stated; {evidence}"
+    reason = f"stated{declined}; {evidence}"
     meta["mathema.policy"]["reason"] = reason
     return Probe(cj.name, statement, "holds", n=len(calls), route="probe:counterfactual",
                  note=reason, meta=meta)
@@ -1371,16 +1373,27 @@ def _guard_raise(fn, facts, tree, node, raise_stmt, param: str, kind: str,
     read, _ = read_with(kinds)
     if read is not None:
         return read, ()
-    annotated = {q: found for q in facts.params if q != param
-                 for found in [_annotated_kind(body_fn, q)] if found is not None}
-    if not annotated:
+    every = {q: found for q in facts.params if q != param
+             for found in [_annotated_kind(body_fn, q)] if found is not None}
+    annotated = {q: found for q, found in every.items()
+                 if _default_contradicts(body_fn, q, found[2]) is None}
+    read, steps = read_with({**kinds, **{q: found[0] for q, found in annotated.items()}}) \
+        if annotated else (None, [])
+    if read is not None:
+        named = {n.id for _, step in steps for n in ast.walk(step) if isinstance(n, ast.Name)}
+        return read, tuple(f"{q} is {annotated[q][1]}, as annotated"
+                           for q in facts.params if q in annotated and q in named)
+    if len(every) == len(annotated):
         return None
-    read, steps = read_with({**kinds, **{q: found[0] for q, found in annotated.items()}})
+    # the path is read only by taking an annotation its own default
+    # contradicts: not read, and the row says which
+    read, steps = read_with({**kinds, **{q: found[0] for q, found in every.items()}})
     if read is None:
         return None
     named = {n.id for _, step in steps for n in ast.walk(step) if isinstance(n, ast.Name)}
-    return read, tuple(f"{q} is {annotated[q][1]}, as annotated"
-                       for q in facts.params if q in annotated and q in named)
+    return None, tuple(_default_contradicts(body_fn, q, every[q][2])
+                       for q in facts.params
+                       if q in every and q not in annotated and q in named)
 
 
 #: the annotations a policy proof takes as a parameter's exact type, with
@@ -1390,8 +1403,9 @@ _ANNOTATED_TYPES = ((float, "a float"), (int, "an int"), (bool, "a bool"), (str,
 
 def _annotated_kind(fn, param: str):  # :draft
     """Intent:
-        `(kind, words)` for a parameter annotated with exactly `float`,
-        `int`, `bool` or `str`: a value of that one type, and "a float".
+        `(kind, words, cls)` for a parameter annotated with exactly `float`,
+        `int`, `bool` or `str`: a value of that one type, "a float", and
+        the class.
         None for any other annotation or none. The annotation is the
         class itself, or its name as text where the function's module
         gives that name no other meaning.
@@ -1404,8 +1418,44 @@ def _annotated_kind(fn, param: str):  # :draft
     for cls, words in _ANNOTATED_TYPES:
         if annotation is cls or (annotation == cls.__name__ and type(annotation) is str
                                  and cls.__name__ not in getattr(fn, "__globals__", {})):
-            return ValueKind(frozenset({cls})), words
+            return ValueKind(frozenset({cls})), words, cls
     return None
+
+
+def _default_contradicts(fn, param: str, cls: type) -> "str | None":  # :draft
+    """Intent:
+        Words for a parameter annotated `cls` whose default is not a value
+        of exactly that type, so the signature itself contradicts taking
+        the annotation as the type: "y is annotated float but its default
+        None is not a float, so the annotation is not taken as its type".
+        None for a parameter with no default or a default of that type.
+    """
+    code = getattr(fn, "__code__", None)
+    if code is None:
+        return None
+    positional = code.co_varnames[:code.co_argcount]
+    defaults = getattr(fn, "__defaults__", None) or ()
+    held = dict(zip(positional[len(positional) - len(defaults):], defaults))
+    held.update(getattr(fn, "__kwdefaults__", None) or {})
+    if param not in held or type(held[param]) is cls:
+        return None
+    default = held[param]
+    shown = repr(default) if default is None or type(default) in (int, float, bool, str) \
+        else f"of type {type(default).__name__}"
+    words = dict((c, w) for c, w in _ANNOTATED_TYPES)[cls]
+    # :draft
+    return (f"{param} is annotated {cls.__name__} but its default {shown} is not "
+            f"{words}, so the annotation is not taken as its type")
+
+
+def _not_taken(guard) -> str:  # :draft
+    """Intent:
+        The words for the annotations a guard's reading did not take as
+        types because a default contradicts them, "; y is annotated float
+        but ...", empty when there is none.
+    """
+    declined = guard[5] if guard is not None and len(guard) > 5 else ()
+    return "".join(f"; {words}" for words in declined)
 
 
 def guard_policies(facts, fn=None) -> dict:
@@ -1565,6 +1615,9 @@ def guard_policies(facts, fn=None) -> dict:
                 # exactly that class; an unread guard still says the
                 # raise is deliberate, and proves nothing
                 found = _guard_raise(fn, facts, tree, node, raise_stmt, p, kind, member)
+                declined: tuple = ()
+                if found is not None and found[0] is None:
+                    declined, found = found[1], None
                 if found is not None:
                     read, assumed = found
                     out.setdefault((p, kind, member),
@@ -1579,7 +1632,8 @@ def guard_policies(facts, fn=None) -> dict:
                     name = exc.id
                 elif isinstance(exc, ast.Attribute):
                     name = exc.attr
-                out.setdefault((p, kind, member), ("raises", name, node.lineno, None))
+                out.setdefault((p, kind, member),
+                               ("raises", name, node.lineno, None, (), declined))
             elif back is not None:
                 if back == "itself":
                     # what came in goes back out
@@ -1935,7 +1989,7 @@ def _default_row(fn, p, kind, member, calls, origin, sig, guards, current,
             return row("holds", behaviour, exception, "derived",
                        # :draft
                        f"from the guard on line {guard[2]}, whose path to its raise "
-                       f"is not read; {evidence}")
+                       f"is not read{_not_taken(guard)}; {evidence}")
         return row("proven", behaviour, exception, "derived",
                    f"from the guard on line {guard[2]}{_assuming(guard, meta)}; {evidence}",
                    route="examine")

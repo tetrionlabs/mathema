@@ -463,12 +463,32 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
         # is never zero
         apart = max(a.least - b.magnitude, b.least - a.magnitude)
         least = math.nextafter(apart, 0.0) if 0.0 < apart < math.inf else 0.0  # :draft
+        # the sign the second operand contributes: its own in a sum,
+        # the opposite in a difference
+        other = b.sign if isinstance(op, ast.Add) else -b.sign
+        sign = 0
+        if a.sign != 0 and a.sign == other:
+            # two terms of one sign: the result has that sign and is at
+            # least as far from zero as both together (rounding to
+            # nearest keeps the order of sums)
+            together = a.least + b.least
+            sign = a.sign
+            if 0.0 < together < math.inf:
+                least = max(least, math.nextafter(together, 0.0))  # :draft
+        elif least > 0.0:
+            # the operand that outweighs the other gives the sign
+            sign = a.sign if a.least - b.magnitude > 0.0 else other  # :draft
         return (HALTS if mixes else TOTAL), ValueKind(out_types,
                                                        _up(a.magnitude + b.magnitude),
-                                                       least)
+                                                       least, sign if least > 0.0 else 0)
     if isinstance(op, ast.Mult):
         size = 0.0 if 0.0 in (a.magnitude, b.magnitude) else _up(a.magnitude * b.magnitude)
-        return (HALTS if mixes else TOTAL), ValueKind(out_types, size)
+        # a product of two floats away from zero may still round to
+        # zero, so the sign is kept only with a lower bound that did not
+        apart = a.least * b.least if math.isfinite(a.least) and math.isfinite(b.least) else 0.0
+        least = math.nextafter(apart, 0.0) if 0.0 < apart < math.inf else 0.0  # :draft
+        return (HALTS if mixes else TOTAL), ValueKind(out_types, size, least,
+                                                       a.sign * b.sign if least > 0.0 else 0)
     if isinstance(op, ast.Div) and b.least > 0 and _converts_to_float(a) \
             and _converts_to_float(b):
         return TOTAL, ValueKind(frozenset({float}),
@@ -537,7 +557,7 @@ def _call_level(node: ast.Call, kinds: dict, ns: _Namespace):
         if _is_numeric(kind):
             return level, ValueKind(kind.types - {bool} | ({int} if bool in kind.types
                                                            else set()), kind.magnitude,
-                                    kind.least)
+                                    kind.least, 1 if kind.least > 0.0 else 0)
         return UNKNOWN, ANY
     called = ns.resolve(node.func)
     if any(called is getattr(math, name) for name in _MATH_TESTS):
@@ -722,7 +742,8 @@ def read_expression(node: ast.AST, kinds: dict, ns: _Namespace):
         if isinstance(node.op, (ast.USub, ast.UAdd)) and _is_numeric(kind):
             return level, ValueKind((kind.types - {bool}) | ({int} if bool in kind.types
                                                              else set()), kind.magnitude,
-                                    kind.least)
+                                    kind.least,
+                                    -kind.sign if isinstance(node.op, ast.USub) else kind.sign)
         return UNKNOWN, ANY
     if isinstance(node, ast.BinOp):
         left, a = read_expression(node.left, kinds, ns)
@@ -831,6 +852,260 @@ def _repeated(a: ValueKind, b: ValueKind) -> "ValueKind | None":  # :draft
     if count(a) and sequence(b):
         return ValueKind(b.types)
     return None
+
+
+#: the largest magnitude of argument `math.exp` is read at: `exp(700)`
+#: is a finite double and `exp(-700)` a normal one, so neither end
+#: overflows or rounds to zero
+_EXP_MOST = 700.0
+
+#: the most a result of the math library is taken to differ from the
+#: exact one, as a factor: the library is accurate to a few units in
+#: the last place, far inside this
+_LIBRARY_SLACK = 1.0 + 2.0 ** -40
+
+
+def _library_kind(called, k: ValueKind) -> "ValueKind | None":  # :draft
+    """Intent:
+        The kind of `called(v)` for a function of the `math` module and a
+        number `v` of kind `k` with a finite magnitude bound, where the
+        call cannot raise on any such `v`; None for any other function or
+        range. `exp` up to `_EXP_MOST` in magnitude; `sin`, `cos`, `tanh`,
+        `atan` and `fabs` of any finite number; `sqrt` and `log` of a
+        number known to be above zero.
+    """
+    above = k.sign == 1 and k.least > 0.0
+    if called is math.exp and k.magnitude <= _EXP_MOST:
+        return ValueKind(frozenset({float}), _up(math.exp(k.magnitude) * _LIBRARY_SLACK),
+                         math.exp(-k.magnitude) / _LIBRARY_SLACK, 1)
+    if any(called is known for known in (math.sin, math.cos, math.tanh)):
+        return ValueKind(frozenset({float}), 1.0)
+    if called is math.atan:
+        return ValueKind(frozenset({float}), 2.0)
+    if called is math.fabs:
+        return ValueKind(frozenset({float}), k.magnitude, k.least, 1 if k.least > 0.0 else 0)
+    if called is math.sqrt and above:
+        return ValueKind(frozenset({float}), _up(math.sqrt(k.magnitude) * _LIBRARY_SLACK),
+                         math.sqrt(k.least) / _LIBRARY_SLACK, 1)
+    if called is math.log and above:
+        return ValueKind(frozenset({float}), _up(max(abs(math.log(k.least)),
+                                                     abs(math.log(k.magnitude)))
+                                                 * _LIBRARY_SLACK))
+    return None
+
+
+#: the largest exponent a power is read with
+_POWER_MOST = 64
+
+
+def _power_kind(a: ValueKind, exponent) -> "ValueKind | None":  # :draft
+    """Intent:
+        The kind of `a ** n` for a number of kind `a` and a literal integer
+        `n` of magnitude at most `_POWER_MOST`, where the power cannot
+        raise: `n` at least zero and the bound on the result finite, or
+        `n` below zero and `a` never zero. None for anything else (a
+        fractional exponent gives a complex number for a base below zero).
+    """
+    if type(exponent) is not int or abs(exponent) > _POWER_MOST:
+        return None
+    floats = frozenset({float})
+    try:
+        if exponent >= 0:
+            size = _up(a.magnitude ** exponent * _LIBRARY_SLACK)
+            held = a.types or frozenset()
+            types = (floats if float in held else frozenset()) \
+                | (frozenset({int}) if held - {float} else frozenset())
+            return ValueKind(types, size)
+        if a.least <= 0.0:
+            return None
+        return ValueKind(floats, _up(a.least ** exponent * _LIBRARY_SLACK))
+    except (OverflowError, ZeroDivisionError):
+        return None
+
+
+def _without_bool(k: ValueKind) -> frozenset:
+    """Intent:
+        The types of `+v`, `-v` or `abs(v)` for a number of kind `k`: its
+        own, a `bool` giving an `int`.
+    """
+    held = k.types or frozenset()
+    return frozenset(held - {bool}) | (frozenset({int}) if bool in held else frozenset())
+
+
+def finite_number(node: ast.AST, kinds: dict, ns: "_Namespace | None") -> "ValueKind | None":  # :draft
+    """Intent:
+        The kind of the number `node` evaluates to, where every operation
+        in it is shown unable to raise in Python's own arithmetic and
+        every value on the way has a finite bound on its magnitude; None
+        where that is not shown. Each name is a number of `kinds`; `ns`
+        resolves the functions called and may be None, which reads no
+        call.
+
+    Notes:
+        Read: an int, float or bool literal; a name of `kinds`; a float
+        or int attribute of a module (`math.pi`); `+a`, `-a`; `+ - * / //
+        %` as `_arithmetic` judges them total; a power by a literal
+        integer (`_power_kind`); `abs` that resolves to the builtin and
+        the `math` functions of `_library_kind`; a conditional whose
+        test cannot fail, both branches read. A float operation whose
+        bound passes the largest float is not read, so no infinity or
+        nan is among the values.
+    """
+    found = _finite_number(node, kinds, ns)
+    if found is None or not _is_numeric(found) or not found.magnitude <= _FLOAT_MAX:
+        return None
+    return found
+
+
+def _finite_number(node: ast.AST, kinds: dict, ns: "_Namespace | None") -> "ValueKind | None":
+    """Intent:
+        `finite_number` before the bound on the result itself is checked.
+    """
+    if isinstance(node, ast.Constant):
+        return kind_of_value(node.value) if type(node.value) in _NUMBERS else None
+    if isinstance(node, ast.Name):
+        return kinds.get(node.id)
+    if isinstance(node, ast.Attribute):
+        held = ns.resolve(node) if ns is not None else _Namespace._MISSING
+        return kind_of_value(held) if type(held) in (int, float) else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        k = finite_number(node.operand, kinds, ns)
+        if k is None:
+            return None
+        return ValueKind(_without_bool(k), k.magnitude, k.least,
+                         -k.sign if isinstance(node.op, ast.USub) else k.sign)
+    if isinstance(node, ast.BinOp):
+        a = finite_number(node.left, kinds, ns)
+        if a is None:
+            return None
+        if isinstance(node.op, ast.Pow):
+            exponent = node.right
+            if isinstance(exponent, ast.UnaryOp) and isinstance(exponent.op, ast.USub) \
+                    and isinstance(exponent.operand, ast.Constant) \
+                    and type(exponent.operand.value) is int:
+                return _power_kind(a, -exponent.operand.value)
+            return _power_kind(a, exponent.value) if isinstance(exponent, ast.Constant) else None
+        b = finite_number(node.right, kinds, ns)
+        if b is None:
+            return None
+        level, kind = _arithmetic(node.op, a, b, node.right)
+        return kind if level == TOTAL else None
+    if isinstance(node, ast.Call) and ns is not None:
+        if node.keywords or len(node.args) != 1 or isinstance(node.args[0], ast.Starred):
+            return None
+        k = finite_number(node.args[0], kinds, ns)
+        if k is None:
+            return None
+        if ns.is_builtin(node.func, "abs"):
+            return ValueKind(_without_bool(k), k.magnitude, k.least,
+                             1 if k.least > 0.0 else 0)
+        return _library_kind(ns.resolve(node.func), k)
+    if isinstance(node, ast.IfExp):
+        level, test = read_expression(node.test, kinds, ns) if ns is not None else (UNKNOWN, ANY)
+        if min(level, _truth_level(test)) < TOTAL:
+            return None
+        body, other = finite_number(node.body, kinds, ns), finite_number(node.orelse, kinds, ns)
+        return None if body is None or other is None else _union(body, other)
+    return None
+
+
+def _never_taken(test: ast.AST, kinds: dict, ns: "_Namespace") -> bool:  # :draft
+    """Intent:
+        Whether the test of an `if` is false on every run, evaluated
+        without raising: `name is None` for a name that never holds None,
+        or one ordering of two numbers that never holds (`_never_holds`).
+    """
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1):
+        return False
+    op, right = test.ops[0], test.comparators[0]
+    if isinstance(op, ast.Is) and isinstance(test.left, ast.Name) \
+            and isinstance(right, ast.Constant) and right.value is None:
+        held = kinds.get(test.left.id)
+        return held is not None and held.types is not None and _NONE not in held.types
+    a, b = finite_number(test.left, kinds, ns), finite_number(right, kinds, ns)
+    return a is not None and b is not None and _never_holds(op, a, b)
+
+
+def _steps_that_may_raise(body: list, kinds: dict, ns: "_Namespace") -> "tuple[str | None, dict | None]":
+    """Intent:
+        `(reason, kinds)` for running the statements of `body` in order
+        with the names of `kinds` bound: `reason` names the first
+        statement not shown unable to raise, None when there is none;
+        `kinds` is what the names hold where the statements fall through
+        to what follows, None where every run returns first.
+    """
+    kinds = dict(kinds)
+    for stmt in body:
+        if isinstance(stmt, ast.Pass) or (isinstance(stmt, ast.Expr)
+                                          and isinstance(stmt.value, ast.Constant)):
+            continue
+        if isinstance(stmt, ast.Return):
+            if stmt.value is not None and finite_number(stmt.value, kinds, ns) is None:
+                return f"`{_source(stmt)}`{_where(stmt)}", None  # :draft
+            return None, None
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
+                and isinstance(stmt.targets[0], ast.Name):
+            found = finite_number(stmt.value, kinds, ns)
+            if found is None:
+                return f"`{_source(stmt)}`{_where(stmt)}", None  # :draft
+            kinds[stmt.targets[0].id] = found
+            continue
+        if isinstance(stmt, ast.If):
+            if _never_taken(stmt.test, kinds, ns):
+                branches = [stmt.orelse]
+            else:
+                level, test = read_expression(stmt.test, kinds, ns)
+                if min(level, _truth_level(test)) < TOTAL:
+                    return f"the test `{_source(stmt.test)}`{_where(stmt.test)}", None  # :draft
+                branches = [stmt.body, stmt.orelse]
+            after = []
+            for branch in branches:
+                reason, left = _steps_that_may_raise(branch, kinds, ns)
+                if reason is not None:
+                    return reason, None
+                if left is not None:
+                    after.append(left)
+            if not after:
+                return None, None
+            # a name every branch that falls through binds, as a value
+            # of any of them
+            kinds = {name: after[0][name] for name in after[0]
+                     if all(name in left for left in after)}
+            for left in after[1:]:
+                kinds = {name: _union(kind, left[name]) for name, kind in kinds.items()}
+            continue
+        return f"`{_source(stmt)}`{_where(stmt)}", None  # :draft
+    return None, kinds
+
+
+def step_that_may_raise(fn, kinds: dict) -> "str | None":  # :draft
+    """Intent:
+        The first statement of the plain Python function `fn` that is not
+        shown unable to raise when its parameters hold numbers of `kinds`,
+        as words; None when every run of the body is shown to return, in
+        Python's float and integer arithmetic, with no step raising.
+
+    Notes:
+        Read: assignments to one name and `return` of a number
+        (`finite_number`), and `if` with a test that cannot fail, each
+        branch read. A branch whose test never holds is not run
+        (`_never_taken`), so a `raise` there is not reached. Any other
+        statement, a `raise` that may be reached among them, is named.
+    """
+    import inspect
+    import textwrap
+    ns = _Namespace(fn)
+    if not ns.ok:
+        return "the function has no Python code object"  # :draft
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn.__code__)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return "the function's source is not available"  # :draft
+    fdef = tree.body[0] if tree.body else None
+    if not isinstance(fdef, ast.FunctionDef) or fdef.name != fn.__code__.co_name:
+        return "the function's source is not one `def`"  # :draft
+    ast.increment_lineno(tree, fn.__code__.co_firstlineno - 1)
+    return _steps_that_may_raise(fdef.body, kinds, ns)[0]
 
 
 def _source(node: ast.AST) -> str:
