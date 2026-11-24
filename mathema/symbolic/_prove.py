@@ -5223,7 +5223,7 @@ def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":
             return "a call with a keyword"
         if name not in _ONE_NUMBER_FUNCTIONS \
                 and name not in ("min", "max", "Min", "Max", "dim") \
-                and _SAFE_FUNCS.get(name) not in (len, sum, sorted, str):
+                and not any(_SAFE_FUNCS.get(name) is known for known in (len, sum, sorted, str)):
             return f"a call of `{name}`" if name else "a call"
         return None
     if isinstance(node, ast.Name):

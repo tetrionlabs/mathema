@@ -480,8 +480,8 @@ def _arithmetic(op: ast.AST, a: ValueKind, b: ValueKind, right: ast.AST):
                 and isinstance(right.operand, ast.Constant) \
                 and type(right.operand.value) in (int, float):
             # a signed literal: `-1.5`
-            divisor = -right.operand.value if isinstance(right.op, ast.USub) \
-                else right.operand.value  # :draft
+            literal: "int | float" = right.operand.value  # type: ignore[assignment]
+            divisor = -literal if isinstance(right.op, ast.USub) else literal  # :draft
         if type(divisor) in (int, float) and abs(divisor) >= 1 \
                 and _converts_to_float(a) and math.isfinite(_magnitude(divisor)):
             # |a / c| <= |a| and |a // c| <= |a| + 1 for |c| >= 1, and
