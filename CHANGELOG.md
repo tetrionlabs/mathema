@@ -20,6 +20,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A claim whose stored text 0.6.6.1 wrote and cannot read back (`= not (a < x and x < b)`) is checked again as written and re-recorded with a note, where 0.6.6.1 failed the whole function with "rebuild the record". An edit made to that claim since its record was written is adopted without `--as superseded`.
 
 ### Fixes
+- A long run of spaces in an `assuming` clause no longer slows the reading of the clause.
 - The check of a language's definition compares the strings the claim itself writes. Agreement on the values tried is no proof: the definition, the reading of a validator and `<L> holds only texts` each stand as `assumed`, with an `axiom` id and a `corroboration` record of the values drawn, compared and skipped, the seed and the outcome. A proven line names a definition it assumes when a value was skipped or none was compared.
 - A language whose `contains()` admits a value that is not a text proves no claim on the solver route; a proof lists `<L> holds only texts` among its assumptions.
 - A falsified claim's witness, shrunk inside a language, stays inside the claim's premise.
