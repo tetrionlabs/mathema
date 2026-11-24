@@ -1428,5 +1428,65 @@
   "input": "assuming dim(returns) >= 2, for returns in [-0.1, 0.1]^n, f(returns) >= 0",
   "unicode": "assuming dim(returns) >= 2, ∀ returns ∈ ([-0.1, 0.1] ∪ {∅})ⁿ ⊂ ℝ, f(returns) ≥ 0",
   "ascii": "assuming dim(returns) >= 2, for returns in ([-0.1, 0.1] | {missing})^n : float, f(returns) >= 0"
+ },
+ "subject_function": {
+  "input": "for x in [-10, 10], lo in [0, 1], hi in [2, 3], lo <= clamp(x, lo, hi) <= hi",
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, lo ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, hi ∈ [2.0, 3.0] ⊂ ℝ ∪ {∅}, lo ≤ clamp(x, lo, hi) ≤ hi",
+  "ascii": "for x in [-10.0, 10.0] : float|missing, lo in [0.0, 1.0] : float|missing, hi in [2.0, 3.0] : float|missing, lo <= clamp(x, lo, hi) <= hi"
+ },
+ "subject_function_trap": {
+  "input": "for x in [-10, 10], lo in [0, 1], hi in [2, 3], clamp(x, lo, hi) == x",
+  "unicode": "∀ x ∈ [-10.0, 10.0] ⊂ ℝ ∪ {∅}, lo ∈ [0.0, 1.0] ⊂ ℝ ∪ {∅}, hi ∈ [2.0, 3.0] ⊂ ℝ ∪ {∅}, clamp(x, lo, hi) = x",
+  "ascii": "for x in [-10.0, 10.0] : float|missing, lo in [0.0, 1.0] : float|missing, hi in [2.0, 3.0] : float|missing, clamp(x, lo, hi) = x"
+ },
+ "subject_method_state": {
+  "input": "for balance in [0, 1000], amount in [0, 100], assuming amount <= balance, withdraw(balance, amount) == balance - amount",
+  "unicode": "assuming amount <= balance, ∀ balance ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, amount ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, withdraw(balance, amount) = -amount + balance",
+  "ascii": "assuming amount <= balance, for balance in [0.0, 1000.0] : float|missing, amount in [0.0, 100.0] : float|missing, withdraw(balance, amount) = -amount + balance"
+ },
+ "subject_method_state_funded": {
+  "input": "for balance in [100, 1000], amount in [0, 100], withdraw(balance, amount) == balance - amount",
+  "unicode": "∀ balance ∈ [100.0, 1000.0] ⊂ ℝ ∪ {∅}, amount ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, withdraw(balance, amount) = -amount + balance",
+  "ascii": "for balance in [100.0, 1000.0] : float|missing, amount in [0.0, 100.0] : float|missing, withdraw(balance, amount) = -amount + balance"
+ },
+ "subject_method_state_refusal": {
+  "input": "for balance in [0, 100], amount in (100, 200], raises(withdraw(balance, amount), ValueError)",
+  "unicode": "∀ balance ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, amount ∈ (100.0, 200.0] ⊂ ℝ ∪ {∅}, raises(withdraw(balance, amount), ValueError)",
+  "ascii": "for balance in [0.0, 100.0] : float|missing, amount in (100.0, 200.0] : float|missing, raises(withdraw(balance, amount), ValueError)"
+ },
+ "subject_method_state_trap": {
+  "input": "for balance in [0, 1000], amount in [0, 100], withdraw(balance, amount) == balance - amount",
+  "unicode": "∀ balance ∈ [0.0, 1000.0] ⊂ ℝ ∪ {∅}, amount ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, withdraw(balance, amount) = -amount + balance",
+  "ascii": "for balance in [0.0, 1000.0] : float|missing, amount in [0.0, 100.0] : float|missing, withdraw(balance, amount) = -amount + balance"
+ },
+ "subject_pipeline": {
+  "input": "let g = mathema.lexicon.growth_factor_reference, f =:= g",
+  "unicode": "let g = mathema.lexicon.growth_factor_reference, f ≡ g",
+  "ascii": "let g = mathema.lexicon.growth_factor_reference, f =:= g"
+ },
+ "subject_pipeline_trap": {
+  "input": "let g = mathema.lexicon.growth_factor_misread, f =:= g",
+  "unicode": "let g = mathema.lexicon.growth_factor_misread, f ≡ g",
+  "ascii": "let g = mathema.lexicon.growth_factor_misread, f =:= g"
+ },
+ "subject_pipeline_pointwise": {
+  "input": "let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, for percent in [0, 100], f(percent) == load(transform(percent))",
+  "unicode": "let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, ∀ percent ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(percent) = load(transform(percent))",
+  "ascii": "let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, for percent in [0.0, 100.0] : float|missing, f(percent) = load(transform(percent))"
+ },
+ "subject_pipeline_pointwise_trap": {
+  "input": "let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, for percent in [0, 100], f(percent) == load(transform(percent))",
+  "unicode": "let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, ∀ percent ∈ [0.0, 100.0] ⊂ ℝ ∪ {∅}, f(percent) = load(transform(percent))",
+  "ascii": "let load = mathema.lexicon.fraction_to_growth_factor, let transform = mathema.lexicon.percent_to_fraction, for percent in [0.0, 100.0] : float|missing, f(percent) = load(transform(percent))"
+ },
+ "subject_config_record": {
+  "input": "for config in L[mathema.lexicon.BUILD_CONFIG], config[\"jobs\"] <= 8",
+  "unicode": "∀ config ∈ L[mathema.lexicon.BUILD_CONFIG], config[\"jobs\"] ≤ 8",
+  "ascii": "for config in L[mathema.lexicon.BUILD_CONFIG], config[\"jobs\"] <= 8"
+ },
+ "subject_config_record_trap": {
+  "input": "for config in L[mathema.lexicon.BUILD_CONFIG], config[\"jobs\"] <= 4",
+  "unicode": "∀ config ∈ L[mathema.lexicon.BUILD_CONFIG], config[\"jobs\"] ≤ 4",
+  "ascii": "for config in L[mathema.lexicon.BUILD_CONFIG], config[\"jobs\"] <= 4"
  }
 }

@@ -31,6 +31,7 @@ _LANGUAGE_ROWS = (
     "language_contraction", "language_excluding_empty",
     "language_length_bound", "language_membership_symbol",
     "language_missing_excluded", "language_section",
+    "subject_config_record", "subject_config_record_trap",
 )
 
 #: the verdict every row with an example function lands on, or
@@ -236,6 +237,18 @@ PINNED: dict = {
     "let_shift_seq_mean_moves": "falsified",
     "assuming_spread_positive": "holds",
     "dim_call_premise": "holds",
+    # the claim-subject rows: a function, a method with its state
+    # written out, a pipeline; a row ending _trap is a false twin
+    "subject_function": "proven",
+    "subject_function_trap": "falsified",
+    "subject_method_state": "holds",
+    "subject_method_state_funded": "proven",
+    "subject_method_state_refusal": "holds",
+    "subject_method_state_trap": "falsified",
+    "subject_pipeline": "proven",
+    "subject_pipeline_trap": "falsified",
+    "subject_pipeline_pointwise": "proven",
+    "subject_pipeline_pointwise_trap": "falsified",
 }
 if importlib.util.find_spec("mathema_language") is None:
     PINNED.update({key: "unknown" for key in _LANGUAGE_ROWS})
