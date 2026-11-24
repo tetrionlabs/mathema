@@ -270,3 +270,36 @@ def shortfall_is_empty(compared: int, disagreed: int, skipped: int) -> bool:
     from mathema import domain_relations
     return domain_relations.corroboration_shortfall(
         int(compared), int(disagreed), int(skipped)) == ""
+
+
+def before_region_arrow_reference(part: str) -> str:
+    """The text of `part` before its first `-->`, `=>` or `⟹`, stripped,
+    found with a plain search for each arrow."""
+    cut = len(part)
+    for arrow in ("-->", "=>", "⟹"):
+        at = part.find(arrow)
+        if at != -1:
+            cut = min(cut, at)
+    return part[:cut].strip()
+
+
+def arrow_free(text: str) -> bool:
+    """Whether `text` holds none of `-->`, `=>`, `⟹`."""
+    return not any(arrow in text for arrow in ("-->", "=>", "⟹"))
+
+
+def is_stripped(text: str) -> bool:
+    """Whether `text` equals itself with leading and trailing whitespace removed."""
+    return text == text.strip()
+
+
+def stripped(text: str) -> str:
+    """`text` with leading and trailing whitespace removed."""
+    return text.strip()
+
+
+
+def after_two_arrows(head: str) -> str:
+    """`head` followed by an arrow of each spelling, so that the first
+    arrow is the one right after `head`."""
+    return head + " --> b => c ⟹ d"
