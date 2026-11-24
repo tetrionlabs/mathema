@@ -79,6 +79,7 @@ UNDECIDED = "undecided"
 UNCONFIRMED = "unconfirmed"
 CONTRADICTED = "contradicted holds"
 LEAK = "LEAK"
+CRASH = "crash"
 NOT_RUN = "not run"
 
 # Comparison classes.
@@ -109,6 +110,8 @@ class Case:
     `mathema/_rules.py` must list for the case to run on a tree; `issue`
     names an open issue the case reproduces. `marker` marks a case whose
     function writes the planted marker somewhere, so its row is searched.
+    `rule_if_false` says the rule is needed only where the claim is
+    false, which the ground truth decides.
     `points` gives the points to try for a variable whose domain the
     ground truth cannot enumerate (a language). `setup` is `module:name`
     of a function returning a teardown callable, run around the check."""
@@ -124,6 +127,7 @@ class Case:
     points: "dict | None" = None
     setup: "str | None" = None
     shows: str = ""
+    rule_if_false: bool = False
 
 
 def resolve(reference: str) -> Any:
@@ -1016,12 +1020,13 @@ def _leading_literal(text: str) -> tuple:
 def witness_fails(case: Case, point: dict) -> "bool | None":
     """Whether the claim fails at a printed witness when called: True,
     False, or None when it cannot be evaluated there. A witness outside
-    the claim's domain does not fail the claim."""
+    the claim's domain cannot be replayed (it may name the function's
+    parameters rather than the claim's variables), so it gives None."""
     try:
         parsed = parse_claim(case.claim, case.points)
         for name, dom in parsed.bindings:
             if not dom.contains(point.get(name)):
-                return False
+                return None
         subject = _subject(case, parsed)
         assert parsed.body is not None
         negated, word, _arg = _top_word(parsed.body)
@@ -1087,10 +1092,14 @@ def marker_hits(rows: Sequence[Any]) -> list:
     return hits
 
 
-def check_case(case: Case, rules_text: "str | None" = None) -> Outcome:
-    """Run `check_conjectures` on one case in this interpreter's tree."""
+def check_case(case: Case, rules_text: "str | None" = None, honour_rules: bool = True) -> Outcome:
+    """Run `check_conjectures` on one case in this interpreter's tree.
+    A case whose rule the tree lacks is not run, and says so, unless
+    `honour_rules` is False."""
     rules_text = rules_in_tree() if rules_text is None else rules_text
-    if case.rule and case.rule not in rules_text:
+    needs_rule = bool(case.rule) and (not case.rule_if_false
+                                      or known_truth(case, ground_truth(case)) is False)
+    if honour_rules and needs_rule and case.rule not in rules_text:
         return Outcome(case.name, NOT_RUN, skipped_for=f"the tree lacks {case.rule}")
     from mathema.conjecture import check_conjectures, claim
     teardown = resolve(case.setup)() if case.setup else None
@@ -1160,6 +1169,8 @@ def judge(case: Case, outcome: Outcome, ground: GroundTruth) -> Judgement:
 
     if outcome.verdict == NOT_RUN:
         return made(NOT_RUN, outcome.skipped_for)
+    if outcome.verdict == "crash":
+        return made(CRASH, f"check_conjectures raised {outcome.note}")
     if outcome.marker_hits:
         return made(LEAK, "the planted marker shows in " + "; ".join(outcome.marker_hits))
     if outcome.verdict == "proven":
@@ -1237,37 +1248,38 @@ def _ensure_importable_children() -> None:
         os.environ["PYTHONPATH"] = os.pathsep.join([*paths, str(REPO_ROOT)])
 
 
-def outcomes_here(cases: Sequence[Case]) -> list[Outcome]:
+def outcomes_here(cases: Sequence[Case], honour_rules: bool = True) -> list[Outcome]:
     _ensure_importable_children()
     rules = rules_in_tree()
-    return [check_case(c, rules) for c in cases]
+    return [check_case(c, rules, honour_rules) for c in cases]
 
 
 _CHILD = """
 import importlib.util, json, sys
-tree, root, runner, names = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+tree, root, runner, names, honour = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4]), sys.argv[5] == "1"
 sys.path[:0] = [p for p in (tree, root) if p]
 import mathema
 if tree and not mathema.__file__.startswith(tree):
     raise SystemExit("mathema resolved to " + mathema.__file__ + ", not under " + tree)
 spec = importlib.util.spec_from_file_location("verdict_families_runner", runner)
 mod = importlib.util.module_from_spec(spec); sys.modules[spec.name] = mod; spec.loader.exec_module(mod)
-mod._child_main(names)
+mod._child_main(names, honour)
 """
 
 
-def _child_main(names: Sequence[str]) -> None:
+def _child_main(names: Sequence[str], honour_rules: bool = True) -> None:
     import dataclasses as dc
     wanted = set(names)
     families = sorted({n.split(".", 1)[0] for n in names})
     cases = [c for c in cases_of(families) if c.name in wanted]
-    for outcome in outcomes_here(cases):
+    for outcome in outcomes_here(cases, honour_rules):
         print("OUTCOME " + json.dumps(dc.asdict(outcome), default=repr), flush=True)
 
 
-def outcomes_in_tree(tree: "str | None", cases: Sequence[Case], workers: int = 1) -> list[Outcome]:
-    """Run the cases in child interpreters with `tree` (the directory
-    holding a `mathema/` package; None for this one) first on the path."""
+def outcomes_in_tree(tree: "str | None", cases: Sequence[Case], workers: int = 1,
+                     honour_rules: bool = True) -> list[Outcome]:
+    """Run the cases in child interpreters with `tree` (a checkout's
+    `mathema/` package; None for this one) first on the path."""
     tree_dir = str(Path(tree).resolve().parent) if tree else ""
     if tree and Path(tree).name != "mathema":
         raise ValueError("give the path of a checkout's mathema/ package")
@@ -1280,7 +1292,7 @@ def outcomes_in_tree(tree: "str | None", cases: Sequence[Case], workers: int = 1
             continue
         procs.append(subprocess.Popen(
             [sys.executable, "-c", _CHILD, tree_dir, str(REPO_ROOT), str(Path(__file__).resolve()),
-             json.dumps([c.name for c in chunk])],
+             json.dumps([c.name for c in chunk]), "1" if honour_rules else "0"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, cwd=str(REPO_ROOT)))
     found: dict = {}
     for proc in procs:
@@ -1359,7 +1371,7 @@ def summary(judgements: Sequence[Judgement]) -> str:
         lines.append(f"  {area}: " + ", ".join(
             f"{sum(j.status == s for j in mine)} {s}" for s in statuses if any(j.status == s for j in mine)))
     for j in judgements:
-        if j.status in (WRONG, LEAK, NOT_RUN):
+        if j.status in (WRONG, LEAK, CRASH, NOT_RUN):
             tag = f" (issue {j.issue})" if j.issue else ""
             lines.append(f"{j.status} {j.case}{tag}: {j.reason}")
     return "\n".join(lines)
@@ -1387,13 +1399,18 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--json", help="write the table as JSON lines here")
     parser.add_argument("--only", help="run only cases whose name contains this text")
+    parser.add_argument("--all-rules", action="store_true",
+                        help="run cases whose rule the tree lacks as well")
     args = parser.parse_args(argv)
     cases = cases_of(args.families)
     if args.only:
         cases = [c for c in cases if args.only in c.name]
-    head = outcomes_in_tree(args.head, cases, args.workers)
+    head = outcomes_in_tree(args.head, cases, args.workers, honour_rules=not args.all_rules)
     if args.base:
-        base = outcomes_in_tree(args.base, cases, args.workers)
+        # a case whose rule the head carries also runs on a base that lacks it
+        ran = [c for c, o in zip(cases, head) if o.verdict != NOT_RUN]
+        found = {o.case: o for o in outcomes_in_tree(args.base, ran, args.workers, honour_rules=False)}
+        base = [found.get(c.name, o) for c, o in zip(cases, head)]
         rows = compare(cases, base, head)
         lines = [json.dumps({"case": r.case, "area": r.area, "class": r.cls,
                              "base": dataclasses.asdict(r.base), "head": dataclasses.asdict(r.head)},
