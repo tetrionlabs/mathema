@@ -5,6 +5,9 @@ sugar expanders and the domain parser. Stdlib-only leaf.
 """
 from __future__ import annotations
 
+import ast
+import contextlib
+import contextvars
 import re
 from typing import Callable
 
@@ -45,6 +48,41 @@ def _opens_string(s: str, i: int) -> bool:
     return s[i] in _QUOTES
 
 
+def _raw_string_end(s: str, i: int) -> "int | None":
+    """Intent:
+        The index just past a raw literal whose `r` prefix is `s[i]`
+        (`r'[a-z]+'`, `r"[a-z]+"`), or None when `s[i]` does not start
+        one. The prefix must stand alone as a name.
+
+    Notes:
+        After a name a single quote is otherwise a derivative prime, so
+        `r'(x)` is the derivative of a function named `r`. A single
+        quoted raw string is read only when the quote is closed and
+        what follows the closing quote is not a name or an opening
+        bracket (as it is in `r'(x) + r'(y)`).
+    """
+    if s[i] not in "rR" or i + 1 >= len(s) or s[i + 1] not in _QUOTES:
+        return None
+    if i > 0 and (s[i - 1].isalnum() or s[i - 1] in "_'.)"):
+        return None
+    end = _string_end(s, i + 1)
+    if s[i + 1] == '"':
+        return end
+    if end < i + 3 or s[end - 1] != "'" or (end == i + 3 and s[i + 2] == "\\"):
+        return None
+    if end < len(s) and (s[end].isalnum() or s[end] in "_('"):
+        return None
+    return end
+
+
+def _literal_end(s: str, i: int) -> "int | None":
+    """The index just past the quoted literal starting at `s[i]`, its
+    raw prefix included, or None when no literal starts there."""
+    if _opens_string(s, i):
+        return _string_end(s, i)
+    return _raw_string_end(s, i)
+
+
 def mask_strings(s: str) -> tuple[str, list[str]]:
     """Intent:
         `s` with every quoted literal replaced by a numbered placeholder
@@ -57,8 +95,8 @@ def mask_strings(s: str) -> tuple[str, list[str]]:
     literals: list[str] = []
     i = 0
     while i < len(s):
-        if _opens_string(s, i):
-            end = _string_end(s, i)
+        end = _literal_end(s, i)
+        if end is not None:
             out.append(_STRING_MARK.format(len(literals)))
             literals.append(s[i:end])
             i = end
@@ -105,6 +143,115 @@ def sub_outside_strings(pattern, repl, s: str, count: int = 0) -> str:
     return outside_strings(lambda t: re.sub(pattern, repl, t, count=count), s)
 
 
+#: whether stored claim text is written with the literal quoting of
+#: releases up to 0.6.6.1, for reading a record those releases wrote
+_LEGACY_QUOTING: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "legacy_quoting", default=False)
+
+
+@contextlib.contextmanager
+def legacy_quoting():
+    """Intent:
+        Within the block, claim text is rendered with the literal
+        quoting releases up to 0.6.6.1 wrote (`grammar._legacy_double_quoted`
+        and a domain set member always in double quotes), so a record
+        those releases wrote can be compared with the claim it records.
+    """
+    token = _LEGACY_QUOTING.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_QUOTING.reset(token)
+
+
+def uses_legacy_quoting() -> bool:
+    """Intent:
+        Whether `legacy_quoting` is in force.
+    """
+    return _LEGACY_QUOTING.get()
+
+
+#: whether stored claim text writes a `not` over a relation without its
+#: parentheses, as releases up to 0.6.6.1 did, for reading a record
+#: those releases wrote
+_LEGACY_NOT_PARENTHESES: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "legacy_not_parentheses", default=False)
+
+
+@contextlib.contextmanager
+def legacy_not_parentheses():
+    """Intent:
+        Within the block, a `not` over a comparison or a boolean
+        connective is rendered without its own parentheses, as releases
+        up to 0.6.6.1 wrote it (`f(x) = not (a < x and x < b)`, text that
+        does not read back), so a record those releases wrote can be
+        compared with the claim it records.
+    """
+    token = _LEGACY_NOT_PARENTHESES.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_NOT_PARENTHESES.reset(token)
+
+
+def uses_legacy_not_parentheses() -> bool:
+    """Intent:
+        Whether `legacy_not_parentheses` is in force.
+    """
+    return _LEGACY_NOT_PARENTHESES.get()
+
+
+def uses_legacy_rendering() -> bool:
+    """Intent:
+        Whether any rendering of an earlier release is in force.
+    """
+    return _LEGACY_QUOTING.get() or _LEGACY_NOT_PARENTHESES.get()
+
+
+def string_literal(value: str) -> str:
+    """Intent:
+        The one spelling of a string value in stored claim text. A value
+        holding no double quote is written in double quotes; a value
+        holding one is written as Python writes it (`repr`: single
+        quotes, a single quote inside escaped as `\\'`). Inside the
+        quotes every other character is escaped exactly as `repr`
+        escapes it (`\\\\`, `\\n`, `\\t`, `\\x00`, ...), and every printable
+        character, unicode included, is written as itself.
+
+    Notes:
+        The spelling is a function of the value alone, so one value has
+        one stored spelling however its literal was written.
+    """
+    shown = repr(value)
+    return shown if '"' in value else f'"{shown[1:-1]}"'
+
+
+def _requoted(literal: str) -> str:
+    """Intent:
+        One quoted literal as `string_literal` spells its value, or the
+        literal as written when it is not a complete string literal.
+    """
+    try:
+        value = ast.literal_eval(literal)
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
+        return literal
+    return string_literal(value) if isinstance(value, str) else literal
+
+
+def requote_literals(s: str) -> str:
+    """Intent:
+        `s` with each quoted literal (as `mask_strings` reads them, one
+        literal at a time, escapes honoured) written in the spelling
+        `string_literal` gives its value. The text outside the literals
+        is unchanged, and the quotes of one literal never pair with the
+        quotes of another.
+    """
+    masked, literals = mask_strings(s)
+    if not literals:
+        return s
+    return unmask_strings(masked, [_requoted(lit) for lit in literals])
+
+
 def _split_commas(s: str) -> list[str]:
     """Split on top-level commas only: a comma nested inside any
     bracket pair (`[]`, `()`, `{}`) or inside a quoted literal stays
@@ -115,8 +262,8 @@ def _split_commas(s: str) -> list[str]:
     i = 0
     while i < len(s):
         ch = s[i]
-        if _opens_string(s, i):
-            end = _string_end(s, i)
+        end = _literal_end(s, i)
+        if end is not None:
             cur.append(s[i:end])
             i = end
             continue

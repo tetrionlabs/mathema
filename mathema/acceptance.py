@@ -44,7 +44,7 @@ import subprocess
 from .grammar import split_relation
 from .identity import namespaced_form, same_form
 from .routes import safety_predicates
-from .spec import classify_verdict, write_yaml
+from .spec import _SAFE_LOADER, classify_verdict, write_yaml
 
 ACCEPT_AS = ("evidence", "risk", "discovery", "historical", "superseded",
              "trusted", "reconciled")
@@ -701,6 +701,8 @@ def _apply_rename(plan: dict, attestation: "dict | None") -> str:
     write_yaml(plan["new_path"], {new_key: entry},
                header=f"machine record; reconciled {new_key} from {old_key}")
     os.remove(plan["path"])
+    from . import _run_scope
+    _run_scope.wrote(plan["path"])
     from .locks import _write_locks, load_locks
     locks = load_locks(root)
     if old_key in locks:
@@ -1273,6 +1275,29 @@ def _apply_attested(plan: dict, attestation) -> str:
     if plan["as"] == "superseded":
         entry = doc[plan["key"]]
         claims = entry.get("claims") or []
+        earlier = (target.get("meta") or {}).pop("mathema.earlier_reading", None)
+        if isinstance(earlier, dict):
+            # the live row is the claim as written, already checked; the
+            # earlier reading of its stored text is what is superseded
+            import copy
+            prior = copy.deepcopy(target)
+            prior["statement"] = earlier.get("statement")
+            prior["verdict"] = earlier.get("verdict")
+            for field_name in ("note", "sketch", "counterexample", "n",
+                               "condition", "acceptance_history"):
+                prior.pop(field_name, None)
+            prior["accepted"] = plan["accepted"]
+            prior["acceptance_history"] = [event]
+            prior["superseded_by"] = target.get("name")
+            entry.setdefault("superseded", []).append(prior)
+            _restamp_integrity(doc[plan["key"]])
+            write_yaml(plan["path"], doc,
+                       header=f"machine record; supersession of "
+                              f"{target.get('name')}")
+            # :draft
+            return (f"superseded: the earlier reading of {target.get('name')} "
+                    f"({earlier.get('statement')}); the claim as written "
+                    f"stays as checked")
         target["accepted"] = plan["accepted"]
         target.setdefault("acceptance_history", []).append(event)
         target["superseded_by"] = target.get("name")
@@ -1658,7 +1683,7 @@ def carry_acceptance(spec: dict, key: str, path: str) -> None:
     try:
         import yaml
         with open(path) as fh:
-            prior_doc = yaml.safe_load(fh) or {}
+            prior_doc = yaml.load(fh, Loader=_SAFE_LOADER) or {}
         prior_entry = prior_doc.get(key) or {}
     except Exception:
         return
@@ -1831,7 +1856,8 @@ def carry_intent_acceptance(spec: dict, key: str, path: str) -> None:
         return
     try:
         with open(path) as fh:
-            prior = (yaml.safe_load(fh) or {}).get(key) or {}
+            prior = (yaml.load(fh, Loader=_SAFE_LOADER)
+                     or {}).get(key) or {}
     except Exception:
         return
     # concepts_accepted rides the same carry (tags are curation, not

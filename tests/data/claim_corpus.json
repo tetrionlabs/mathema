@@ -135,32 +135,57 @@
   "unicode": "A^T = A"
  },
  "L[a] ⊂ L[b]": {
-  "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'L[a] ⊂ L[b]'",
+  "error": "InvalidConjecture: `⊂` reads two ways: write `L[a] subset L[b]` for every member of L[a] is in L[b], equality included, or `L[a] subset L[b] and L[a] != L[b]` for a proper subset",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_relations_between_domains.py",
+   "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
  "L[ascii, len <= 8] subset L[unicode]": {
-  "error": "InvalidConjecture: the only comparison in 'L[ascii, len <= 8] subset L[unicode]' sits inside parentheses, a comprehension or quantified expression is not claim syntax; quantify the element domain (a `for xs in [lo, hi], ...` element bound) or state the sum with Sum(expr, var, lo, hi)",
-  "parses": false,
+  "ascii": "L[ascii, len <= 8] subset L[unicode]",
+  "domains": {},
+  "fingerprint": "95e070ac7bf7",
+  "identity": "L[ascii, len <= 8] subset L[unicode]",
+  "parses": true,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py"
-  ]
+  ],
+  "unicode": "L[ascii, len <= 8] ⊆ L[unicode]"
  },
  "L[ascii] subset L[unicode]": {
-  "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'L[ascii] subset L[unicode]'",
-  "parses": false,
+  "ascii": "L[ascii] subset L[unicode]",
+  "domains": {},
+  "fingerprint": "aa2299e1e83f",
+  "identity": "L[ascii] subset L[unicode]",
+  "parses": true,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py"
-  ]
+  ],
+  "unicode": "L[ascii] ⊆ L[unicode]"
  },
  "L[ascii] ⊆ L[unicode]": {
-  "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'L[ascii] ⊆ L[unicode]'",
-  "parses": false,
+  "ascii": "L[ascii] subset L[unicode]",
+  "domains": {},
+  "fingerprint": "aa2299e1e83f",
+  "identity": "L[ascii] subset L[unicode]",
+  "parses": true,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py"
-  ]
+  ],
+  "unicode": "L[ascii] ⊆ L[unicode]"
+ },
+ "L[slugdef] subset L[slugdef]": {
+  "ascii": "L[slugdef] subset L[slugdef]",
+  "domains": {},
+  "fingerprint": "3b91f7ccdfa6",
+  "identity": "L[slugdef] subset L[slugdef]",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_moved_language_definition_makes_the_record_stale.py"
+  ],
+  "unicode": "L[slugdef] ⊆ L[slugdef]"
  },
  "Prod(x)_{i=1}^n == f(x, n)": {
   "ascii": "Prod(x, i, 1, n) = f(x, n)",
@@ -172,6 +197,17 @@
    "tests:tests/test_symbolic.py"
   ],
   "unicode": "Prod(x, i, 1, n) = f(x, n)"
+ },
+ "R supset Z": {
+  "ascii": "Z subset R",
+  "domains": {},
+  "fingerprint": "964a4e9f3c7e",
+  "identity": "Z subset R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "ℤ ⊆ ℝ"
  },
  "S(0, 0, b, -x) == -S(0, 0, b, x)": {
   "ascii": "S(0, 0, b, -x) = -S(0, 0, b, x)",
@@ -274,6 +310,57 @@
    "tests:tests/test_symbolic.py"
   ],
   "unicode": "Sum(i, i, 1, n) = f(n)"
+ },
+ "Z != R": {
+  "ascii": "Z != R",
+  "domains": {},
+  "fingerprint": "65c71fa4714e",
+  "identity": "Z != R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "ℤ ≠ ℝ"
+ },
+ "[0, 1] subset [0, 2]": {
+  "ascii": "[0.0, 1.0] subset [0.0, 2.0]",
+  "domains": {},
+  "fingerprint": "fe86c4d600b5",
+  "identity": "[0.0, 1.0] subset [0.0, 2.0]",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "[0.0, 1.0] ⊆ [0.0, 2.0]"
+ },
+ "[0, 2] | [1, 3] subset R": {
+  "ascii": "[0.0, 2.0] | [1.0, 3.0] subset R",
+  "domains": {},
+  "fingerprint": "052718b0d176",
+  "identity": "[0.0, 2.0] | [1.0, 3.0] subset R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "[0.0, 2.0] ∪ [1.0, 3.0] ⊆ ℝ"
+ },
+ "[0, 3] subset R": {
+  "ascii": "[0.0, 3.0] subset R",
+  "domains": {},
+  "fingerprint": "0816d685109f",
+  "identity": "[0.0, 3.0] subset R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "[0.0, 3.0] ⊆ ℝ"
+ },
+ "[0, 5] subset Z subset R": {
+  "error": "InvalidConjecture: '[0, 5] subset Z subset R' holds more than one relation between two domains; state one (an integer range is written `[0, 5] : int`)",
+  "parses": false,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ]
  },
  "a + b >= 0": {
   "ascii": "a + b >= 0",
@@ -514,8 +601,8 @@
   "parses": true,
   "sources": [
    "claims-file:mathema/compendium/math.claims.yaml",
-   "tests:tests/test_policy_rows_say_where_they_come_from.py",
-   "tests:tests/test_the_gates_read_the_policy_rows.py"
+   "tests:tests/test_a_raise_is_read_only_when_building_it_cannot_fail.py",
+   "tests:tests/test_policy_rows_say_where_they_come_from.py"
   ],
   "unicode": "absent(f, x) raises(TypeError)"
  },
@@ -1240,6 +1327,17 @@
    "tests:tests/test_matrix_lemmas.py"
   ],
   "unicode": "assuming A is upper triangular, is_upper_triangular(A @ B)"
+ },
+ "assuming Z != R, f(Z) == R": {
+  "ascii": "assuming Z != R, f(Z) = R",
+  "domains": {},
+  "fingerprint": "ff39450db5e3",
+  "identity": "assuming Z != R, f(Z) = R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "assuming Z != R, f(Z) = R"
  },
  "assuming [5,5,5] == x, for x in [0,10]^3, f(x) == [5,5,5]": {
   "ascii": "assuming [5,5,5] == x, for x in ([0.0, 10.0] | {missing})^3 : float|absent, f(x) = [5, 5, 5]",
@@ -2086,6 +2184,28 @@
   ],
   "unicode": "assuming f is defined => b != 0, b*f(a, b) = a"
  },
+ "assuming f is defined --> x != \"a\", f(x) >= 0": {
+  "ascii": "assuming f is defined => x != \"a\", f(x) >= 0",
+  "domains": {},
+  "fingerprint": "04fd0c3b3dc6",
+  "identity": "assuming f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming f is defined => x != \"a\", f(x) ≥ 0"
+ },
+ "assuming f is defined --> x != 0, f(x) >= 0": {
+  "ascii": "assuming f is defined => x != 0, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "04fd0c3b3dc6",
+  "identity": "assuming f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming f is defined => x != 0, f(x) ≥ 0"
+ },
  "assuming f is defined, abs(f(x, y)) <= 1": {
   "ascii": "assuming f is defined, |f(x, y)| <= 1",
   "domains": {},
@@ -2107,6 +2227,17 @@
    "tests:tests/test_is_defined.py"
   ],
   "unicode": "assuming f is defined, f(x) = f(x)"
+ },
+ "assuming f is defined, f(x) >= 0": {
+  "ascii": "assuming f is defined, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "04fd0c3b3dc6",
+  "identity": "assuming f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming f is defined, f(x) ≥ 0"
  },
  "assuming f is defined, for w in [-50, 50], f(F0,k,m,-w,c) == f(F0,k,m,w,c)": {
   "ascii": "assuming f is defined, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
@@ -2765,6 +2896,38 @@
    "tests:tests/test_language_len_renders_as_len.py"
   ],
   "unicode": "assuming len(s) >= 1, ∀ s ∈ L[ascii], f(s) = s"
+ },
+ "assuming len(text) < 1, for text in L[slugs], raises(f(text), ValueError)": {
+  "ascii": "assuming len(text) < 1, for text in L[slugs], raises(f(text), ValueError)",
+  "domains": {
+   "text": [
+    "L[slugs]",
+    "L[slugs]"
+   ]
+  },
+  "fingerprint": "f253a47ba84e",
+  "identity": "assuming len(text) < 1, for text in L[slugs], raises(f(text), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "assuming len(text) < 1, ∀ text ∈ L[slugs], raises(f(text), ValueError)"
+ },
+ "assuming len(text) >= 1, for text in L[slugs], f(text) == text": {
+  "ascii": "assuming len(text) >= 1, for text in L[slugs], f(text) = text",
+  "domains": {
+   "text": [
+    "L[slugs]",
+    "L[slugs]"
+   ]
+  },
+  "fingerprint": "01ad22d4be26",
+  "identity": "assuming len(text) >= 1, for text in L[slugs], f(text) = text",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "assuming len(text) >= 1, ∀ text ∈ L[slugs], f(text) = text"
  },
  "assuming len(weights) >= 1, assuming len(features) >= 1, f(weights, features) == f(weights, features)": {
   "ascii": "assuming len(weights) >= 1 and len(features) >= 1, f(weights, features) = f(weights, features)",
@@ -3596,6 +3759,83 @@
   ],
   "unicode": "assuming twin holds, ∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x) = 2*x"
  },
+ "assuming x != \"a and b\" and f is defined --> x > 1, f(x) >= 0": {
+  "ascii": "assuming x != \"a and b\" and f is defined => x > 1, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "f19f429acd29",
+  "identity": "assuming x != \"a and b\" and f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x != \"a and b\" and f is defined => x > 1, f(x) ≥ 0"
+ },
+ "assuming x != \"a and b\" and f is defined, f(x) >= 0": {
+  "ascii": "assuming x != \"a and b\" and f is defined, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "f19f429acd29",
+  "identity": "assuming x != \"a and b\" and f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x != \"a and b\" and f is defined, f(x) ≥ 0"
+ },
+ "assuming x != \"a\", f(x) == 1": {
+  "ascii": "assuming x != \"a\", f(x) = 1",
+  "domains": {},
+  "fingerprint": "3dbf9dd9096e",
+  "identity": "assuming x != \"a\", f(x) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "assuming x != \"a\", f(x) = 1"
+ },
+ "assuming x != \"a=>b\" and f is defined --> x > 1, f(x) >= 0": {
+  "ascii": "assuming x != \"a=>b\" and f is defined => x > 1, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "0ea1b1c5ac1e",
+  "identity": "assuming x != \"a=>b\" and f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x != \"a=>b\" and f is defined => x > 1, f(x) ≥ 0"
+ },
+ "assuming x != \"a=>b\" and f is defined, f(x) >= 0": {
+  "ascii": "assuming x != \"a=>b\" and f is defined, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "0ea1b1c5ac1e",
+  "identity": "assuming x != \"a=>b\" and f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x != \"a=>b\" and f is defined, f(x) ≥ 0"
+ },
+ "assuming x != '}\"' and x != 's', f(x, 't') == 1": {
+  "ascii": "assuming x != '}\"' and x != 's', f(x, \"t\") = 1",
+  "domains": {},
+  "fingerprint": "8f18b03ed3cd",
+  "identity": "assuming x != '}\"' and x != 's', f(x, \"t\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "assuming x != '}\"' and x != 's', f(x, \"t\") = 1"
+ },
+ "assuming x != '}\"', f(x, 's') == 1": {
+  "ascii": "assuming x != '}\"', f(x, \"s\") = 1",
+  "domains": {},
+  "fingerprint": "7b5a65375949",
+  "identity": "assuming x != '}\"', f(x, \"s\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "assuming x != '}\"', f(x, \"s\") = 1"
+ },
  "assuming x != 0, for x in [0, 1]^2, f(x) > 0": {
   "ascii": "assuming x != 0, for x in ([0.0, 1.0] | {missing})^2 : float|absent, f(x) > 0",
   "domains": {
@@ -4390,6 +4630,39 @@
   ],
   "unicode": "assuming x == [None, 1], ∀ x ∈ ([0.0, 1.0] ∪ {∅})² ⊂ ℝ ∪ {absent}, f(x) = x"
  },
+ "assuming x > 0 and f is defined --> x != \"a=>b\", f(x) >= 0": {
+  "ascii": "assuming x > 0 and f is defined => x != \"a=>b\", f(x) >= 0",
+  "domains": {},
+  "fingerprint": "65bea41a0b02",
+  "identity": "assuming x > 0 and f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x > 0 and f is defined => x != \"a=>b\", f(x) ≥ 0"
+ },
+ "assuming x > 0 and f is defined, f(x) >= 0": {
+  "ascii": "assuming x > 0 and f is defined, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "65bea41a0b02",
+  "identity": "assuming x > 0 and f is defined, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x > 0 and f is defined, f(x) ≥ 0"
+ },
+ "assuming x > 0, f(x) >= 0": {
+  "ascii": "assuming x > 0, f(x) >= 0",
+  "domains": {},
+  "fingerprint": "2ee3b9769045",
+  "identity": "assuming x > 0, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pin_is_stripped_only_outside_string_literals.py"
+  ],
+  "unicode": "assuming x > 0, f(x) ≥ 0"
+ },
  "assuming x > 0, for x in [-1, 1], f(x) >= 0": {
   "ascii": "assuming x > 0, for x in [-1.0, 1.0] : float|absent|missing, f(x) >= 0",
   "domains": {
@@ -4919,6 +5192,17 @@
   ],
   "unicode": "let σ = sigma, 0.5*S^2*σ^2*∂²(f(S, K, T, r, σ)/∂S²) + S*r*∂(f(S, K, T, r, σ)/∂S) - r*f(S, K, T, r, σ) + ∂(f(S, K, T, r, σ)/∂T) = 0"
  },
+ "d(f(a, k=k), a, a) == 0": {
+  "ascii": "d(f(a, k=k), a, a) = 0",
+  "domains": {},
+  "fingerprint": "f618c6c22045",
+  "identity": "d(f(a, k=k), a, a) = 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_keyword_only_parameters_pass_by_keyword.py"
+  ],
+  "unicode": "∂²(f(a, k=k)/∂a²) = 0"
+ },
  "d(f(dh,t,ds)/dh) == -ds": {
   "ascii": "d(f(dh, t, ds), h) = -ds",
   "domains": {},
@@ -5370,6 +5654,17 @@
    "tests:tests/test_calculus_sugar.py"
   ],
   "unicode": "f'(x) at {x=2} = 4"
+ },
+ "f(\"a\\\\b\") == 1": {
+  "ascii": "f(\"a\\\\b\") = 1",
+  "domains": {},
+  "fingerprint": "bd0c23435977",
+  "identity": "f(\"a\\\\b\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_domain_value_reads_its_escapes_as_an_expression_literal_does.py"
+  ],
+  "unicode": "f(\"a\\\\b\") = 1"
  },
  "f(\"no-such\") == {}": {
   "ascii": "f(\"no-such\") = {}",
@@ -6383,6 +6678,17 @@
   ],
   "unicode": "f(x) ≤ 2"
  },
+ "f(x) <= g(x)": {
+  "ascii": "f(x) <= g(x)",
+  "domains": {},
+  "fingerprint": "d88ce1f5fbce",
+  "identity": "f(x) <= g(x)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_canonical_text_that_does_not_read_back_is_refused.py"
+  ],
+  "unicode": "f(x) ≤ g(x)"
+ },
  "f(x) <= pi": {
   "ascii": "f(x) <= pi",
   "domains": {},
@@ -6770,6 +7076,28 @@
    "tests:tests/test_render_claim_text.py"
   ],
   "unicode": "f(x)^2 ≥ 0"
+ },
+ "f(x, 'a\"b\\'c') == 1": {
+  "ascii": "f(x, 'a\"b\\'c') = 1",
+  "domains": {},
+  "fingerprint": "aab7ee82ba85",
+  "identity": "f(x, 'a\"b\\'c') = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_canonical_text_that_does_not_read_back_is_refused.py"
+  ],
+  "unicode": "f(x, 'a\"b\\'c') = 1"
+ },
+ "f(x, '}\"', 's') == 1": {
+  "ascii": "f(x, '}\"', \"s\") = 1",
+  "domains": {},
+  "fingerprint": "5d3fc7aabdcb",
+  "identity": "f(x, '}\"', \"s\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_canonical_text_that_does_not_read_back_is_refused.py"
+  ],
+  "unicode": "f(x, '}\"', \"s\") = 1"
  },
  "f(x, 1.0) == x": {
   "ascii": "f(x, 1.0) = x",
@@ -9687,6 +10015,26 @@
   ],
   "unicode": "∀ X ∈ (ℝ ∪ {∅})ⁿˣⁿ ∪ {absent}, 0 ≤ f(X) ≤ 1"
  },
+ "for Z in [0, 1], R in [0, 1], Z != R": {
+  "ascii": "for Z in [0.0, 1.0] : float|absent|missing, R in [0.0, 1.0] : float|absent|missing, Z != R",
+  "domains": {
+   "R": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "Z": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "eb0057ac801d",
+  "identity": "for Z in [0.0, 1.0] : float|absent|missing, R in [0.0, 1.0] : float|absent|missing, Z != R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "∀ Z ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, R ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, Z ≠ R"
+ },
  "for \\varphi in [0, 1], f(\\varphi) \\leq 1": {
   "ascii": "for φ in [0.0, 1.0] : float|absent|missing, f(\\phi) <= 1",
   "domains": {
@@ -11617,26 +11965,6 @@
   ],
   "unicode": "∀ a ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, q ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(a, q) = quantile(a, q / 100)"
  },
- "for a in R^n, q in [0, 1], f(a, q) == quantile(a, q)": {
-  "ascii": "for a in (R | {missing})^n|absent, q in [0.0, 1.0] : float|absent|missing, f(a, q) = quantile(a, q)",
-  "domains": {
-   "a": [
-    "(R | {missing})^n|absent",
-    "(ℝ ∪ {∅})ⁿ ∪ {absent}"
-   ],
-   "q": [
-    "[0.0, 1.0] : float|absent|missing",
-    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
-   ]
-  },
-  "fingerprint": "8ffdb3a0338d",
-  "identity": "for a in (R | {missing})^n|absent, q in [0.0, 1.0] : float|absent|missing, f(a, q) = quantile(a, q)",
-  "parses": true,
-  "sources": [
-   "claims-file:mathema/compendium/numpy/statistics.claims.yaml"
-  ],
-  "unicode": "∀ a ∈ (ℝ ∪ {∅})ⁿ ∪ {absent}, q ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(a, q) = quantile(a, q)"
- },
  "for a in R^n, quantile in [0, 1], min(a) <= f(a, quantile) <= max(a)": {
   "ascii": "for a in (R | {missing})^n|absent, quantile in [0.0, 1.0] : float|absent|missing, min(a) <= f(a, quantile) <= max(a)",
   "domains": {
@@ -12155,6 +12483,26 @@
    "claims-file:mathema/compendium/numpy/statistics.claims.yaml"
   ],
   "unicode": "∀ a ∈ ([-1e+150, 1e+150] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, q ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, min(a) ≤ f(a, q) ≤ max(a)"
+ },
+ "for a in [-1e150, 1e150]^n, q in [0, 1], f(a, q) == quantile(a, q)": {
+  "ascii": "for a in ([-1e+150, 1e+150] | {missing})^n : float|absent, q in [0.0, 1.0] : float|absent|missing, f(a, q) = quantile(a, q)",
+  "domains": {
+   "a": [
+    "([-1e+150, 1e+150] | {missing})^n : float|absent",
+    "([-1e+150, 1e+150] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}"
+   ],
+   "q": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "9e28cee62cb8",
+  "identity": "for a in ([-1e+150, 1e+150] | {missing})^n : float|absent, q in [0.0, 1.0] : float|absent|missing, f(a, q) = quantile(a, q)",
+  "parses": true,
+  "sources": [
+   "claims-file:mathema/compendium/numpy/statistics.claims.yaml"
+  ],
+  "unicode": "∀ a ∈ ([-1e+150, 1e+150] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, q ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(a, q) = quantile(a, q)"
  },
  "for a in [-1e150, 1e150]^n, q in [0, 1], min(a) <= f(a, q) <= max(a)": {
   "ascii": "for a in ([-1e+150, 1e+150] | {missing})^n : float|absent, q in [0.0, 1.0] : float|absent|missing, min(a) <= f(a, q) <= max(a)",
@@ -13844,6 +14192,50 @@
   ],
   "unicode": "let θ = theta, ∀ a ∈ [2.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, b ∈ [0.1, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(a, b) = ∫(1/(a + b*cos(θ)), θ, 0, 2*π)"
  },
+ "for a in [32, 126] subset Z, b in [32, 126] subset Z, shape in {0, 1, 2, 3}, f(a, b, shape) == True": {
+  "ascii": "for a in [32, 126] : int, b in [32, 126] : int, shape in {0, 1, 2, 3}, f(a, b, shape) = True",
+  "domains": {
+   "a": [
+    "[32, 126] : int",
+    "[32, 126] ⊂ ℤ"
+   ],
+   "b": [
+    "[32, 126] : int",
+    "[32, 126] ⊂ ℤ"
+   ],
+   "shape": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ]
+  },
+  "fingerprint": "6a6adb5cddc6",
+  "identity": "for a in [32, 126] : int, b in [32, 126] : int, shape in {0, 1, 2, 3}, f(a, b, shape) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ a ∈ [32, 126] ⊂ ℤ, b ∈ [32, 126] ⊂ ℤ, shape ∈ {0, 1, 2, 3}, f(a, b, shape) = True"
+ },
+ "for a in [48, 68] subset Z, b in [48, 68] subset Z, f(a, b) == True": {
+  "ascii": "for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = True",
+  "domains": {
+   "a": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ],
+   "b": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ]
+  },
+  "fingerprint": "8bb164454922",
+  "identity": "for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ a ∈ [48, 68] ⊂ ℤ, b ∈ [48, 68] ⊂ ℤ, f(a, b) = True"
+ },
  "for a in [5, 10], b in [1, 2], f(a, b) == 1.0": {
   "ascii": "for a in [5.0, 10.0] : float|absent|missing, b in [1.0, 2.0] : float|absent|missing, f(a, b) = 1.00000000000000",
   "domains": {
@@ -14772,17 +15164,18 @@
   "unicode": "∀ c ∈ (0.0, 1.0) ⊂ ℝ ∪ {absent, ∅}, n ∈ [1.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(c, n) > 0"
  },
  "for c in L[ascii] | {\"\"}, c in L[unicode]": {
-  "error": "InvalidConjecture: 'for c in L[ascii] | {\"\"}, c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for c in L[ascii] | {\"\"}, c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[ascii] | {\"\"} is in L[unicode], write: L[ascii] | {\"\"} subset L[unicode]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py"
   ]
  },
  "for c in L[ascii], c in L[unicode]": {
-  "error": "InvalidConjecture: 'for c in L[ascii], c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for c in L[ascii], c in L[unicode]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[ascii] is in L[unicode], write: L[ascii] subset L[unicode]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_rulings_acceptance_sheet.py",
    "tests:tests/test_the_membership_forms_between_languages_and_sets_read_as_they_do_today.py"
   ]
  },
@@ -16687,7 +17080,7 @@
   "unicode": "∀ k ∈ {1, 2}, f(k) ∈ {1, 2, 3}"
  },
  "for k in {1, 2}, k in {1, 2, 3}": {
-  "error": "InvalidConjecture: 'for k in {1, 2}, k in {1, 2, 3}': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for k in {1, 2}, k in {1, 2, 3}': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of {1, 2} is in {1, 2, 3}, write: {1, 2} subset {1, 2, 3}",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -17444,7 +17837,7 @@
   "unicode": "∀ n ∈ ℤ ∪ {absent, ∅}, f(n) ≥ 0"
  },
  "for n in Z, n in Z": {
-  "error": "InvalidConjecture: 'for n in Z, n in Z': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for n in Z, n in Z': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of Z is in Z, write: Z subset Z",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -19658,6 +20051,38 @@
   ],
   "unicode": "∀ n ∈ [5, 5] ⊂ ℤ, f(cx, cy, a, b, n)[0][9] = cx"
  },
+ "for n in [5,15] ⊂ Z, f(n) == 1 + g(3) - g(3)": {
+  "ascii": "for n in [5, 15] : int, f(n) = 1",
+  "domains": {
+   "n": [
+    "[5, 15] : int",
+    "[5, 15] ⊂ ℤ"
+   ]
+  },
+  "fingerprint": "9753d590ccdc",
+  "identity": "for n in [5, 15] : int, f(n) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_raise_must_be_reachable.py"
+  ],
+  "unicode": "∀ n ∈ [5, 15] ⊂ ℤ, f(n) = 1"
+ },
+ "for n in [5,5] ⊂ Z, f(n) == 1 + g(3) - g(3)": {
+  "ascii": "for n in [5, 5] : int, f(n) = 1",
+  "domains": {
+   "n": [
+    "[5, 5] : int",
+    "[5, 5] ⊂ ℤ"
+   ]
+  },
+  "fingerprint": "b9cab221c750",
+  "identity": "for n in [5, 5] : int, f(n) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_raise_must_be_reachable.py"
+  ],
+  "unicode": "∀ n ∈ [5, 5] ⊂ ℤ, f(n) = 1"
+ },
  "for n in [6, 100] subset Z, f(n) == n": {
   "ascii": "for n in [6, 100] : int, f(n) = n",
   "domains": {
@@ -21032,6 +21457,22 @@
   ],
   "unicode": "let y = other_var, let x = some_other_var, ∀ y ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(some_var, x, y) = some_var + x + y"
  },
+ "for p in L[path, within (\"/ws\")], f(p) = p": {
+  "ascii": "for p in L[path, within (\"/ws\")], f(p) = p",
+  "domains": {
+   "p": [
+    "L[path, within (\"/ws\")]",
+    "L[path, within (\"/ws\")]"
+   ]
+  },
+  "fingerprint": "84b68bbb35f2",
+  "identity": "for p in L[path, within (\"/ws\")], f(p) = p",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ p ∈ L[path, within (\"/ws\")], f(p) = p"
+ },
  "for p in [5, 9], q in [0, 1], f(p, q) == p - q": {
   "ascii": "for p in [5.0, 9.0] : float|absent|missing, q in [0.0, 1.0] : float|absent|missing, f(p, q) = p - q",
   "domains": {
@@ -21479,7 +21920,8 @@
   "identity": "for price in [0.0, 100.0] : float|absent|missing, f(price) <= 2500",
   "parses": true,
   "sources": [
-   "tests:tests/test_semi_analytical_route_needs_a_critical_point_drawn.py"
+   "tests:tests/test_semi_analytical_route_needs_a_critical_point_drawn.py",
+   "tests:tests/test_the_claim_corpus_harvester_reads_as_the_tests_do.py"
   ],
   "unicode": "∀ price ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(price) ≤ 2500"
  },
@@ -22097,6 +22539,54 @@
   ],
   "unicode": "∀ r ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, f(r) ≥ 0"
  },
+ "for r in [-2,2], f(r,0) == 1": {
+  "ascii": "for r in [-2.0, 2.0] : float|absent|missing, f(r, 0) = 1",
+  "domains": {
+   "r": [
+    "[-2.0, 2.0] : float|absent|missing",
+    "[-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "af8a612b9e87",
+  "identity": "for r in [-2.0, 2.0] : float|absent|missing, f(r, 0) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_raise_must_be_reachable.py"
+  ],
+  "unicode": "∀ r ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(r, 0) = 1"
+ },
+ "for r in [-2,2], f(r,2) == r*r": {
+  "ascii": "for r in [-2.0, 2.0] : float|absent|missing, f(r, 2) = r^2",
+  "domains": {
+   "r": [
+    "[-2.0, 2.0] : float|absent|missing",
+    "[-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "bcddaf70710c",
+  "identity": "for r in [-2.0, 2.0] : float|absent|missing, f(r, 2) = r^2",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_raise_must_be_reachable.py"
+  ],
+  "unicode": "∀ r ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(r, 2) = r^2"
+ },
+ "for r in [-2,2], f(r,3) == f(r,3)": {
+  "ascii": "for r in [-2.0, 2.0] : float|absent|missing, f(r, 3) = f(r, 3)",
+  "domains": {
+   "r": [
+    "[-2.0, 2.0] : float|absent|missing",
+    "[-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "2c20c944c3e0",
+  "identity": "for r in [-2.0, 2.0] : float|absent|missing, f(r, 3) = f(r, 3)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_raise_must_be_reachable.py"
+  ],
+  "unicode": "∀ r ∈ [-2.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(r, 3) = f(r, 3)"
+ },
  "for r in [-5, -1.5], raises(f(x, r), ValueError)": {
   "ascii": "for r in [-5.0, -1.5] : float|absent|missing, raises(f(x, r), ValueError)",
   "domains": {
@@ -22623,7 +23113,8 @@
   "identity": "for rate in [0.0, 1.0] : float|absent|missing, f(price, rate) <= price",
   "parses": true,
   "sources": [
-   "tests:tests/test_an_extra_never_removes_the_mathematics_line.py"
+   "tests:tests/test_an_extra_never_removes_the_mathematics_line.py",
+   "tests:tests/test_the_claim_corpus_harvester_reads_as_the_tests_do.py"
   ],
   "unicode": "∀ rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(price, rate) ≤ price"
  },
@@ -22722,6 +23213,38 @@
    "tests:tests/test_an_open_endpoint_is_read_as_open.py"
   ],
   "unicode": "∀ ratio ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, ratio is number set safe"
+ },
+ "for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) == True": {
+  "ascii": "for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = True",
+  "domains": {
+   "a": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "b": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "c": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "d": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "relation": [
+    "{0, 1, 2, 3, 4}",
+    "{0, 1, 2, 3, 4}"
+   ]
+  },
+  "fingerprint": "f747bafcbe74",
+  "identity": "for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt_relations.claims.yaml"
+  ],
+  "unicode": "∀ relation ∈ {0, 1, 2, 3, 4}, a ∈ {0, 1, 2, 3}, b ∈ {0, 1, 2, 3}, c ∈ {0, 1, 2, 3}, d ∈ {0, 1, 2, 3}, f(relation, a, b, c, d) = True"
  },
  "for returns in R^n, 0 <= f(returns) <= 1": {
   "ascii": "for returns in (R | {missing})^n|absent, 0 <= f(returns) <= 1",
@@ -23654,7 +24177,7 @@
   "unicode": "∀ s ∈ L[ascii], len(f(s)) ≤ len(s)"
  },
  "for s in L[ascii], s in L[ascii]": {
-  "error": "InvalidConjecture: 'for s in L[ascii], s in L[ascii]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for s in L[ascii], s in L[ascii]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[ascii] is in L[ascii], write: L[ascii] subset L[ascii]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -23805,6 +24328,38 @@
    "tests:tests/test_language_risk.py"
   ],
   "unicode": "∀ s ∈ L[crowded], f(s) = 0"
+ },
+ "for s in L[digit + lower + \"_\"], f(s) = s": {
+  "ascii": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "domains": {
+   "s": [
+    "L[digit + lower + \"_\"]",
+    "L[digit + lower + \"_\"]"
+   ]
+  },
+  "fingerprint": "46537e4c1b04",
+  "identity": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_an_alphabet_expression_heads_a_language.py"
+  ],
+  "unicode": "∀ s ∈ L[digit + lower + \"_\"], f(s) = s"
+ },
+ "for s in L[digit+lower+\"_\"], f(s) == s": {
+  "ascii": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "domains": {
+   "s": [
+    "L[digit + lower + \"_\"]",
+    "L[digit + lower + \"_\"]"
+   ]
+  },
+  "fingerprint": "46537e4c1b04",
+  "identity": "for s in L[digit + lower + \"_\"], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_an_alphabet_expression_heads_a_language.py"
+  ],
+  "unicode": "∀ s ∈ L[digit + lower + \"_\"], f(s) = s"
  },
  "for s in L[digit] \\ {\"\"}, f(\"0\" + s) == f(s)": {
   "ascii": "for s in L[digit] \\ {\"\"}, f(\"0\" + s) = f(s)",
@@ -24194,11 +24749,59 @@
   "unicode": "∀ s ∈ L[letters], len(f(s)) = 8"
  },
  "for s in L[letters], s in L[letters]": {
-  "error": "InvalidConjecture: 'for s in L[letters], s in L[letters]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for s in L[letters], s in L[letters]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of L[letters] is in L[letters], write: L[letters] subset L[letters]",
   "parses": false,
   "sources": [
    "tests:tests/test_membership_relation.py"
   ]
+ },
+ "for s in L[lower + digit + \"-\" + \"_\", len in [3, 32]], f(s) = s": {
+  "ascii": "for s in L[lower + digit + \"-\" + \"_\", len in [3, 32]], f(s) = s",
+  "domains": {
+   "s": [
+    "L[lower + digit + \"-\" + \"_\", len in [3, 32]]",
+    "L[lower + digit + \"-\" + \"_\", len in [3, 32]]"
+   ]
+  },
+  "fingerprint": "b46e24debe8b",
+  "identity": "for s in L[lower + digit + \"-\" + \"_\", len in [3, 32]], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[lower + digit + \"-\" + \"_\", len in [3, 32]], f(s) = s"
+ },
+ "for s in L[lower + digit + \"_\"], f(s) == s": {
+  "ascii": "for s in L[lower + digit + \"_\"], f(s) = s",
+  "domains": {
+   "s": [
+    "L[lower + digit + \"_\"]",
+    "L[lower + digit + \"_\"]"
+   ]
+  },
+  "fingerprint": "6aa92dc96e89",
+  "identity": "for s in L[lower + digit + \"_\"], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_an_alphabet_expression_heads_a_language.py"
+  ],
+  "unicode": "∀ s ∈ L[lower + digit + \"_\"], f(s) = s"
+ },
+ "for s in L[lower + digit + \"_-\", len in [3, 32]], f(s) == s": {
+  "ascii": "for s in L[lower + digit + \"_\" + \"-\", len in [3, 32]], f(s) = s",
+  "domains": {
+   "s": [
+    "L[lower + digit + \"_\" + \"-\", len in [3, 32]]",
+    "L[lower + digit + \"_\" + \"-\", len in [3, 32]]"
+   ]
+  },
+  "fingerprint": "701f57126f1e",
+  "identity": "for s in L[lower + digit + \"_\" + \"-\", len in [3, 32]], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[lower + digit + \"_\" + \"-\", len in [3, 32]], f(s) = s"
  },
  "for s in L[nope], f(s) == s": {
   "ascii": "for s in L[nope], f(s) = s",
@@ -24216,6 +24819,70 @@
   ],
   "unicode": "∀ s ∈ L[nope], f(s) = s"
  },
+ "for s in L[onlya, len >= 1], raises(f(s), ValueError)": {
+  "ascii": "for s in L[onlya, len >= 1], raises(f(s), ValueError)",
+  "domains": {
+   "s": [
+    "L[onlya, len >= 1]",
+    "L[onlya, len >= 1]"
+   ]
+  },
+  "fingerprint": "c7ba704fa814",
+  "identity": "for s in L[onlya, len >= 1], raises(f(s), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_proof_checks_the_definitions_it_rests_on.py"
+  ],
+  "unicode": "∀ s ∈ L[onlya, len >= 1], raises(f(s), ValueError)"
+ },
+ "for s in L[onlya], f(s) == s": {
+  "ascii": "for s in L[onlya], f(s) = s",
+  "domains": {
+   "s": [
+    "L[onlya]",
+    "L[onlya]"
+   ]
+  },
+  "fingerprint": "33e1db3bab27",
+  "identity": "for s in L[onlya], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_proof_checks_the_definitions_it_rests_on.py"
+  ],
+  "unicode": "∀ s ∈ L[onlya], f(s) = s"
+ },
+ "for s in L[plainlang], f(s) == s": {
+  "ascii": "for s in L[plainlang], f(s) = s",
+  "domains": {
+   "s": [
+    "L[plainlang]",
+    "L[plainlang]"
+   ]
+  },
+  "fingerprint": "2171dc1f3794",
+  "identity": "for s in L[plainlang], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_moved_language_definition_makes_the_record_stale.py"
+  ],
+  "unicode": "∀ s ∈ L[plainlang], f(s) = s"
+ },
+ "for s in L[re.compile], f(s) == s": {
+  "ascii": "for s in L[re.compile], f(s) = s",
+  "domains": {
+   "s": [
+    "L[re.compile]",
+    "L[re.compile]"
+   ]
+  },
+  "fingerprint": "b456795124d0",
+  "identity": "for s in L[re.compile], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[re.compile], f(s) = s"
+ },
  "for s in L[slug], f(s) in L[slug]": {
   "ascii": "for s in L[slug], f(s) in L[slug]",
   "domains": {
@@ -24231,6 +24898,22 @@
    "docs:docs/language.md"
   ],
   "unicode": "∀ s ∈ L[slug], f(s) ∈ L[slug]"
+ },
+ "for s in L[slugdef], f(s) == s": {
+  "ascii": "for s in L[slugdef], f(s) = s",
+  "domains": {
+   "s": [
+    "L[slugdef]",
+    "L[slugdef]"
+   ]
+  },
+  "fingerprint": "b540545311f4",
+  "identity": "for s in L[slugdef], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_moved_language_definition_makes_the_record_stale.py"
+  ],
+  "unicode": "∀ s ∈ L[slugdef], f(s) = s"
  },
  "for s in L[strategic_words, vowels <= 3], f(s) >= 0": {
   "ascii": "for s in L[strategic_words, vowels <= 3], f(s) >= 0",
@@ -24296,6 +24979,70 @@
   ],
   "unicode": "∀ s ∈ L[swapped_letters], f(s) ≥ 1"
  },
+ "for s in L[unicode, contains (\"x\")], f(s) = s": {
+  "ascii": "for s in L[unicode, contains (\"x\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, contains (\"x\")]",
+    "L[unicode, contains (\"x\")]"
+   ]
+  },
+  "fingerprint": "12822f1d2463",
+  "identity": "for s in L[unicode, contains (\"x\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, contains (\"x\")], f(s) = s"
+ },
+ "for s in L[unicode, ends with (\".py\")], f(s) = s": {
+  "ascii": "for s in L[unicode, ends with (\".py\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, ends with (\".py\")]",
+    "L[unicode, ends with (\".py\")]"
+   ]
+  },
+  "fingerprint": "36f1ec5933cb",
+  "identity": "for s in L[unicode, ends with (\".py\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, ends with (\".py\")], f(s) = s"
+ },
+ "for s in L[unicode, len <= 80], f(s, \"a\") == 1": {
+  "ascii": "for s in L[unicode, len <= 80], f(s, \"a\") = 1",
+  "domains": {
+   "s": [
+    "L[unicode, len <= 80]",
+    "L[unicode, len <= 80]"
+   ]
+  },
+  "fingerprint": "352ac87f0643",
+  "identity": "for s in L[unicode, len <= 80], f(s, \"a\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, len <= 80], f(s, \"a\") = 1"
+ },
+ "for s in L[unicode, len <= 80], f(s, '\"}', 'b') == 1": {
+  "ascii": "for s in L[unicode, len <= 80], f(s, '\"}', \"b\") = 1",
+  "domains": {
+   "s": [
+    "L[unicode, len <= 80]",
+    "L[unicode, len <= 80]"
+   ]
+  },
+  "fingerprint": "e79b62b949ef",
+  "identity": "for s in L[unicode, len <= 80], f(s, '\"}', \"b\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, len <= 80], f(s, '\"}', \"b\") = 1"
+ },
  "for s in L[unicode, len <= 80], len(f(s)) <= 80": {
   "ascii": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
   "domains": {
@@ -24359,6 +25106,118 @@
    "docs:docs/language.md"
   ],
   "unicode": "∀ s ∈ L[unicode, len in [1, 80]], f(s) ∈ L[unicode, len in [1, 80]]"
+ },
+ "for s in L[unicode, matches (\"abc\")], f(s) = s": {
+  "ascii": "for s in L[unicode, matches (\"abc\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, matches (\"abc\")]",
+    "L[unicode, matches (\"abc\")]"
+   ]
+  },
+  "fingerprint": "bfa8358e9e80",
+  "identity": "for s in L[unicode, matches (\"abc\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, matches (\"abc\")], f(s) = s"
+ },
+ "for s in L[unicode, matches (re(r\"[a-z]+\", python))], f(s) = s": {
+  "ascii": "for s in L[unicode, matches (re(r\"[a-z]+\", python))], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, matches (re(r\"[a-z]+\", python))]",
+    "L[unicode, matches (re(r\"[a-z]+\", python))]"
+   ]
+  },
+  "fingerprint": "2ce615d0a6c5",
+  "identity": "for s in L[unicode, matches (re(r\"[a-z]+\", python))], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, matches (re(r\"[a-z]+\", python))], f(s) = s"
+ },
+ "for s in L[unicode, matches (re(r\"[a-z]+\", python, ignore case))], f(s) = s": {
+  "ascii": "for s in L[unicode, matches (re(r\"[a-z]+\", python, ignore case))], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, matches (re(r\"[a-z]+\", python, ignore case))]",
+    "L[unicode, matches (re(r\"[a-z]+\", python, ignore case))]"
+   ]
+  },
+  "fingerprint": "2e8d52778b53",
+  "identity": "for s in L[unicode, matches (re(r\"[a-z]+\", python, ignore case))], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, matches (re(r\"[a-z]+\", python, ignore case))], f(s) = s"
+ },
+ "for s in L[unicode, matches (re(r\"\\d+\", python 3.13))], f(s) = s": {
+  "ascii": "for s in L[unicode, matches (re(r\"\\d+\", python 3.13))], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, matches (re(r\"\\d+\", python 3.13))]",
+    "L[unicode, matches (re(r\"\\d+\", python 3.13))]"
+   ]
+  },
+  "fingerprint": "6bf053718de8",
+  "identity": "for s in L[unicode, matches (re(r\"\\d+\", python 3.13))], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, matches (re(r\"\\d+\", python 3.13))], f(s) = s"
+ },
+ "for s in L[unicode, matches (shape (\"'KEY-'U{3}9{4}\", U = upper))], f(s) = s": {
+  "ascii": "for s in L[unicode, matches (shape (\"'KEY-'U{3}9{4}\", U = upper))], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, matches (shape (\"'KEY-'U{3}9{4}\", U = upper))]",
+    "L[unicode, matches (shape (\"'KEY-'U{3}9{4}\", U = upper))]"
+   ]
+  },
+  "fingerprint": "c3a14cb55e21",
+  "identity": "for s in L[unicode, matches (shape (\"'KEY-'U{3}9{4}\", U = upper))], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, matches (shape (\"'KEY-'U{3}9{4}\", U = upper))], f(s) = s"
+ },
+ "for s in L[unicode, matches (shape (\"AA99\", A = upper))], f(s) = s": {
+  "ascii": "for s in L[unicode, matches (shape (\"AA99\", A = upper))], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, matches (shape (\"AA99\", A = upper))]",
+    "L[unicode, matches (shape (\"AA99\", A = upper))]"
+   ]
+  },
+  "fingerprint": "f6f8b1eb64ae",
+  "identity": "for s in L[unicode, matches (shape (\"AA99\", A = upper))], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, matches (shape (\"AA99\", A = upper))], f(s) = s"
+ },
+ "for s in L[unicode, starts with (\"http://\")], f(s) = s": {
+  "ascii": "for s in L[unicode, starts with (\"http://\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[unicode, starts with (\"http://\")]",
+    "L[unicode, starts with (\"http://\")]"
+   ]
+  },
+  "fingerprint": "8d7c96aa2567",
+  "identity": "for s in L[unicode, starts with (\"http://\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ s ∈ L[unicode, starts with (\"http://\")], f(s) = s"
  },
  "for s in L[unicode] \\ {\"\"}, excluded_outside_domain(s)": {
   "ascii": "for s in L[unicode] \\ {\"\"}, excluded_outside_domain(s)",
@@ -24545,6 +25404,54 @@
   ],
   "unicode": "∀ s ∈ L[unicode], len(f(s)) ≤ len(s)"
  },
+ "for s in L[words, begins with (\"ab\")], f(s) = s": {
+  "ascii": "for s in L[words, begins with (\"ab\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[words, begins with (\"ab\")]",
+    "L[words, begins with (\"ab\")]"
+   ]
+  },
+  "fingerprint": "2718de55cad9",
+  "identity": "for s in L[words, begins with (\"ab\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_language_predicate_refinements.py"
+  ],
+  "unicode": "∀ s ∈ L[words, begins with (\"ab\")], f(s) = s"
+ },
+ "for s in L[words, begins with (\"ab\")], f(s) == s": {
+  "ascii": "for s in L[words, begins with (\"ab\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[words, begins with (\"ab\")]",
+    "L[words, begins with (\"ab\")]"
+   ]
+  },
+  "fingerprint": "2718de55cad9",
+  "identity": "for s in L[words, begins with (\"ab\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_language_predicate_refinements.py"
+  ],
+  "unicode": "∀ s ∈ L[words, begins with (\"ab\")], f(s) = s"
+ },
+ "for s in L[words, beginsWith(\"ab\")], f(s) == s": {
+  "ascii": "for s in L[words, begins with (\"ab\")], f(s) = s",
+  "domains": {
+   "s": [
+    "L[words, begins with (\"ab\")]",
+    "L[words, begins with (\"ab\")]"
+   ]
+  },
+  "fingerprint": "2718de55cad9",
+  "identity": "for s in L[words, begins with (\"ab\")], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_language_predicate_refinements.py"
+  ],
+  "unicode": "∀ s ∈ L[words, begins with (\"ab\")], f(s) = s"
+ },
  "for s in L[words, depth <= 3], f(s) == s": {
   "ascii": "for s in L[words, depth <= 3], f(s) = s",
   "domains": {
@@ -24560,6 +25467,22 @@
    "tests:tests/test_language_refinement_seam.py"
   ],
   "unicode": "∀ s ∈ L[words, depth <= 3], f(s) = s"
+ },
+ "for s in L[wrong], f(s) == s": {
+  "ascii": "for s in L[wrong], f(s) = s",
+  "domains": {
+   "s": [
+    "L[wrong]",
+    "L[wrong]"
+   ]
+  },
+  "fingerprint": "63b559a69141",
+  "identity": "for s in L[wrong], f(s) = s",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_proof_checks_the_definitions_it_rests_on.py"
+  ],
+  "unicode": "∀ s ∈ L[wrong], f(s) = s"
  },
  "for s in R^n, (f(s) + s)[::-1] == f(s) + s[::-1]": {
   "ascii": "for s in (R | {missing})^n|absent, (f(s) + s)[::-1] = s[::-1] + f(s)",
@@ -24796,6 +25719,38 @@
   ],
   "unicode": "∀ s ∈ {\"B\", \"a\"}, f(f(s)) = f(s)"
  },
+ "for s in {\"a\", \"b c\"}, f(s) = 1": {
+  "ascii": "for s in {\"a\", \"b c\"}, f(s) = 1",
+  "domains": {
+   "s": [
+    "{\"a\", \"b c\"}",
+    "{\"a\", \"b c\"}"
+   ]
+  },
+  "fingerprint": "a554f39afb82",
+  "identity": "for s in {\"a\", \"b c\"}, f(s) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_domain_value_reads_its_escapes_as_an_expression_literal_does.py"
+  ],
+  "unicode": "∀ s ∈ {\"a\", \"b c\"}, f(s) = 1"
+ },
+ "for s in {\"a\", \"b c\"}, f(s) == 1": {
+  "ascii": "for s in {\"a\", \"b c\"}, f(s) = 1",
+  "domains": {
+   "s": [
+    "{\"a\", \"b c\"}",
+    "{\"a\", \"b c\"}"
+   ]
+  },
+  "fingerprint": "a554f39afb82",
+  "identity": "for s in {\"a\", \"b c\"}, f(s) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_domain_value_reads_its_escapes_as_an_expression_literal_does.py"
+  ],
+  "unicode": "∀ s ∈ {\"a\", \"b c\"}, f(s) = 1"
+ },
  "for s in {\"a\", \"b\"}, f(s) == s": {
   "ascii": "for s in {\"a\", \"b\"}, f(s) = s",
   "domains": {
@@ -24996,6 +25951,22 @@
   "sources": [
    "tests:tests/test_family_probe_meta.py"
   ]
+ },
+ "for s in {\"a\\\\b\"}, f(s) == 1": {
+  "ascii": "for s in {\"a\\\\b\"}, f(s) = 1",
+  "domains": {
+   "s": [
+    "{\"a\\\\b\"}",
+    "{\"a\\\\b\"}"
+   ]
+  },
+  "fingerprint": "5e1597e6cbdf",
+  "identity": "for s in {\"a\\\\b\"}, f(s) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_domain_value_reads_its_escapes_as_an_expression_literal_does.py"
+  ],
+  "unicode": "∀ s ∈ {\"a\\\\b\"}, f(s) = 1"
  },
  "for s in {\"export\", \"a\"}, x in [0, 1], f(s, x) <= 1": {
   "ascii": "for s in {\"a\", \"export\"}, x in [0.0, 1.0] : float|absent|missing, f(s, x) <= 1",
@@ -25771,6 +26742,22 @@
   ],
   "unicode": "∀ sigma1 ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(sigma1) ≥ 0"
  },
+ "for slug in L[unicode], raises(f(slug + \"\\n\"), ValueError)": {
+  "ascii": "for slug in L[unicode], raises(f(slug + \"\\n\"), ValueError)",
+  "domains": {
+   "slug": [
+    "L[unicode]",
+    "L[unicode]"
+   ]
+  },
+  "fingerprint": "3fb2dca7cf48",
+  "identity": "for slug in L[unicode], raises(f(slug + \"\\n\"), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_rulings_acceptance_sheet.py"
+  ],
+  "unicode": "∀ slug ∈ L[unicode], raises(f(slug + \"\\n\"), ValueError)"
+ },
  "for spot in [1, 500], strike in [1, 500], f(spot, strike) >= 0": {
   "ascii": "for spot in [1.0, 500.0] : float|absent|missing, strike in [1.0, 500.0] : float|absent|missing, f(spot, strike) >= 0",
   "domains": {
@@ -26020,6 +27007,107 @@
   ],
   "unicode": "∀ tenor ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(tenor) ≥ 0"
  },
+ "for text in L[anytext], f(text) == True": {
+  "ascii": "for text in L[anytext], f(text) = True",
+  "domains": {
+   "text": [
+    "L[anytext]",
+    "L[anytext]"
+   ]
+  },
+  "fingerprint": "bc63085bc6ae",
+  "identity": "for text in L[anytext], f(text) = True",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[anytext], f(text) = True"
+ },
+ "for text in L[anytext], f(text) == text": {
+  "ascii": "for text in L[anytext], f(text) = text",
+  "domains": {
+   "text": [
+    "L[anytext]",
+    "L[anytext]"
+   ]
+  },
+  "fingerprint": "a3de2693f73e",
+  "identity": "for text in L[anytext], f(text) = text",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[anytext], f(text) = text"
+ },
+ "for text in L[anytext], raises(f(text + \"\\n\"), TypeError)": {
+  "ascii": "for text in L[anytext], raises(f(text + \"\\n\"), TypeError)",
+  "domains": {
+   "text": [
+    "L[anytext]",
+    "L[anytext]"
+   ]
+  },
+  "fingerprint": "f0e63a6066ce",
+  "identity": "for text in L[anytext], raises(f(text + \"\\n\"), TypeError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[anytext], raises(f(text + \"\\n\"), TypeError)"
+ },
+ "for text in L[anytext], raises(f(text + \"\\n\"), ValueError)": {
+  "ascii": "for text in L[anytext], raises(f(text + \"\\n\"), ValueError)",
+  "domains": {
+   "text": [
+    "L[anytext]",
+    "L[anytext]"
+   ]
+  },
+  "fingerprint": "7e60c98babba",
+  "identity": "for text in L[anytext], raises(f(text + \"\\n\"), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_moved_language_definition_makes_the_record_stale.py",
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[anytext], raises(f(text + \"\\n\"), ValueError)"
+ },
+ "for text in L[anytext], raises(f(text.upper()), ValueError)": {
+  "ascii": "for text in L[anytext], raises(f(text.upper()), ValueError)",
+  "domains": {
+   "text": [
+    "L[anytext]",
+    "L[anytext]"
+   ]
+  },
+  "fingerprint": "747e9083ded5",
+  "identity": "for text in L[anytext], raises(f(text.upper()), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[anytext], raises(f(text.upper()), ValueError)"
+ },
+ "for text in L[ascii], note in L[ascii], f(text, note) == f(text, \"\")": {
+  "ascii": "for text in L[ascii], note in L[ascii], f(text, note) = f(text, \"\")",
+  "domains": {
+   "note": [
+    "L[ascii]",
+    "L[ascii]"
+   ],
+   "text": [
+    "L[ascii]",
+    "L[ascii]"
+   ]
+  },
+  "fingerprint": "76178e647df6",
+  "identity": "for text in L[ascii], note in L[ascii], f(text, note) = f(text, \"\")",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ text ∈ L[ascii], note ∈ L[ascii], f(text, note) = f(text, \"\")"
+ },
  "for text in L[letters], f(text) >= 0": {
   "ascii": "for text in L[letters], f(text) >= 0",
   "domains": {
@@ -26035,6 +27123,150 @@
    "tests:tests/test_language_derive_gate.py"
   ],
   "unicode": "∀ text ∈ L[letters], f(text) ≥ 0"
+ },
+ "for text in L[lines], f(text) == False": {
+  "ascii": "for text in L[lines], f(text) = False",
+  "domains": {
+   "text": [
+    "L[lines]",
+    "L[lines]"
+   ]
+  },
+  "fingerprint": "2ccec47a40b5",
+  "identity": "for text in L[lines], f(text) = False",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[lines], f(text) = False"
+ },
+ "for text in L[lines], raises(f(text), ValueError)": {
+  "ascii": "for text in L[lines], raises(f(text), ValueError)",
+  "domains": {
+   "text": [
+    "L[lines]",
+    "L[lines]"
+   ]
+  },
+  "fingerprint": "601220726c02",
+  "identity": "for text in L[lines], raises(f(text), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[lines], raises(f(text), ValueError)"
+ },
+ "for text in L[narrowslugs], raises(f(text + \"\\n\"), ValueError)": {
+  "ascii": "for text in L[narrowslugs], raises(f(text + \"\\n\"), ValueError)",
+  "domains": {
+   "text": [
+    "L[narrowslugs]",
+    "L[narrowslugs]"
+   ]
+  },
+  "fingerprint": "ad04648622fd",
+  "identity": "for text in L[narrowslugs], raises(f(text + \"\\n\"), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[narrowslugs], raises(f(text + \"\\n\"), ValueError)"
+ },
+ "for text in L[plain], raises(f(text + \"\\n\"), ValueError)": {
+  "ascii": "for text in L[plain], raises(f(text + \"\\n\"), ValueError)",
+  "domains": {
+   "text": [
+    "L[plain]",
+    "L[plain]"
+   ]
+  },
+  "fingerprint": "32d51524d4ed",
+  "identity": "for text in L[plain], raises(f(text + \"\\n\"), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[plain], raises(f(text + \"\\n\"), ValueError)"
+ },
+ "for text in L[slugs] | {None}, f(text) == text": {
+  "ascii": "for text in L[slugs]|absent, f(text) = text",
+  "domains": {
+   "text": [
+    "L[slugs]|absent",
+    "L[slugs]|absent"
+   ]
+  },
+  "fingerprint": "9c849a1aa171",
+  "identity": "for text in L[slugs]|absent, f(text) = text",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[slugs]|absent, f(text) = text"
+ },
+ "for text in L[slugs], f(\"-\" + text) == True": {
+  "ascii": "for text in L[slugs], f(\"-\" + text) = True",
+  "domains": {
+   "text": [
+    "L[slugs]",
+    "L[slugs]"
+   ]
+  },
+  "fingerprint": "5e39bd4b545e",
+  "identity": "for text in L[slugs], f(\"-\" + text) = True",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[slugs], f(\"-\" + text) = True"
+ },
+ "for text in L[slugs], f(\"x-\" + text) == True": {
+  "ascii": "for text in L[slugs], f(\"x-\" + text) = True",
+  "domains": {
+   "text": [
+    "L[slugs]",
+    "L[slugs]"
+   ]
+  },
+  "fingerprint": "140b40c736b9",
+  "identity": "for text in L[slugs], f(\"x-\" + text) = True",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[slugs], f(\"x-\" + text) = True"
+ },
+ "for text in L[slugs], f(text) == True": {
+  "ascii": "for text in L[slugs], f(text) = True",
+  "domains": {
+   "text": [
+    "L[slugs]",
+    "L[slugs]"
+   ]
+  },
+  "fingerprint": "e03ab7cc7bb1",
+  "identity": "for text in L[slugs], f(text) = True",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[slugs], f(text) = True"
+ },
+ "for text in L[slugs], f(text) == text": {
+  "ascii": "for text in L[slugs], f(text) = text",
+  "domains": {
+   "text": [
+    "L[slugs]",
+    "L[slugs]"
+   ]
+  },
+  "fingerprint": "e780c03cf3e3",
+  "identity": "for text in L[slugs], f(text) = text",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_is_decided_for_every_text.py"
+  ],
+  "unicode": "∀ text ∈ L[slugs], f(text) = text"
  },
  "for text in L[stable_claim_text], f(f(text)) == f(text)": {
   "ascii": "for text in L[stable_claim_text], f(f(text)) = f(text)",
@@ -26067,6 +27299,22 @@
    "tests:tests/test_baseline_claims_about_the_names_and_renderings_hold.py"
   ],
   "unicode": "∀ text ∈ L[stable_claim_text], f(text) = True"
+ },
+ "for text in L[unicode], raises(f(text + \"\\n\"), ValueError)": {
+  "ascii": "for text in L[unicode], raises(f(text + \"\\n\"), ValueError)",
+  "domains": {
+   "text": [
+    "L[unicode]",
+    "L[unicode]"
+   ]
+  },
+  "fingerprint": "2c3dc92531b1",
+  "identity": "for text in L[unicode], raises(f(text + \"\\n\"), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_pattern_validator_end_to_end_with_mathema_language.py"
+  ],
+  "unicode": "∀ text ∈ L[unicode], raises(f(text + \"\\n\"), ValueError)"
  },
  "for text in {\"a\", \"abcdef\"}, output_is_short(f(text))": {
   "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'output_is_short(f(text))'",
@@ -26566,6 +27814,39 @@
   ],
   "unicode": "∀ value ∈ [1.0, 3.0] ⊂ ℝ ∪ {absent, ∅}, f(value) = \"other\""
  },
+ "for value in [1, 5], f(value) == value": {
+  "ascii": "for value in [1.0, 5.0] : float|absent|missing, f(value) = value",
+  "domains": {
+   "value": [
+    "[1.0, 5.0] : float|absent|missing",
+    "[1.0, 5.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "fb924691bc9e",
+  "identity": "for value in [1.0, 5.0] : float|absent|missing, f(value) = value",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_plain_domain_binds_the_value_unless_annotated_as_a_sequence.py"
+  ],
+  "unicode": "∀ value ∈ [1.0, 5.0] ⊂ ℝ ∪ {absent, ∅}, f(value) = value"
+ },
+ "for value in {1, 2.5, 1e300}, f(value) == (-value, value)": {
+  "ascii": "for value in {1, 2.5, 1e+300}, f(value) = (-value, value)",
+  "domains": {
+   "value": [
+    "{1, 2.5, 1e+300}",
+    "{1, 2.5, 1e+300}"
+   ]
+  },
+  "fingerprint": "abb0b9841a40",
+  "identity": "for value in {1, 2.5, 1e+300}, f(value) = (-value, value)",
+  "parses": true,
+  "sources": [
+   "docs:CHANGELOG.md",
+   "tests:tests/test_a_plain_domain_binds_the_value_unless_annotated_as_a_sequence.py"
+  ],
+  "unicode": "∀ value ∈ {1, 2.5, 1e+300}, f(value) = (-value, value)"
+ },
  "for variance in [-1, 1], is_defined(f)": {
   "ascii": "for variance in [-1.0, 1.0] : float|absent|missing, is_defined(f)",
   "domains": {
@@ -26881,6 +28162,42 @@
    "tests:tests/test_witnesses_stay_in_the_parameter_type.py"
   ],
   "unicode": "∀ weights ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿ ⊂ ℝ ∪ {absent}, cov ∈ ([-1000000.0, 1000000.0] ∪ {∅})ⁿˣⁿ ⊂ ℝ ∪ {absent}, f is defined"
+ },
+ "for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) == True": {
+  "ascii": "for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) = True",
+  "domains": {
+   "text_index": [
+    "{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}",
+    "{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}"
+   ],
+   "which": [
+    "{0, 1, 2, 3, 4}",
+    "{0, 1, 2, 3, 4}"
+   ]
+  },
+  "fingerprint": "13d99741bfc0",
+  "identity": "for which in {0, 1, 2, 3, 4}, text_index in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, text_index) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "let x = text_index, ∀ which ∈ {0, 1, 2, 3, 4}, x ∈ {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, f(which, x) = True"
+ },
+ "for which in {0, 1, 2, 3}, f(which) == True": {
+  "ascii": "for which in {0, 1, 2, 3}, f(which) = True",
+  "domains": {
+   "which": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ]
+  },
+  "fingerprint": "061254d731ec",
+  "identity": "for which in {0, 1, 2, 3}, f(which) = True",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "∀ which ∈ {0, 1, 2, 3}, f(which) = True"
  },
  "for x in (-1, 0], is_number_set_safe(x)": {
   "ascii": "for x in (-1.0, 0.0] : float|absent|missing, is_number_set_safe(x)",
@@ -32695,6 +34012,54 @@
   ],
   "unicode": "∀ x ∈ [-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) = None"
  },
+ "for x in [-5, -1], raises(f(x))": {
+  "ascii": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x))",
+  "domains": {
+   "x": [
+    "[-5.0, -1.0] : float|absent|missing",
+    "[-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "752023330f1c",
+  "identity": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x))",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_raise_is_read_only_when_building_it_cannot_fail.py"
+  ],
+  "unicode": "∀ x ∈ [-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, raises(f(x))"
+ },
+ "for x in [-5, -1], raises(f(x), Plain)": {
+  "ascii": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), Plain)",
+  "domains": {
+   "x": [
+    "[-5.0, -1.0] : float|absent|missing",
+    "[-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "a82b1d816341",
+  "identity": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), Plain)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_raise_is_read_only_when_building_it_cannot_fail.py"
+  ],
+  "unicode": "∀ x ∈ [-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, raises(f(x), Plain)"
+ },
+ "for x in [-5, -1], raises(f(x), Refusing)": {
+  "ascii": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), Refusing)",
+  "domains": {
+   "x": [
+    "[-5.0, -1.0] : float|absent|missing",
+    "[-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "b34038865ebe",
+  "identity": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), Refusing)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_raise_is_read_only_when_building_it_cannot_fail.py"
+  ],
+  "unicode": "∀ x ∈ [-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, raises(f(x), Refusing)"
+ },
  "for x in [-5, -1], raises(f(x), SystemExit)": {
   "ascii": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), SystemExit)",
   "domains": {
@@ -32710,6 +34075,22 @@
    "tests:tests/test_derive_reads_an_exit_as_a_raise.py"
   ],
   "unicode": "∀ x ∈ [-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, raises(f(x), SystemExit)"
+ },
+ "for x in [-5, -1], raises(f(x), ValueError)": {
+  "ascii": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), ValueError)",
+  "domains": {
+   "x": [
+    "[-5.0, -1.0] : float|absent|missing",
+    "[-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "8b4a06618655",
+  "identity": "for x in [-5.0, -1.0] : float|absent|missing, raises(f(x), ValueError)",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_raise_is_read_only_when_building_it_cannot_fail.py"
+  ],
+  "unicode": "∀ x ∈ [-5.0, -1.0] ⊂ ℝ ∪ {absent, ∅}, raises(f(x), ValueError)"
  },
  "for x in [-5, -2], f(x) == 0.0": {
   "ascii": "for x in [-5.0, -2.0] : float|absent|missing, f(x) = 0.0",
@@ -34269,6 +35650,7 @@
   "identity": "for x in [0.0, 10.0] : float|absent|missing, is_defined(f)",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py",
    "tests:tests/test_an_overflow_is_never_a_definedness_witness.py",
    "tests:tests/test_is_pole_safe_certifies_a_pole_no_float_reaches.py"
   ],
@@ -34303,6 +35685,7 @@
   "identity": "for x in [0.0, 10.0] : float|absent|missing, is_pole_safe(x)",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py",
    "tests:tests/test_family_disproof_witness.py"
   ],
   "unicode": "∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, x is pole safe"
@@ -35850,6 +37233,22 @@
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0.100000000000000"
  },
+ "for x in [0, 1], f(x) >= 0.5": {
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0.500000000000000",
+  "domains": {
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "04e962658b5f",
+  "identity": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0.500000000000000",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py"
+  ],
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0.500000000000000"
+ },
  "for x in [0, 1], f(x) >= 1": {
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 1",
   "domains": {
@@ -36216,6 +37615,22 @@
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x)[0] = 1"
  },
+ "for x in [0, 1], f(x, \"a\") >= 0": {
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x, \"a\") >= 0",
+  "domains": {
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "3f0df320d1a8",
+  "identity": "for x in [0.0, 1.0] : float|absent|missing, f(x, \"a\") >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_the_claim_corpus_harvester_reads_as_the_tests_do.py"
+  ],
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x, \"a\") ≥ 0"
+ },
  "for x in [0, 1], f(x, compounded) >= 0": {
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x, compounded) >= 0",
   "domains": {
@@ -36328,6 +37743,7 @@
   "identity": "for x in [0.0, 1.0] : float|absent|missing, is_defined(f)",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py",
    "tests:tests/test_an_exact_witness_falsifies_where_every_float_passes.py",
    "tests:tests/test_is_defined_over_a_bound_domain_counts_a_guard_refusal.py"
   ],
@@ -36485,8 +37901,24 @@
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, twice(x) = double(x)"
  },
+ "for x in [0, 1], x == [0, 1]": {
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, x = [0, 1]",
+  "domains": {
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "adfa5f4539b9",
+  "identity": "for x in [0.0, 1.0] : float|absent|missing, x = [0, 1]",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, x = [0, 1]"
+ },
  "for x in [0, 1], x in R": {
-  "error": "InvalidConjecture: 'for x in [0, 1], x in R': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for x in [0, 1], x in R': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of [0, 1] is in R, write: [0, 1] subset R",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -36494,7 +37926,7 @@
   ]
  },
  "for x in [0, 1], x in [0, 2]": {
-  "error": "InvalidConjecture: 'for x in [0, 1], x in [0, 2]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify",
+  "error": "InvalidConjecture: 'for x in [0, 1], x in [0, 2]': every segment after 'for' parses as a binding, the quantifier has no statement left to quantify. To state that every member of [0, 1] is in [0, 2], write: [0, 1] subset [0, 2]",
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
@@ -36576,6 +38008,26 @@
    "tests:tests/test_a_permuted_call_does_not_inherit_the_parameters_domain.py"
   ],
   "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, y ∈ [-1.0, 0.0] ⊂ ℝ ∪ {absent, ∅}, f(x, y) = f(y, x)"
+ },
+ "for x in [0, 1], y in [-1, 1], f(x, y) == x * y": {
+  "ascii": "for x in [0.0, 1.0] : float|absent|missing, y in [-1.0, 1.0] : float|absent|missing, f(x, y) = x*y",
+  "domains": {
+   "x": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "y": [
+    "[-1.0, 1.0] : float|absent|missing",
+    "[-1.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "59ba8b075b45",
+  "identity": "for x in [0.0, 1.0] : float|absent|missing, y in [-1.0, 1.0] : float|absent|missing, f(x, y) = x*y",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_raise_is_read_only_when_building_it_cannot_fail.py"
+  ],
+  "unicode": "∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, y ∈ [-1.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x, y) = x*y"
  },
  "for x in [0, 1], y in [0, 1], f(x + y, y) <= 0.5": {
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, y in [0.0, 1.0] : float|absent|missing, f(x + y, y) <= 0.500000000000000",
@@ -37284,6 +38736,7 @@
   "identity": "for x in [0.0, 2.0] : float|absent|missing, is_defined(f)",
   "parses": true,
   "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py",
    "tests:tests/test_an_exact_witness_falsifies_where_every_float_passes.py"
   ],
   "unicode": "∀ x ∈ [0.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f is defined"
@@ -38078,7 +39531,7 @@
   "unicode": "∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, lo ∈ [0.0, 3.0] ⊂ ℝ ∪ {absent, ∅}, hi ∈ [7.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, lo, hi) = (lo <= x and x <= hi)"
  },
  "for x in [0,10], lo in [0,3], hi in [7,10], f(x, lo, hi) == (not (lo < x and x < hi))": {
-  "ascii": "for x in [0.0, 10.0] : float|absent|missing, lo in [0.0, 3.0] : float|absent|missing, hi in [7.0, 10.0] : float|absent|missing, f(x, lo, hi) = not (lo < x and x < hi)",
+  "ascii": "for x in [0.0, 10.0] : float|absent|missing, lo in [0.0, 3.0] : float|absent|missing, hi in [7.0, 10.0] : float|absent|missing, f(x, lo, hi) = (not (lo < x and x < hi))",
   "domains": {
    "hi": [
     "[7.0, 10.0] : float|absent|missing",
@@ -38093,14 +39546,14 @@
     "[0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}"
    ]
   },
-  "fingerprint": "8a3703cd62a0",
-  "identity": "for x in [0.0, 10.0] : float|absent|missing, lo in [0.0, 3.0] : float|absent|missing, hi in [7.0, 10.0] : float|absent|missing, f(x, lo, hi) = not (lo < x and x < hi)",
+  "fingerprint": "9db1602487dc",
+  "identity": "for x in [0.0, 10.0] : float|absent|missing, lo in [0.0, 3.0] : float|absent|missing, hi in [7.0, 10.0] : float|absent|missing, f(x, lo, hi) = (not (lo < x and x < hi))",
   "parses": true,
   "sources": [
    "tests:tests/test_boolean_returns.py",
    "tests:tests/test_the_shipped_claim_corpus_reads_as_pinned.py"
   ],
-  "unicode": "∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, lo ∈ [0.0, 3.0] ⊂ ℝ ∪ {absent, ∅}, hi ∈ [7.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, lo, hi) = not (lo < x and x < hi)"
+  "unicode": "∀ x ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, lo ∈ [0.0, 3.0] ⊂ ℝ ∪ {absent, ∅}, hi ∈ [7.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(x, lo, hi) = (not (lo < x and x < hi))"
  },
  "for x in [0,1], f(x) <= 1": {
   "ascii": "for x in [0.0, 1.0] : float|absent|missing, f(x) <= 1",
@@ -38718,6 +40171,59 @@
    "tests:tests/test_a_witness_against_a_proof_reports_the_proof_failed.py"
   ],
   "unicode": "∀ x ∈ [0.2, 0.8] ⊂ ℝ ∪ {absent, ∅}, f(x) > 0.300000000000000"
+ },
+ "for x in [0.3, 1], f(x) >= -1000000000": {
+  "ascii": "for x in [0.3, 1.0] : float|absent|missing, f(x) >= -1000000000",
+  "domains": {
+   "x": [
+    "[0.3, 1.0] : float|absent|missing",
+    "[0.3, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "bf536136fffa",
+  "identity": "for x in [0.3, 1.0] : float|absent|missing, f(x) >= -1000000000",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py"
+  ],
+  "unicode": "∀ x ∈ [0.3, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ -1000000000"
+ },
+ "for x in [0.3, 1], f(x) >= 0": {
+  "ascii": "for x in [0.3, 1.0] : float|absent|missing, f(x) >= 0",
+  "domains": {
+   "x": [
+    "[0.3, 1.0] : float|absent|missing",
+    "[0.3, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "7f382307101d",
+  "identity": "for x in [0.3, 1.0] : float|absent|missing, f(x) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py",
+   "tests:tests/test_a_certified_raise_must_be_reachable.py"
+  ],
+  "unicode": "∀ x ∈ [0.3, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
+ },
+ "for x in [0.3, 1], for y in [0, 1], f(x, y) >= 0": {
+  "ascii": "for x in [0.3, 1.0] : float|absent|missing, y in [0.0, 1.0] : float|absent|missing, f(x, y) >= 0",
+  "domains": {
+   "x": [
+    "[0.3, 1.0] : float|absent|missing",
+    "[0.3, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ],
+   "y": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "78424a83af57",
+  "identity": "for x in [0.3, 1.0] : float|absent|missing, y in [0.0, 1.0] : float|absent|missing, f(x, y) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_certified_disproof_needs_an_exact_run.py"
+  ],
+  "unicode": "∀ x ∈ [0.3, 1.0] ⊂ ℝ ∪ {absent, ∅}, y ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x, y) ≥ 0"
  },
  "for x in [0.3472963553338606, 0.3472963553338607], f(x) < 0": {
   "ascii": "for x in [0.3472963553338606, 0.3472963553338607] : float|absent|missing, f(x) < 0",
@@ -39652,6 +41158,22 @@
   ],
   "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) < -∞"
  },
+ "for x in [1, 2], f(x) < 0": {
+  "ascii": "for x in [1.0, 2.0] : float|absent|missing, f(x) < 0",
+  "domains": {
+   "x": [
+    "[1.0, 2.0] : float|absent|missing",
+    "[1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "c0ec414866bb",
+  "identity": "for x in [1.0, 2.0] : float|absent|missing, f(x) < 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_class_decorator_is_read_through_only_when_its_call_hands_over_unchanged.py"
+  ],
+  "unicode": "∀ x ∈ [1.0, 2.0] ⊂ ℝ ∪ {absent, ∅}, f(x) < 0"
+ },
  "for x in [1, 2], f(x) < 1e17": {
   "ascii": "for x in [1.0, 2.0] : float|absent|missing, f(x) < 1.00000000000000e+17",
   "domains": {
@@ -39714,6 +41236,7 @@
   "identity": "for x in [1.0, 2.0] : float|absent|missing, f(x) <= 1.0e+309*x",
   "parses": true,
   "sources": [
+   "tests:tests/test_canonical_text_that_does_not_read_back_is_refused.py",
    "tests:tests/test_float_companion.py",
    "tests:tests/test_the_shipped_claim_corpus_reads_as_pinned.py"
   ],
@@ -41389,6 +42912,134 @@
    "tests:tests/test_inf_results_falsify.py"
   ],
   "unicode": "∀ x ∈ [710.0, 800.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≠ 5"
+ },
+ "for x in {\"a\", \"b\"}, f(x) == 1": {
+  "ascii": "for x in {\"a\", \"b\"}, f(x) = 1",
+  "domains": {
+   "x": [
+    "{\"a\", \"b\"}",
+    "{\"a\", \"b\"}"
+   ]
+  },
+  "fingerprint": "4e527f7b94e9",
+  "identity": "for x in {\"a\", \"b\"}, f(x) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ x ∈ {\"a\", \"b\"}, f(x) = 1"
+ },
+ "for x in {\"a\"}, f(x, 'a\"b\\'c') = 0": {
+  "ascii": "for x in {\"a\"}, f(x, 'a\"b\\'c') = 0",
+  "domains": {
+   "x": [
+    "{\"a\"}",
+    "{\"a\"}"
+   ]
+  },
+  "fingerprint": "e15435959952",
+  "identity": "for x in {\"a\"}, f(x, 'a\"b\\'c') = 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_record_written_with_the_old_literal_quoting_keeps_its_claim.py"
+  ],
+  "unicode": "∀ x ∈ {\"a\"}, f(x, 'a\"b\\'c') = 0"
+ },
+ "for x in {\"a\"}, f(x, body='a: {\"c\":\"\"}\", t=\"s') = 1": {
+  "ascii": "for x in {\"a\"}, f(x, body='a: {\"c\":\"\"}\", t=\"s') = 1",
+  "domains": {
+   "x": [
+    "{\"a\"}",
+    "{\"a\"}"
+   ]
+  },
+  "fingerprint": "2ec1f0e1d7d2",
+  "identity": "for x in {\"a\"}, f(x, body='a: {\"c\":\"\"}\", t=\"s') = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_record_written_with_the_old_literal_quoting_keeps_its_claim.py"
+  ],
+  "unicode": "∀ x ∈ {\"a\"}, f(x, body='a: {\"c\":\"\"}\", t=\"s') = 1"
+ },
+ "for x in {\"a\"}, f(x, body='a: {\"c\":\"\"}', t=\"s\") = 1": {
+  "ascii": "for x in {\"a\"}, f(x, body='a: {\"c\":\"\"}', t=\"s\") = 1",
+  "domains": {
+   "x": [
+    "{\"a\"}",
+    "{\"a\"}"
+   ]
+  },
+  "fingerprint": "dcf2511d9374",
+  "identity": "for x in {\"a\"}, f(x, body='a: {\"c\":\"\"}', t=\"s\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_record_written_with_the_old_literal_quoting_keeps_its_claim.py"
+  ],
+  "unicode": "∀ x ∈ {\"a\"}, f(x, body='a: {\"c\":\"\"}', t=\"s\") = 1"
+ },
+ "for x in {\"a:b\", \"c,d\"}, f(x) == 1": {
+  "ascii": "for x in {\"a:b\", \"c,d\"}, f(x) = 1",
+  "domains": {
+   "x": [
+    "{\"a:b\", \"c,d\"}",
+    "{\"a:b\", \"c,d\"}"
+   ]
+  },
+  "fingerprint": "e77e26baf908",
+  "identity": "for x in {\"a:b\", \"c,d\"}, f(x) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ x ∈ {\"a:b\", \"c,d\"}, f(x) = 1"
+ },
+ "for x in {'a\"', \"b\"}, f(x) = 1": {
+  "ascii": "for x in {'a\"', \"b\"}, f(x) = 1",
+  "domains": {
+   "x": [
+    "{'a\"', \"b\"}",
+    "{'a\"', \"b\"}"
+   ]
+  },
+  "fingerprint": "6810e49306ef",
+  "identity": "for x in {'a\"', \"b\"}, f(x) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ x ∈ {'a\"', \"b\"}, f(x) = 1"
+ },
+ "for x in {'a\"', 'b\"'}, f(x) == 1": {
+  "ascii": "for x in {'a\"', 'b\"'}, f(x) = 1",
+  "domains": {
+   "x": [
+    "{'a\"', 'b\"'}",
+    "{'a\"', 'b\"'}"
+   ]
+  },
+  "fingerprint": "8f0985a43389",
+  "identity": "for x in {'a\"', 'b\"'}, f(x) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ x ∈ {'a\"', 'b\"'}, f(x) = 1"
+ },
+ "for x in {'a\"', 'b'}, f(x) == 1": {
+  "ascii": "for x in {'a\"', \"b\"}, f(x) = 1",
+  "domains": {
+   "x": [
+    "{'a\"', \"b\"}",
+    "{'a\"', \"b\"}"
+   ]
+  },
+  "fingerprint": "6810e49306ef",
+  "identity": "for x in {'a\"', \"b\"}, f(x) = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "∀ x ∈ {'a\"', \"b\"}, f(x) = 1"
  },
  "for x in {-1, 1}, f(x) == x / 2": {
   "ascii": "for x in {-1, 1}, f(x) = x/2",
@@ -44754,6 +46405,23 @@
   ],
   "unicode": "∀ xs ∈ ([0.0, 0.1] ∪ {∅})³ ⊂ ℝ ∪ {absent}, f(xs) ≥ 0"
  },
+ "for xs in [0, 10] : float, f(xs) >= 0": {
+  "ascii": "for xs in [0.0, 10.0] : float, f(xs) >= 0",
+  "domains": {
+   "xs": [
+    "[0.0, 10.0] : float",
+    "[0.0, 10.0] ⊂ ℝ"
+   ]
+  },
+  "fingerprint": "e57e14f883d7",
+  "identity": "for xs in [0.0, 10.0] : float, f(xs) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_declared_runtime_type_not_installed_decides_only_the_mathematics.py",
+   "tests:tests/test_a_plain_domain_binds_the_value_unless_annotated_as_a_sequence.py"
+  ],
+  "unicode": "∀ xs ∈ [0.0, 10.0] ⊂ ℝ, f(xs) ≥ 0"
+ },
  "for xs in [0, 10], f(xs) >= 0": {
   "ascii": "for xs in [0.0, 10.0] : float|absent|missing, f(xs) >= 0",
   "domains": {
@@ -44770,6 +46438,22 @@
    "tests:tests/test_normalize.py"
   ],
   "unicode": "∀ xs ∈ [0.0, 10.0] ⊂ ℝ ∪ {absent, ∅}, f(xs) ≥ 0"
+ },
+ "for xs in [0, 10]^n : float, f(xs) >= 0": {
+  "ascii": "for xs in [0.0, 10.0]^n : float, f(xs) >= 0",
+  "domains": {
+   "xs": [
+    "[0.0, 10.0]^n : float",
+    "[0.0, 10.0]ⁿ ⊂ ℝ"
+   ]
+  },
+  "fingerprint": "d8ef1489f6ab",
+  "identity": "for xs in [0.0, 10.0]^n : float, f(xs) >= 0",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_plain_domain_binds_the_value_unless_annotated_as_a_sequence.py"
+  ],
+  "unicode": "∀ xs ∈ [0.0, 10.0]ⁿ ⊂ ℝ, f(xs) ≥ 0"
  },
  "for xs in [0, 1]^3, 0 <= f(xs) <= 1": {
   "ascii": "for xs in ([0.0, 1.0] | {missing})^3 : float|absent, 0 <= f(xs) <= 1",
@@ -46744,21 +48428,24 @@
   "error": "InvalidConjecture: `let N be u64` is reserved for representation declarations (binding a named set to a machine number representation such as i64 or f32), which are not supported yet; a free variable cannot be named 'N' and a number representation name cannot be a bound",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_representation_spellings_stay_refused.py"
   ]
  },
  "let R be f32, for x in [0, 1], f(x) >= 0": {
   "error": "InvalidConjecture: `let R be f32` is reserved for representation declarations (binding a named set to a machine number representation such as i64 or f32), which are not supported yet; a free variable cannot be named 'R' and a number representation name cannot be a bound",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_representation_spellings_stay_refused.py"
   ]
  },
  "let Z be i64, for n in [0, 100] subset Z, f(n) >= 0": {
   "error": "InvalidConjecture: `let Z be i64` is reserved for representation declarations (binding a named set to a machine number representation such as i64 or f32), which are not supported yet; a free variable cannot be named 'Z' and a number representation name cannot be a bound",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_representation_spellings_stay_refused.py"
   ]
  },
  "let \\alpha = alpha, for \\alpha in [0,10], f(\\alpha) >= 0": {
@@ -46835,6 +48522,22 @@
    "tests:tests/test_grammar.py"
   ],
   "unicode": "2 ≥ 0"
+ },
+ "let a be [0, 1], a != [0, 1]": {
+  "ascii": "let a be [0.0, 1.0], a != [0, 1]",
+  "domains": {
+   "a": [
+    "[0.0, 1.0] : float|absent|missing",
+    "[0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}"
+   ]
+  },
+  "fingerprint": "48951c25d8ec",
+  "identity": "let a be [0.0, 1.0], a != [0, 1]",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "let a be [0.0, 1.0], a ≠ [0, 1]"
  },
  "let alpha = 0.5, let beta = 2": {
   "error": "InvalidConjecture: the let run binds names but has no claim after it: state the claim after the last binding (`let c be [0, 1], f(x) + c >= 0`)",
@@ -47824,7 +49527,8 @@
   "parses": false,
   "sources": [
    "extra:scripts/harvest_claim_corpus.py",
-   "tests:tests/test_grammar_reservations.py"
+   "tests:tests/test_grammar_reservations.py",
+   "tests:tests/test_the_let_representation_spellings_stay_refused.py"
   ]
  },
  "let ch = numpy.linalg.cholesky, assuming A is positive definite, ch(A) @ ch(A).T ~= A": {
@@ -49082,6 +50786,48 @@
   ],
   "unicode": "let h = numpy.linalg.norm, h(x + y)^2 = h(x)^2 + h(y)^2"
  },
+ "let inside = claims.smt_support.span_inside, for a in [48, 68] subset Z, b in [48, 68] subset Z, f(a, b) == inside(a, b)": {
+  "ascii": "let inside = claims.smt_support.span_inside, for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = inside(a, b)",
+  "domains": {
+   "a": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ],
+   "b": [
+    "[48, 68] : int",
+    "[48, 68] ⊂ ℤ"
+   ]
+  },
+  "fingerprint": "0d57ec0d5f39",
+  "identity": "let inside = claims.smt_support.span_inside, for a in [48, 68] : int, b in [48, 68] : int, f(a, b) = inside(a, b)",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "let inside = claims.smt_support.span_inside, ∀ a ∈ [48, 68] ⊂ ℤ, b ∈ [48, 68] ⊂ ℤ, f(a, b) = inside(a, b)"
+ },
+ "let k = \"a:b\", f(x, k) == 1": {
+  "ascii": "f(x, \"a:b\") = 1",
+  "domains": {},
+  "fingerprint": "dd0388f0ae1a",
+  "identity": "f(x, \"a:b\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "f(x, \"a:b\") = 1"
+ },
+ "let k = '}\"', f(x, k, 's') == 1": {
+  "ascii": "f(x, '}\"', \"s\") = 1",
+  "domains": {},
+  "fingerprint": "5d3fc7aabdcb",
+  "identity": "f(x, '}\"', \"s\") = 1",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_a_string_literal_keeps_its_value_in_the_stored_statement.py"
+  ],
+  "unicode": "f(x, '}\"', \"s\") = 1"
+ },
  "let k be 2.5, f(k) >= 0": {
   "ascii": "let k be 2.5, f(k) >= 0",
   "domains": {
@@ -49499,6 +51245,26 @@
   ],
   "unicode": "∀ price ∈ [0.0, 1000.0] ⊂ ℝ ∪ {absent, ∅}, rate ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(price, rate) ≤ price"
  },
+ "let other be {\"\", \"a\", \"b\", \"ab\", \"ba\"}, for text in {\"\", \"a\", \"b\", \"ab\", \"ba\"}, assuming text != other, f(text, \"\") != f(other, \"\")": {
+  "ascii": "assuming text != other, let other be {\"\", \"a\", \"ab\", \"b\", \"ba\"}, for text in {\"\", \"a\", \"ab\", \"b\", \"ba\"}, f(text, \"\") != f(other, \"\")",
+  "domains": {
+   "other": [
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}",
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}"
+   ],
+   "text": [
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}",
+    "{\"\", \"a\", \"ab\", \"b\", \"ba\"}"
+   ]
+  },
+  "fingerprint": "321e3900a1c4",
+  "identity": "assuming text != other, let other be {\"\", \"a\", \"ab\", \"b\", \"ba\"}, for text in {\"\", \"a\", \"ab\", \"b\", \"ba\"}, f(text, \"\") != f(other, \"\")",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt.claims.yaml"
+  ],
+  "unicode": "assuming text != other, let other be {\"\", \"a\", \"ab\", \"b\", \"ba\"}, ∀ text ∈ {\"\", \"a\", \"ab\", \"b\", \"ba\"}, f(text, \"\") ≠ f(other, \"\")"
+ },
  "let phi be [0, 1], for x in [0, 10], f(x) + phi >= 0": {
   "ascii": "let phi be [0.0, 1.0], for x in [0.0, 10.0] : float|absent|missing, phi + f(x) >= 0",
   "domains": {
@@ -49720,6 +51486,38 @@
   ],
   "unicode": "let strict be True, ∀ x ∈ [-1.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ 0"
  },
+ "let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) == truth(relation, a, b, c, d)": {
+  "ascii": "let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = truth(relation, a, b, c, d)",
+  "domains": {
+   "a": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "b": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "c": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "d": [
+    "{0, 1, 2, 3}",
+    "{0, 1, 2, 3}"
+   ],
+   "relation": [
+    "{0, 1, 2, 3, 4}",
+    "{0, 1, 2, 3, 4}"
+   ]
+  },
+  "fingerprint": "caa4a8695490",
+  "identity": "let truth = claims.smt_support.interval_truth, for relation in {0, 1, 2, 3, 4}, a in {0, 1, 2, 3}, b in {0, 1, 2, 3}, c in {0, 1, 2, 3}, d in {0, 1, 2, 3}, f(relation, a, b, c, d) = truth(relation, a, b, c, d)",
+  "parses": true,
+  "sources": [
+   "claims-file:claims/smt_relations.claims.yaml"
+  ],
+  "unicode": "let truth = claims.smt_support.interval_truth, ∀ relation ∈ {0, 1, 2, 3, 4}, a ∈ {0, 1, 2, 3}, b ∈ {0, 1, 2, 3}, c ∈ {0, 1, 2, 3}, d ∈ {0, 1, 2, 3}, f(relation, a, b, c, d) = truth(relation, a, b, c, d)"
+ },
  "let two = 2, for x in [0,10], f(x) <= two": {
   "ascii": "for x in [0.0, 10.0] : float|absent|missing, f(x) <= 2",
   "domains": {
@@ -49840,11 +51638,19 @@
   ],
   "unicode": "let x = acceleration, let θ = theta, ∀ θ ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, x ∈ [0.0, 100.0] ⊂ ℝ ∪ {absent, ∅}, f(θ, x) ≥ 0"
  },
+ "let x be [0, 1], for x in [0, 2], f(x) >= 0": {
+  "error": "ConflictingDomainBinding: ['x'] declared with both 'let ... be ...' and 'for ... in ...' in the same claim, pick one",
+  "parses": false,
+  "sources": [
+   "tests:tests/test_the_let_representation_spellings_stay_refused.py"
+  ]
+ },
  "let x be f32, f(x) >= 0": {
   "error": "InvalidConjecture: `let x be f32` is reserved for representation declarations (binding a named set to a machine number representation such as i64 or f32), which are not supported yet; a free variable cannot be named 'x' and a number representation name cannot be a bound",
   "parses": false,
   "sources": [
-   "extra:scripts/harvest_claim_corpus.py"
+   "extra:scripts/harvest_claim_corpus.py",
+   "tests:tests/test_the_let_representation_spellings_stay_refused.py"
   ]
  },
  "let y = a + b in |y| < 1": {
@@ -49910,6 +51716,13 @@
    "tests:tests/test_undeclared_names.py"
   ],
   "unicode": "let y be [0.0, 1.0], ∀ x ∈ [0.0, 1.0] ⊂ ℝ ∪ {absent, ∅}, f(x) ≥ x - y - 1"
+ },
+ "let |inf| be (-1e6, 1e6), for x in [0, oo), f(x) >= 0": {
+  "error": "InvalidConjecture: let |inf| be ... expects a positive magnitude (let |inf| be 1e6); got '(-1e6, 1e6)'",
+  "parses": false,
+  "sources": [
+   "tests:tests/test_pseudo_infinity_levels.py"
+  ]
  },
  "let |inf| be 100, is_overflow_safe(x)": {
   "ascii": "let |inf| be 100, is_overflow_safe(x)",
@@ -50792,6 +52605,13 @@
    "other:examples/sketches/fourier_sum.yaml"
   ]
  },
+ "the canonical form of a term holds the strings the term holds": {
+  "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'the canonical form of a term holds the strings the term holds'",
+  "parses": false,
+  "sources": [
+   "package:mathema/domain_relations.py"
+  ]
+ },
  "this is not a law": {
   "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in 'this is not a law'",
   "parses": false,
@@ -51026,6 +52846,13 @@
   ],
   "unicode": "y ≥ 1"
  },
+ "z3 answers 'no string exists' only when none does": {
+  "error": "InvalidConjecture: no relation (==, !=, <=, >=, <, >) in \"z3 answers 'no string exists' only when none does\"",
+  "parses": false,
+  "sources": [
+   "package:mathema/domain_relations.py"
+  ]
+ },
  "|a + b| < 1": {
   "ascii": "abs(a + b) < 1",
   "domains": {},
@@ -51058,6 +52885,17 @@
    "tests:tests/test_linalg.py"
   ],
   "unicode": "|x| ≥ 0"
+ },
+ "ℤ ≠ ℝ": {
+  "ascii": "Z != R",
+  "domains": {},
+  "fingerprint": "65c71fa4714e",
+  "identity": "Z != R",
+  "parses": true,
+  "sources": [
+   "tests:tests/test_relations_between_domains.py"
+  ],
+  "unicode": "ℤ ≠ ℝ"
  },
  "∀ x ∈ [0, 1] ⊂ ℝ, f(x) ≥ 0": {
   "ascii": "for x in [0.0, 1.0] : float, f(x) >= 0",

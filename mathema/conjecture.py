@@ -323,14 +323,82 @@ def _yaml_safe_args(args) -> list:
         A falsifying argument tuple as YAML-safe values a later run can
         replay exactly: numbers pass through, a complex value becomes
         its coordinate spelling, a set or frozenset becomes its members
-        under a `set` or `frozenset` tag, and sequences and mapping
-        values recurse.
+        under a `set` or `frozenset` tag, a string holding a lone
+        surrogate becomes its escaped spelling under an `escaped_str`
+        tag, and sequences and mapping values recurse. A mapping with
+        a key holding a lone surrogate, or with `escaped_str` as its
+        only key, is stored under the `escaped_str` tag as the mapping
+        with each string key in its escaped spelling, so no mapping is
+        ever read back as an escaped string.
     """
     return [_yaml_safe_value(v) for v in args]
 
 
+#: a lone surrogate: a code point from U+D800 to U+DFFF, which a Python
+#: string may hold but no YAML text can spell
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
+#: one escape in an `escaped_str` spelling: a doubled backslash, or
+#: `\\u` and four hex digits
+_SURROGATE_ESCAPE = re.compile(r"\\(\\|u[0-9A-Fa-f]{4})")
+
+
+def _escaped_str(text: str) -> str:
+    """Intent:
+        `text` with each backslash doubled and each lone surrogate
+        written `\\uXXXX`, every other character standing as itself;
+        the result holds no lone surrogate, and `_unescaped_str`
+        reverses it.
+    """
+    return "".join(f"\\u{ord(ch):04X}" if 0xD800 <= ord(ch) <= 0xDFFF
+                   else "\\\\" if ch == "\\" else ch
+                   for ch in text)
+
+
+def _decoded_escapes(text: str) -> "str | None":
+    """Intent:
+        The string `_escaped_str` spelled as `text`, or None when `text`
+        is not such a spelling: a backslash not starting a doubled
+        backslash or a `\\uXXXX` escape, or a `\\uXXXX` escape of a
+        code point that is not a surrogate.
+    """
+    pieces, at = [], 0
+    for m in _SURROGATE_ESCAPE.finditer(text):
+        pieces.append(text[at:m.start()])
+        esc = m.group(1)
+        if esc != "\\" and not 0xD800 <= int(esc[1:], 16) <= 0xDFFF:
+            return None
+        pieces.append("\\" if esc == "\\" else chr(int(esc[1:], 16)))
+        at = m.end()
+    rest = text[at:]
+    if "\\" in "".join(pieces[0::2]) + rest:
+        return None
+    return "".join(pieces) + rest
+
+
+def _unescaped_str(text: str) -> "str | None":
+    """Intent:
+        The string `_escaped_str` spelled as `text` when it holds a lone
+        surrogate (the only strings stored that way), else None.
+    """
+    out = _decoded_escapes(text)
+    return out if out is not None and _LONE_SURROGATE.search(out) else None
+
+
+def _escaped_mapping(v: dict) -> bool:
+    """Intent:
+        Whether a mapping witness is stored under the `escaped_str` tag:
+        a string key holds a lone surrogate, or `escaped_str` is its
+        only key.
+    """
+    return list(v) == ["escaped_str"] or any(
+        isinstance(k, str) and _LONE_SURROGATE.search(k) for k in v)
+
+
 def _yaml_safe_value(v):
     """One argument value in the spelling `_yaml_safe_args` stores."""
+    if isinstance(v, str) and _LONE_SURROGATE.search(v):
+        return {"escaped_str": _escaped_str(v)}
     if isinstance(v, complex) and not isinstance(v, (int, float)):
         # tagged, so a string witness that reads as a complex
         # number (`"j"`) can never be mistaken for one
@@ -343,19 +411,33 @@ def _yaml_safe_value(v):
         return {"frozenset" if isinstance(v, frozenset) else "set": members}
     if isinstance(v, (list, tuple)):
         return _yaml_safe_args(v)
+    if isinstance(v, dict) and _escaped_mapping(v):
+        return {"escaped_str": {_escaped_str(k) if isinstance(k, str) else k:
+                                _yaml_safe_value(x) for k, x in v.items()}}
     if isinstance(v, dict):
         return {k: _yaml_safe_value(x) for k, x in v.items()}
     return v
 
 
 def _restored_value(v):
-    """A stored argument value read back: a tagged complex number or
-    set becomes the value it spells, and lists and mapping values
-    recurse."""
+    """A stored argument value read back: a tagged complex number,
+    set or escaped string becomes the value it spells, a mapping under
+    the `escaped_str` tag becomes the mapping with its keys decoded,
+    and lists and mapping values recurse."""
     if isinstance(v, dict) and len(v) == 1:
         (tag, inner), = v.items()
         if tag == "complex" and isinstance(inner, str):
             return complex(inner)
+        if tag == "escaped_str" and isinstance(inner, str):
+            text = _unescaped_str(inner)
+            if text is not None:
+                return text
+        if tag == "escaped_str" and isinstance(inner, dict):
+            keys = [_decoded_escapes(k) if isinstance(k, str) else k
+                    for k in inner]
+            if None not in keys:
+                return {k: _restored_value(x)
+                        for k, x in zip(keys, inner.values())}
         if tag in ("set", "frozenset") and isinstance(inner, list):
             members = [_restored_value(m) for m in inner]
             try:
@@ -1804,6 +1886,24 @@ class InvalidConjecture(ValueError):
     `Conjecture` (bad syntax, an unrecognized relation, ...)."""
 
 
+class CanonicalTextError(InvalidConjecture):
+    """Raised by `spec.canonical_claim_text` when the text it rendered
+    for a claim does not read back as that claim (another string
+    literal value, another statement, or text that does not parse), so
+    the claim has no stored text and no record is written for it.
+
+    `claim_name` is the claim's name, `problem` says how the text
+    fails to read back, and `text` is the text rendered; each is None
+    when not given."""
+
+    def __init__(self, message: str = "", *, claim_name: "str | None" = None,
+                 problem: "str | None" = None, text: "str | None" = None):
+        super().__init__(message)
+        self.claim_name = claim_name
+        self.problem = problem
+        self.text = text
+
+
 class ConflictingDomainBinding(InvalidConjecture):
     """Raised by `claim()` when the same name is given a domain both by
     a leading `let name be bounds` and an ordinary `for name in bounds`
@@ -2156,6 +2256,28 @@ def _claim(law: str, name: str | None, source: str, route: str,
     prime_problem = unexpanded_prime_message(text)
     if prime_problem is not None:
         raise InvalidConjecture(prime_problem)
+    from . import domain_relations
+    try:
+        between = domain_relations.parse(
+            text, frozenset({*dom, *let_funcs, *aliases, *param_pins}))
+    except domain_relations.InvalidDomainRelation as e:
+        raise InvalidConjecture(str(e)) from e
+    if between is not None:
+        # a relation between two domains (`A subset B`) states nothing
+        # about f, so it binds no variable and takes no premise
+        if dom or assuming or let_funcs or aliases or param_pins:
+            raise InvalidConjecture(
+                f"a relation between domains takes no quantifier, premise "
+                f"or binding; state `{between.text()}` on its own: "
+                f"{law.strip()!r}")
+        stated = between.text()
+        first = between.relations[0].left.text
+        return Conjecture(
+            name=name or re.sub(r"\W+", "_", stated).strip("_"),
+            lhs=first, rhs=stated[len(first):].strip(),
+            relation=domain_relations.RELATION, source=source,
+            route="derive" if route == "best" else route, grammar=grammar,
+            meta=dict(meta or {}), raw=stated, written=law.strip())
     r = parse_raises(text)
     ds = None if r is not None else parse_domain_safety(text)
     negated = False
@@ -4764,7 +4886,8 @@ def pins_into_calls(cj, fn):
         `cj` written with its pins in the call: each `let p be v` that
         pins a parameter of f (`call_defaults`) and that the claim reads
         nowhere else becomes the keyword `p=v` on every call to f that
-        leaves `p` out, and its `let` goes. `cj` unchanged when it pins
+        leaves `p` out (a call that passes `p` by keyword, even into f's
+        `**kwargs`, keeps its own), and its `let` goes. `cj` unchanged when it pins
         nothing that can move.
     """
     import math
@@ -4814,8 +4937,9 @@ def pins_into_calls(cj, fn):
                                             if k.arg is not None})
             except TypeError:
                 continue
+            passed = {k.arg for k in n.keywords if k.arg is not None}
             for p, v in movable.items():
-                if p not in bound.arguments:
+                if p not in bound.arguments and p not in passed:
                     n.keywords.append(ast.keyword(arg=p, value=literal(v)))
                     changed = True
         return ast.unparse(tree) if changed else src
@@ -5545,19 +5669,209 @@ def check_conjectures(fn, conjectures: list[Conjecture],
     # the function's gates read every policy row, so they come last
     gates = [c for c in built if _policy_gate(c, fn, facts)]
     scalar_empty = [c for c in built if _empty_on_a_scalar(c, fn, facts)]
+    from . import domain_relations
+    between = [c for c in built
+               if getattr(c, "relation", None) == domain_relations.RELATION]
     values = [c for c in built if getattr(c, "relation", None) != "policy"
-              and c not in gates and c not in scalar_empty]
+              and c not in gates and c not in scalar_empty
+              and c not in between]
     from ._empty_input import STATED
     # the claims checked here state the empty policy their value claims
     # read; a nested check (a chain's links) keeps the outer ones too
     stated_token = STATED.set((*STATED.get(), *built))
     try:
-        return _check_built(fn, built, values, stated, gates, scalar_empty,
-                            fn_mats, runtime_mats, domain, trials,
-                            trials_scale, facts, extensive, known_premises,
-                            float_companions, pseudo_infinity)
+        out = _check_built(fn, built, values, stated, gates, scalar_empty,
+                           fn_mats, runtime_mats, domain, trials,
+                           trials_scale, facts, extensive, known_premises,
+                           float_companions, pseudo_infinity)
+        return _stamp_language_definitions(
+            out + [_adjudicate_domain_relation(c, fn) for c in between], built, fn)
     finally:
         STATED.reset(stated_token)
+
+
+def language_definition_stamp(cj, fn=None) -> dict:
+    """Intent:
+        The hash of the regular-language definition each language a
+        claim names states now, by the language's text (`L[slug]`): the
+        languages its bindings range over, the one on the right of
+        `in`, and both sides of a relation between domains. A language
+        that does not resolve, or states no definition this core reads,
+        is left out. With `fn`, a pattern validator a registered word
+        reads, the language of its membership statement (`L[<base>,
+        <word> (<pattern>)]`) is in the map too, so the pattern the
+        function reads is part of what the record rests on. The map is
+        what a row is stamped with
+        (`mathema.language_definitions`) and what verify compares a
+        record against.
+    """
+    from . import regular
+    from .languages import _term_of, resolve_language
+    stamp: dict = {}
+    for ref in _named_languages(cj, fn):
+        try:
+            document = _term_of(resolve_language(ref))
+            if regular.is_definition(document):
+                stamp[repr(ref)] = regular.term_hash(document)
+        except Exception:
+            continue
+    return stamp
+
+
+def _named_languages(cj, fn=None) -> list:
+    """The languages `language_definition_stamp` reads for a claim, as
+    `LanguageRef`s."""
+    from . import domain_relations
+    from .domain import Domain, LanguageRef
+    bounds = [*(getattr(cj, "domain", None) or {}).values(), getattr(cj, "rhs_bound", None)]
+    if getattr(cj, "relation", None) == domain_relations.RELATION:
+        try:
+            stated = domain_relations.parse(f"{cj.lhs} {cj.rhs}")
+        except domain_relations.InvalidDomainRelation:
+            stated = None
+        for rel in (stated.relations if stated is not None else ()):
+            bounds.extend((rel.left.bound, rel.right.bound))
+    named: list = []
+    for bound in bounds:
+        if isinstance(bound, LanguageRef):
+            named.append(bound)
+        elif isinstance(bound, Domain):
+            named.extend(p for p in bound.pieces if isinstance(p, LanguageRef))
+    if fn is not None:
+        try:
+            statement = _validator_statement(fn, getattr(cj, "domain", None) or {})
+        except Exception:
+            statement = None
+        if isinstance(statement, tuple):
+            named.append(statement[3])
+    return named
+
+
+def _language_membership_stamp(cj, fn=None, languages=None) -> dict:
+    """Intent:
+        The identity of the code behind each named language's
+        `contains()` (`_code_identity.membership_identity`), by the
+        language's text, for the languages `language_definition_stamp`
+        reads, or only those in `languages` when given; and, for a
+        validator whose exception message reads module-level text
+        constants, the identity of each constant's value, by
+        `<module>.<name>`. A language that does not resolve is left
+        out. A row whose verdict rests on a
+        definition having been checked against the language's
+        membership is stamped with it (`mathema.language_memberships`),
+        so an edit to that membership makes the record stale.
+    """
+    from ._code_identity import membership_identity
+    from ._validators import read_validator
+    from .languages import resolve_language
+    stamp: dict = {}
+    # a text constant a validator's message reads is part of what the
+    # reading of the function rests on
+    read = read_validator(fn) if fn is not None else None
+    for name in getattr(read, "constants", ()):
+        value = dict.get(getattr(fn, "__globals__", {}), name)
+        if type(value) is str:
+            stamp[f"{fn.__module__}.{name}"] = membership_identity(value)
+    for ref in _named_languages(cj, fn):
+        text = repr(ref)
+        if languages is not None and text not in languages:
+            continue
+        try:
+            stamp[text] = membership_identity(resolve_language(ref))
+        except Exception:
+            continue
+    return stamp
+
+
+def _stamp_language_definitions(rows: list, claims: list, fn=None) -> list:
+    """Each row of a claim that names a defined language, its companion
+    rows included, stamped with `language_definition_stamp`; a row whose
+    verdict lists the definitions it assumed is also stamped with the
+    membership identity of each of those languages
+    (`_language_membership_stamp`)."""
+    by_name = {c.name: c for c in claims}
+    stamps = {c.name: language_definition_stamp(c, fn) for c in claims}
+    for row in rows:
+        meta = getattr(row, "meta", None) or {}
+        name = meta.get("mathema.companion_of") or row.name
+        stamp = stamps.get(name)
+        if stamp:
+            meta = {**meta, "mathema.language_definitions": stamp}
+        assumed = {a.get("language") for a in
+                   (meta.get("mathema.assumptions") or {}).get("definitions") or ()
+                   if isinstance(a, dict)}
+        if assumed and name in by_name:
+            memberships = _language_membership_stamp(by_name[name], fn, assumed)
+            if memberships:
+                meta = {**meta, "mathema.language_memberships": memberships}  # :draft
+        if meta:
+            row.meta = meta
+    return rows
+
+
+def _adjudicate_domain_relation(cj, fn=None) -> "Probe":
+    """Intent:
+        The row for a claim relating two domains (`A subset B`):
+        `proven` or `falsified` as the sets decide it, with the member
+        a verdict rests on executed against both domains, or `unknown`
+        with the reason.
+    """
+    from . import domain_relations
+    statement = statement_text(cj.relation, cj.lhs, cj.rhs)
+    meta = {**(cj.meta or {}), "mathema.surface": cj.source}
+    try:
+        stated = domain_relations.parse(statement)
+    except domain_relations.InvalidDomainRelation as e:
+        stated, why = None, str(e)
+    else:
+        why = f"{statement!r} is not a relation between two domains"
+    if stated is not None and fn is not None:
+        try:
+            parameters = set(inspect.signature(fn).parameters)
+        except (TypeError, ValueError):
+            parameters = set()
+        clash = domain_relations.parameter_named_as_a_set(
+            stated, cj.written or statement, parameters)
+        if clash is not None:
+            stated, why = None, clash
+    if stated is None:
+        return Probe(cj.name, statement, "skipped:misspecified", route=None, note=why,
+                     meta={**meta, "mathema.invalid_conjecture": True})
+    decision = domain_relations.decide(stated, cj.written or None)
+    detail = {"relations": [[r.left.text, r.word, r.right.text] for r in stated.relations]}
+    if decision.witness is not None:
+        detail["witness"] = decision.witness
+    if decision.definitions:
+        detail["definitions"] = decision.definitions
+        if decision.witness is not None:
+            # the verdict rests on a string run through the languages'
+            # own membership, which no definition hash covers
+            meta["mathema.rests_on_membership"] = sorted(decision.definitions)
+    meta["mathema.domain_relation"] = detail
+    if decision.verdict == "unknown":
+        return Probe(cj.name, statement, "unknown", route="derive",
+                     note=decision.reason, meta=meta, grammar=cj.grammar)
+    meta["mathema.derive_route"] = decision.route
+    path = ("smt: membership, regular language" if decision.route == "smt"
+            else "domain sets")
+    assumed = ""
+    if decision.route == "smt" and decision.assumptions is not None:
+        # a verdict that rests on definitions says which, and how each stands
+        meta["mathema.assumptions"] = {
+            "standard": domain_relations.standard_assumptions(),
+            "definitions": decision.assumptions, "texts": decision.texts or []}
+        assumed = "; " + domain_relations.assuming_text(decision.assumptions,
+                                                        decision.verdict)
+    if decision.verdict == "proven":
+        return Probe(cj.name, statement, "proven", route="derive",
+                     sketch=f"{path}: {decision.reason}{assumed}", meta=meta,
+                     grammar=cj.grammar)
+    # a falsified with no executed string rests on the definitions and
+    # says so, as a proof does
+    return Probe(cj.name, statement, "falsified", route="derive",
+                 counterexample=decision.reason, note=f"{decision.reason}{assumed}",
+                 sketch=f"{path}: {decision.reason}{assumed}" if assumed else None,
+                 meta=meta, grammar=cj.grammar)
 
 
 def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
@@ -6604,6 +6918,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # derive reads; only a pin no call writes (`let p be v`) is not
         written = _pins_in_calls(cj)
         unread_pins = {p: v for p, v in call_pins.items() if p not in written}
+        unresolved = _unresolved_bound_names(cj)
+        if unresolved:
+            out.append(stamp(_unresolved_bound_probe(ctx, fn, unresolved),
+                             _cap=verdict_cap))
+            continue
         grounded = (None if unread_pins or ctx.family is not None
                     or ctx.assumption else _ground_proof_of(ctx, fn, facts))
         if grounded is not None and (grounded.status == "disproven"
@@ -8060,14 +8379,18 @@ def _failure_at(cj, kinds, env, args, code_l, code_r, labels=(None, None)) -> "s
     return None
 
 
-def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
+def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r,
+                             outside=None):
     """Intent:
         `(args, counterexample, steps)`: the witness shrunk inside each
         language-bound parameter's language, one of the language's own
         `shrink` candidates at a time, keeping a candidate only when it
-        is in the claim's domain for that parameter and the claim still
-        fails there, within `_WITNESS_SHRINK_EVALUATIONS` evaluations;
-        None when the failure does not reproduce.
+        is in the claim's domain for that parameter, the claim still
+        fails there and the failure is not one `outside` excludes,
+        within `_WITNESS_SHRINK_EVALUATIONS` evaluations; None when the
+        failure does not reproduce. `outside`, called after each
+        evaluation, says whether that evaluation fell outside the
+        claim's premise (a raise of `f` under `f is defined`).
     """
     from .domain import LanguageRef, domain_contains, path_bindings_hold
     from .languages import resolve_language
@@ -8118,6 +8441,8 @@ def _shrink_language_witness(cj, kinds, cj_domain, env, args, code_l, code_r):
                     budget -= 1
                     trial = [*args[:i], candidate, *args[i + 1:]]
                     failure = _failure_at(cj, kinds, env, trial, code_l, code_r, labels)
+                    if outside is not None and outside():
+                        continue
                     if failure is not None:
                         args, current, steps, improved = trial, failure, steps + 1, True
                         break
@@ -10141,7 +10466,8 @@ def _provenance_meta(proof) -> dict:
     meta = {}
     for key in ("mathema.derive_route", "mathema.engine_disagreement",
                 "mathema.missing", "mathema.path_no_value",
-                "mathema.matrix_lemmas",
+                "mathema.matrix_lemmas", "mathema.smt", "mathema.assumptions",
+                "mathema.rests_on_membership",
                 "mathema.corroboration", "mathema.corroboration_unexecutable",
                 "mathema.corroboration_reason", "mathema.definitions",
                 "mathema.exact_witness", "mathema.witness_exact_run",
@@ -10576,12 +10902,570 @@ def _language_strategy_proof(cj, fn, bound_funcs, cj_domain, extensive):
         return ProofResult("proven", sketch=result.sketch, quantifier=result.quantifier,
                            meta=meta)
     if result.status == "disproven":
+        executed = _strategy_witness_fails(cj, fn, cj_domain, bound_funcs, param,
+                                           result.witness)
+        if executed is not None:
+            return ProofResult(
+                "disproven", sketch=result.sketch, witness=dict(result.witness),
+                counterexample=result.counterexample or executed,
+                meta={**meta, "mathema.witness_executed": True})
         return ProofResult("undecided",
                            sketch=f"the language's strategy claimed a disproof it did not "
                                   f"execute ({result.sketch}), so the probe decides")
     if result.status in ("undecided", "unliftable"):
         return ProofResult(result.status, sketch=result.sketch)
     return None
+
+
+def _strategy_witness_fails(cj, fn, cj_domain, bound_funcs, param,
+                            witness) -> "str | None":
+    """Intent:
+        The executed counterexample behind a language strategy's
+        disproof: the witness it names for `param`, when that value is
+        a member of the claim's domain and the claim, run on the real
+        function there, fails. Returns the witness as text
+        (`s = 'a\\n'`), or None when the strategy named no witness, the
+        value is outside the domain, or the claim holds or cannot be
+        evaluated there.
+    """
+    from .domain import domain_contains
+    from .gates import _point_evaluator
+    if not isinstance(witness, dict) or set(witness) != {param}:
+        return None
+    try:
+        if not domain_contains(witness[param], cj_domain[param]):
+            return None
+        from . import analyze as _analyze
+        deps = _point_evaluator(cj, fn, _analyze(fn), cj_domain, bound_funcs)
+        if deps is None or deps["evaluate"](dict(witness)) is not False:
+            return None
+    except Exception:
+        return None
+    return f"{param} = {witness[param]!r}"
+
+
+def _concatenation(expr, param: str) -> "tuple | None":
+    """`(prefix, suffix)` when the parsed expression is the bare name
+    `param` with string literals added before and after it (`"a" + s +
+    "\\n"`), else None."""
+    import ast
+    if isinstance(expr, ast.Name) and expr.id == param:
+        return "", ""
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        left, right = expr.left, expr.right
+        if isinstance(right, ast.Constant) and isinstance(right.value, str):
+            inner = _concatenation(left, param)
+            return None if inner is None else (inner[0], inner[1] + right.value)
+        if isinstance(left, ast.Constant) and isinstance(left.value, str):
+            inner = _concatenation(right, param)
+            return None if inner is None else (left.value + inner[0], inner[1])
+    return None
+
+
+def _validator_question(cj, fn, validator, param: str) -> "tuple | str":
+    """Intent:
+        What a claim asks of a function read as a pattern validator, as
+        `(prefix, suffix, accepted)`: the claim holds exactly when
+        every text `prefix + s + suffix`, `s` in the domain, is one the
+        pattern accepts (`accepted` True) or one it does not (False).
+        A string when the claim asks something else, saying what.
+
+    Notes:
+        Read: `raises(f(<text>), E)` for a refusing validator raising
+        `E` or a subclass of it; `f(s) == s` for a refusing validator,
+        which returns its argument where it does not raise; and `f(s)
+        == True` or `== False` for a predicate.
+    """
+    import ast
+    import builtins
+    # `f` is the function under check; a claim binding any function is
+    # turned away before this is read
+    names = {"f"}
+    try:
+        call = ast.parse(cj.lhs.strip(), mode="eval").body
+    except SyntaxError:
+        return "the claim's left side is not a call of the function"
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and call.func.id in names and len(call.args) == 1 and not call.keywords):
+        return "the claim's left side is not one call of the function"
+    around = _concatenation(call.args[0], param)
+    if around is None:
+        return (f"the function is called on {ast.unparse(call.args[0])}, which is more "
+                f"than {param} with text added before or after it")
+    if cj.relation == "raises":
+        claimed = getattr(builtins, (cj.rhs or "").strip(), None)
+        if validator.raises is None:
+            return "the function returns the truth of the match and raises nothing"
+        if not (isinstance(claimed, type) and issubclass(validator.raises, claimed)):
+            return (f"the function raises {validator.raises.__name__}, which is not "
+                    f"{cj.rhs.strip() or 'the exception claimed'}")
+        return (*around, False)
+    if cj.relation != "==":
+        return f"the relation {cj.relation} is not one a pattern validator decides"
+    right = cj.rhs.strip()
+    if validator.raises is not None:
+        if around == ("", "") and right == param:
+            return ("", "", True)
+        return "the claim compares the validator's value with something other than its argument"
+    if right in ("True", "False") and not cj.tolerance:
+        return (*around, (right == "True") != validator.negated)
+    return "the claim compares the predicate's value with something other than True or False"
+
+
+def _validator_breaks(cj, fn, text: str) -> bool:
+    """Whether the real function, called on `text`, breaks a claim a
+    validator decides: for `raises(f(...), E)` it raises no `E`; for
+    `f(...) == value` it raises, or returns something other than the
+    value claimed (the text itself, `True` or `False`)."""
+    import builtins
+    try:
+        returned = fn(text)
+    except Exception as e:
+        if cj.relation == "raises":
+            return not isinstance(e, getattr(builtins, cj.rhs.strip(), ()))
+        return True
+    if cj.relation == "raises":
+        return True
+    right = cj.rhs.strip()
+    if right in ("True", "False"):
+        return returned is not (right == "True")
+    return returned != text
+
+
+def _validator_statement(fn, cj_domain) -> "tuple | str | None":
+    """Intent:
+        `(validator, param, base, stated)` when `fn` is a pattern
+        validator, `cj_domain` binds one variable over one language and
+        a registered predicate word reads the function's match call:
+        the validator, the claim's variable (whatever the function's
+        parameter is named), its language and the language of the
+        membership statement, `L[<base>, <word> (<pattern>)]`. None
+        when `fn` is no validator or the claim binds more than one
+        variable; a string saying why there is no statement when it is
+        one.
+    """
+    from ._validators import read_validator
+    from .domain import Domain, LanguageRef, Predicate
+    from .languages import word_reading_call
+    if len(cj_domain) != 1:
+        return None
+    ((param, bound),) = cj_domain.items()
+    validator = read_validator(fn)
+    if isinstance(validator, str):
+        return None
+    reading = word_reading_call(validator.accepts)
+    if reading is None:
+        return (f"definition-unread(re.Pattern.{validator.mode}): no registered "
+                f"predicate word reads the call")
+    word, arguments = reading
+    base = bound if isinstance(bound, LanguageRef) else (
+        bound.pieces[0] if isinstance(bound, Domain) and len(bound.pieces) == 1
+        and not bound.excluded and isinstance(bound.pieces[0], LanguageRef) else None)
+    if base is None:
+        return (f"the domain of {param} is not one language, so the validator "
+                f"has no membership statement over it")
+    stated = LanguageRef(base.name, base.refinements, tuple(sorted(
+        {*base.predicates, Predicate(word.word, arguments)})))
+    return validator, param, base, stated
+
+
+def _every_text_language():
+    """Intent:
+        The language of every text: a `StringLanguage` named `text`
+        that holds every `str`, its persisted form stating the term
+        over all code points (any number of characters, each any code
+        point) under `TERM_KEY` and, as the same term, under the
+        earlier key `definition`, which a predicate word's `refine`
+        may still read from its base language.
+    """
+    from . import regular
+    from .languages import TERM_KEY, StringLanguage
+    term = {"kind": regular.KIND, "version": regular.VERSION,
+            "alphabet": [[0, regular.MAX_CODE_POINT]], "exact": True,
+            "language": {"op": "repeat", "arg": {"op": "chars",
+                                                 "ranges": [[0, regular.MAX_CODE_POINT]]},
+                         "min": 0, "max": None}}
+    return StringLanguage("text", char_ok=lambda c: True,
+                          schema={TERM_KEY: term, "definition": term})  # :draft
+
+
+def _accepted_over_every_text(validator):
+    """The language of every text the validator's match accepts, as the
+    registered predicate word reading the match states it over a
+    language of all text; a phrase saying why there is none when the
+    word does not apply there or states no definition."""
+    from . import regular
+    from .languages import _term_of, word_reading_call
+    reading = word_reading_call(validator.accepts)
+    if reading is None:
+        return "no registered predicate word reads the call"
+    word, arguments = reading
+    every = _every_text_language()
+    try:
+        if word.applies is not None and not word.applies(every):
+            return f"the word {word.word} does not apply to every text"
+        over = word.refine(every, arguments, False)
+        if regular.is_definition(_term_of(over)):
+            return over
+    except Exception as e:
+        return f"the word {word.word} gives no language over every text ({e})"
+    return f"the word {word.word} states no definition over every text"
+
+
+def _a_language_of_texts(ref) -> bool:
+    """Whether the language `ref` names is a language of `str` values."""
+    from .languages import resolve_language
+    try:
+        return getattr(resolve_language(ref), "kind", None) == "string"
+    except Exception:
+        return False
+
+
+def _premise_is_f_defined(cj) -> bool:  # :draft
+    """Whether a claim's premise is exactly `f is defined` (or its
+    other spelling, `is_defined(f)`), with no region pinned to it and
+    nothing joined to it."""
+    text = re.sub(r"^\s*assuming\s+", "", getattr(cj, "assuming", "") or "").strip()
+    return re.fullmatch(r"f\s+is\s+defined|is_defined\(\s*f\s*\)", text) is not None
+
+
+def _beyond_a_plain_validator_claim(cj, bound, variable: str = "") -> "str | None":
+    """Intent:
+        What a claim states that the validator proof does not account
+        for, or None for a plain claim: the proof reads one relation
+        about calls of the function under check on texts of the
+        language of the claim's one `variable`, and nothing else. A
+        premise, an outcome clause, a pin, a tolerance, a chained
+        comparison, a free variable other than `variable` (which `let`
+        binds as `for` does), a function bound in the claim (the name
+        `f` may then be another function) or a missing-value policy
+        stated on the variable each make the claim more than that, and
+        the claim is left to the other routes.
+    """
+    from .domain import Domain, _Sentinel, _sentinel_piece
+    if getattr(cj, "assuming", ""):
+        return "the claim has a premise"
+    if getattr(cj, "outcome", ""):
+        return "the claim has an outcome clause"
+    if getattr(cj, "pins", None) or getattr(cj, "param_pins", None):
+        return "the claim pins a value"
+    if getattr(cj, "tolerance", None) is not None:
+        return "the claim states a tolerance"
+    if len(getattr(cj, "links", None) or []) > 1:
+        return "the claim is a chain of comparisons"
+    if set(getattr(cj, "free_vars", None) or ()) - {variable}:  # :draft
+        return "the claim binds a free variable"
+    if getattr(cj, "funcs", None):
+        return "the claim binds a function, so a call in it may be another function"
+    if isinstance(bound, Domain):
+        stated = (bound.absent or bound.members or bound.policy is not None
+                  or any(isinstance(v, _Sentinel) for v in bound.excluded)
+                  or any(_sentinel_piece(p) or (isinstance(p, frozenset) and any(
+                      isinstance(v, _Sentinel) or v is None for v in p))
+                      for p in bound.pieces))
+        if stated:
+            return "the parameter's domain states a missing-value policy"
+    return None
+
+
+#: how many members among the definition check's strings the reading
+#: check also runs
+_READING_FROM_DEFINITION = 400
+
+
+def _validator_reading_check(fn, validator, stated, domain, *, over=None,
+                             around: tuple = ("", "")) -> dict:
+    """Intent:
+        Check the reading of a validator against the function itself:
+        members of the parameter's languages, drawn by their samplers and
+        taken from the strings their definition check compares, with the text
+        `around` them the claim adds (`prefix`, `suffix`), are run
+        through the real function, and each must be accepted exactly
+        when it is a member of the stated language (the language
+        object `over` when given, `stated` naming it in the text)
+        (returned unchanged, or True,
+        for an accepted text; the validator's own exception, or False,
+        for a refused one). Returns the assumption the proof rests on,
+        as `domain_relations.check_definition` does, with its `axiom`
+        (the id taken over the definitions of the parameter's
+        languages): `assumed`, with
+        the corroboration record of the texts run and of those skipped
+        because a language's `contains` raised on them (the artefact
+        names the skipped texts), or `refuted` with the
+        `disagreement`. A reading whose stated language does not
+        resolve carries no corroboration.
+    """
+    import random
+
+    from . import domain_relations
+    from .languages import resolve_language
+    text = stated if isinstance(stated, str) else repr(stated)
+    seed = domain_relations._guard_seed(f"reading of {text}")
+    rng = random.Random(seed)
+    out = domain_relations._with_axiom(
+        {"language": text,
+         "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "  # :draft
+                      f"is in {text}",
+         "status": "assumed", "artefact": {"seed": seed, "texts run": 0}},
+        *(node for _, _, most, least in domain.read for node in (most, least)))
+    try:
+        accepted_language = over if over is not None else resolve_language(stated)
+    except Exception:
+        return out
+    prefix, suffix = around
+    skipped: list = []
+
+    def member(language, value) -> "bool | None":
+        try:
+            return bool(language.contains(value))
+        except Exception:
+            skipped.append(value)
+            return None
+    drawn: list = []
+    draws = 0
+    for piece, language, most, least in domain.read:
+        try:
+            drawn.extend(h.value for h in language.hazards())
+        except Exception:
+            pass
+        for _ in range(domain_relations.GUARD_DRAWS):
+            try:
+                drawn.append(language.sample(rng))
+            except Exception:
+                break
+            draws += 1
+        # the strings the definition check compares, so a member is run
+        # even where the language's own sampler draws none
+        compared = domain_relations._guard_strings(
+            language, most, least, domain.alphabet,
+            domain_relations._guard_seed(piece))[0]
+        texts = sorted({v for v in drawn if isinstance(v, str) and member(language, v)})
+        taken = [v for v in compared if member(language, v)][:_READING_FROM_DEFINITION]
+        texts = sorted(set(texts) | set(taken))
+        for value in (prefix + t + suffix for t in texts):
+            predicted = member(accepted_language, value)
+            if predicted is None:
+                continue
+            try:
+                returned = fn(value)
+            except Exception as e:
+                observed = False if (validator.raises is not None
+                                     and type(e) is validator.raises) else None
+            else:
+                if validator.raises is not None:
+                    observed = True if returned == value else None
+                else:
+                    observed = (returned is not validator.negated) \
+                        if isinstance(returned, bool) else None
+            if observed is not predicted:
+                return {**out, "status": "refuted",
+                        "disagreement": f"the function does not behave as the membership "
+                                        f"statement predicts on {value!r}"}
+            out["artefact"]["texts run"] += 1
+    shown = list(dict.fromkeys(skipped))
+    out["artefact"].update({"texts skipped": len(shown), "skipped": [
+        repr(v) for v in shown[:domain_relations.GUARD_SKIPPED_SHOWN]]})
+    out["corroboration"] = domain_relations.corroboration_record(  # :draft
+        out["artefact"]["texts run"], len(shown), seed, draws=draws,
+        **{"draws cap": domain_relations.GUARD_DRAWS,  # :draft
+           "definition strings cap": _READING_FROM_DEFINITION})  # :draft
+    return out
+
+
+def _validator_proof(cj, fn, cj_domain):
+    """Intent:
+        The derive verdict for a claim over one text parameter of a
+        function read as a pattern validator, or None when the function
+        is not one or the claim asks something a validator does not
+        decide. The claim's one variable, bound by `for` or `let` and
+        named as the claim chooses, is the text the function is called
+        on. The registered predicate word that reads the function's
+        match call turns the validator's truth into a membership
+        statement, `s in L[<the variable's language>, <word>
+        (<pattern>)]`, which is resolved as a claim written in that
+        text would be. The claim then asks whether the texts it calls
+        the function on are all, or are none, members of that language,
+        and the solver answers over the regular-language definitions:
+        no separating text is a proof, and a text the solver finds is
+        run through the real function before it falsifies. An undecided
+        answer says why in its sketch.
+
+    Notes:
+        The membership statement refines the parameter's own language,
+        so it speaks only of texts in that language. Where the claim
+        calls the function on the parameter with text added (`f(s +
+        "x")`), those texts must all lie in the parameter's language
+        for the statement to cover them, which is asked first.
+
+        Under the premise `f is defined`, read only for `f(s) == s`
+        about a refusing validator, the function is called only on the
+        texts it returns, those of the stated language, so a breaking
+        text is one the definitions may place in that language and do
+        not surely place there. A validator matching `s or ''` is read
+        only over a language of texts.
+    """
+    from . import domain_relations, regular
+    from ._validators import read_validator
+    from .domain import domain_contains
+    from .languages import _term_of, resolve_language
+    from .symbolic._proof_support import ProofResult
+    if len(cj_domain) != 1:
+        return None
+    ((param, bound),) = cj_domain.items()
+    validator = read_validator(fn)
+    if isinstance(validator, str):
+        return None
+    question = _validator_question(cj, fn, validator, param)
+    if isinstance(question, str):
+        return None
+    prefix, suffix, accepted = question
+    path = f"smt: membership, validator {validator.described()}"
+
+    def undecided(why: str):
+        return ProofResult("undecided", sketch=f"{path}: {why}")
+    # under `f is defined`, a refusing validator is called only where it
+    # returns: on the texts of the language its match accepts
+    defined = _premise_is_f_defined(cj)
+    if defined:
+        if not (validator.raises is not None and question == ("", "", True)
+                and cj.relation == "=="):
+            return undecided("the premise f is defined is read only for f(s) == s about "  # :draft
+                             "a function that refuses every text outside its language")
+        cj = _dc_replace(cj, assuming="")
+    beyond = _beyond_a_plain_validator_claim(cj, bound, param)
+    if beyond is not None:
+        return undecided(f"{beyond}, which this route does not account for")
+    statement = _validator_statement(fn, cj_domain)
+    if not isinstance(statement, tuple):
+        return undecided(statement) if statement else None
+    _, _, base, stated = statement
+    path = f"smt: membership, {param} in {stated!r}"
+    if validator.or_empty and not _a_language_of_texts(base):
+        return undecided(f"the match is on {param} or '', which is {param} only for a "
+                         f"text, and {base!r} is not a language of texts")  # :draft
+    domain = domain_relations.defined_bound(bound)
+    if domain is None:
+        return undecided(f"the domain of {param} states no regular-language definition")
+    try:
+        document = _term_of(resolve_language(stated))
+    except Exception as e:
+        return undecided(f"{stated!r} does not resolve ({e})")
+    if not regular.is_definition(document):
+        return undecided(f"definition-unread({stated!r}): the language states no "
+                         f"regular-language definition")
+    at_most, at_least = regular.bounds(document)
+    # the text the claim adds is part of every text the function is
+    # called on, so its characters are in the question's alphabet
+    alphabet = (domain.alphabet + regular.alphabet_of(document)
+                + [[ord(c), ord(c)] for c in prefix + suffix])
+
+    def called_on(node: dict) -> dict:
+        return {"op": "concat", "args": [
+            {"op": "literal", "codes": [ord(c) for c in prefix]}, node,
+            {"op": "literal", "codes": [ord(c) for c in suffix]}]}
+    over, stated_text = None, repr(stated)
+    stated_defined = domain_relations.defined_bound(stated)
+    if prefix or suffix:
+        beyond = regular.find_member(alphabet, [called_on(domain.at_least)], [domain.at_most])
+        if beyond.status != "none":
+            # the texts called on leave the variable's language, so the
+            # statement is the language the pattern accepts over all text
+            over = _accepted_over_every_text(validator)  # :draft
+            if isinstance(over, str):
+                return undecided(
+                    f"the texts {cj.lhs.strip()} is called on are not all shown to be "
+                    f"members of {base!r}, which the membership statement speaks of, and "  # :draft
+                    f"{over}" + (f" ({beyond.reason})" if beyond.reason else ""))
+            stated_text = f"the texts {validator.described()} accepts"  # :draft
+            path = f"smt: membership, {cj.lhs.strip()} in {stated_text}"
+            document = _term_of(over)
+            at_most, at_least = regular.bounds(document)
+            alphabet = alphabet + regular.alphabet_of(document)
+            stated_defined = domain_relations._Defined(
+                at_most, at_least, regular.alphabet_of(document),
+                {stated_text: regular.term_hash(document)},
+                ((stated_text, over, at_most, at_least),))
+    # a text that breaks the claim is one the claim calls the function
+    # on that is outside the stated language (when the claim says all
+    # are accepted) or inside it (when it says none is)
+    wide = (([called_on(domain.at_least)], [at_most]) if accepted
+            else ([called_on(domain.at_least), at_least], []))
+    narrow = (([called_on(domain.at_most)], [at_least]) if accepted
+              else ([called_on(domain.at_most), at_most], []))
+    if defined:
+        # the function is defined exactly on the stated language, so a
+        # breaking text is one of the domain the definition may hold in
+        # that language and does not surely hold there
+        wide = ([domain.at_least, at_least], [at_most])
+        narrow = ([domain.at_most, at_most], [at_least])
+    meta = {"mathema.derive_route": "smt",
+            "mathema.smt": {"path": "membership, validator",
+                            "statement": (f"{param} in {stated!r}" if over is None
+                                          else f"{cj.lhs.strip()} in {stated_text}"),
+                            "call": validator.described(),
+                            "definitions": {**domain.hashes,
+                                            stated_text: regular.term_hash(document)}}}
+    why = ""
+    for inside, outside in (wide, narrow):
+        found = regular.find_member(alphabet, inside, outside)
+        if found.status == "none" and (inside, outside) == wide:
+            # "no such text" rests on the definitions and on the reading
+            # of the function, so both are checked by drawing first
+            assumptions, refuted = domain_relations.check_definitions(
+                domain, *filter(None, [stated_defined]),
+                literals=(prefix, suffix, prefix + suffix))
+            texts, admitted = domain_relations.check_holds_only_texts(domain)
+            refuted = refuted or admitted
+            reading = (_validator_reading_check(fn, validator, stated, domain)
+                       if over is None else
+                       _validator_reading_check(fn, validator, stated_text, domain,
+                                                over=over, around=(prefix, suffix)))
+            refuted = refuted or reading.get("disagreement")
+            if refuted is not None:
+                return undecided(f"{refuted}, so nothing is proven from it")
+            assumptions.append(reading)
+            return ProofResult(
+                "proven",
+                meta={**meta, "mathema.assumptions": {
+                    "standard": domain_relations.standard_assumptions(),
+                    "definitions": assumptions, "texts": texts}},
+                sketch=(f"{path}, read from {validator.described()}: no text {param} "
+                        f"in the domain{' where f is defined' if defined else ''} "  # :draft
+                        f"makes {cj.lhs.strip()} a text "
+                        f"{'outside' if accepted else 'in'} that language; "
+                        f"{domain_relations.assuming_text(assumptions)}"))
+        if found.status == "unknown":
+            why = why or found.reason
+        if found.status != "member":
+            continue
+        if defined:
+            # a text the function refuses is outside the premise, and on
+            # one it accepts it returns its argument, so no text found
+            # here breaks the claim; the definitions are too loose to say
+            why = why or "the definitions do not settle where the function is defined"  # :draft
+            continue
+        text = found.member
+        if not regular._places(text, inside, outside):
+            why = why or domain_relations.UNCONFIRMED
+            continue
+        value = text[len(prefix):len(text) - len(suffix)]
+        try:
+            matched = validator.accepts(text) is not None
+            in_domain = domain_contains(value, bound)
+        except Exception:
+            continue
+        if in_domain and matched != accepted and _validator_breaks(cj, fn, text):
+            return ProofResult(
+                "disproven", witness={param: value},
+                counterexample=f"{param} = {value!r}",
+                sketch=(f"{path}, read from {validator.described()}: the solver found "
+                        f"{param} = {value!r}, where the call "
+                        f"{'accepts' if matched else 'refuses'} {text!r}, and the "
+                        f"function run there breaks the claim"),
+                meta={**meta, "mathema.witness_executed": True,
+                      "mathema.rests_on_membership": sorted(meta["mathema.smt"]["definitions"])})
+        why = why or domain_relations.UNCONFIRMED
+    return undecided(why or domain_relations.UNCONFIRMED)
 
 
 #: set while a claim runs again under a `let |inf| be B` it was offered,
@@ -10744,6 +11628,30 @@ def _outside_premise_too(ctx: "_ClaimContext", fn, excluded):
     return lambda point: excluded(point) or lacking(point)
 
 
+def _ranges_over_texts_only(cj_domain) -> bool:
+    """Whether a claim binds at least one variable and each ranges over
+    texts only: a language of `str` values, or a set of strings,
+    admitting no missing value."""
+    from .domain import Domain, LanguageRef, _Sentinel
+    if not cj_domain:
+        return False
+    for bound in cj_domain.values():
+        pieces = (bound,) if isinstance(bound, LanguageRef) else (
+            tuple(bound.pieces) if isinstance(bound, Domain) and not bound.absent
+            and not bound.members and bound.policy is None and not any(
+                isinstance(v, _Sentinel) for v in bound.excluded) else None)
+        if not pieces:
+            return False
+        for piece in pieces:
+            if isinstance(piece, LanguageRef):
+                if not _a_language_of_texts(piece):
+                    return False
+            elif not (isinstance(piece, frozenset) and piece
+                      and all(type(v) is str for v in piece)):
+                return False
+    return True
+
+
 def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
                            facts, bound_funcs, assumption) -> None:
     """Intent:
@@ -10765,6 +11673,12 @@ def _spawn_float_companion(ctx: "_ClaimContext", proven: "Probe", fn,
     if mode == "math_only":
         proven.meta = {**(proven.meta or {}),
                        "mathema.float_companion": "none (derive:math_only)"}
+        return
+    if _ranges_over_texts_only(ctx.cj_domain):
+        proven.meta = {**(proven.meta or {}),
+                       "mathema.float_companion":
+                           "none (every variable of the claim is a text, so there is "
+                           "no float arithmetic to run)"}  # :draft
         return
     if _family_owns_claim(ctx.family):
         # a family claim states a fact about the code itself
@@ -11349,11 +12263,11 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         if any(v is None for v in bound_funcs.values()):
             unresolved = sorted(n for n, v in bound_funcs.items() if v is None)
             if cj.route == "derive":
-                return Probe(cj.name, statement, "skipped", route=cj.route,
-                             note=f"{note}; could not resolve bound "
-                                  f"function(s) {unresolved}, define it in "
-                                  f"f's module or the calling scope, or bind "
-                                  f"it explicitly with funcs=")
+                return Probe(cj.name, statement, "skipped:misspecified",
+                             route=cj.route,
+                             note=_unresolved_bound_note(cj, fn, unresolved,
+                                                         note),
+                             meta={"mathema.invalid_conjecture": True})
             # route == "best": the probe stage reports its own skip
             return None
     language_params = sorted(p for p, b in cj_domain.items()
@@ -11407,8 +12321,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # is still swept point by point by the brute-force fallback
         # below, which is the one derive mechanism it admits
         from .symbolic._proof_support import ProofResult
-        proof = _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
-                                         extensive) or ProofResult(
+        proof = _validator_proof(cj, fn, cj_domain) \
+            or _language_strategy_proof(cj, fn, bound_funcs, cj_domain,
+                                        extensive) or ProofResult(
             "unliftable",
             sketch=(row_reason if row_reason.startswith("derive cannot read the function") else
                     "derive cannot read " + ", ".join(language_params)
@@ -11548,7 +12463,7 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                 note = f"{note}; {proof.sketch}".lstrip("; ")
         else:
             route = ("derive:extensive"
-                    if mechanism is not None and mechanism != "domain_split"
+                    if mechanism is not None and mechanism not in ("domain_split", "smt")
                     else "derive")
         meta = _provenance_meta(proof)
         derive_lines = _derive_line_coverage(fn, facts, cj_domain)
@@ -11829,6 +12744,143 @@ def _derive_alone(ctx: "_ClaimContext", probed: "Probe",
     if finding and probed.verdict in ("holds", "proven"):
         fallen.meta["mathema.computation_finding"] = finding
     return fallen
+
+
+def _unresolved_bound_names(cj) -> list:
+    """Intent:
+        The names a claim binds (by `funcs=` or by a call it makes) that
+        resolve to no function, sorted.
+    """
+    return sorted(n for n, v in _bound_callables(cj).items() if v is None)
+
+
+def _called_names(cj) -> set:
+    """Intent:
+        The plain names the claim's statement calls, as `g` in `g(1)`.
+    """
+    found: set = set()
+    for src in (cj.lhs, cj.rhs):
+        if not src:
+            continue
+        try:
+            tree = ast.parse(str(src), mode="eval")
+        except SyntaxError:
+            continue
+        found |= {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    return found
+
+
+def _diagnostic(title: str, name: "str | None", key: str, statement: str,
+                explanation: str, location: "dict | None" = None) -> str:
+    """Intent:
+        A diagnostic as plain text: `Error: <title>`, the claim and
+        where it is, then one explanation with its fix. The claim is
+        `claim <name> of <key>` (`key` the dotted function under test),
+        or `claim <statement>` when it has no authored `name`. A known
+        `location`, `{"file", "line", "text"}`, makes that line
+        `on <file> line <n>, claim ...:` and quotes the source line.
+    """
+    who = f"claim {name} of {key}" if name else f"claim {statement}"
+    lines = [f"Error: {title}", ""]
+    if location is None:
+        lines.append(f"  {who}")
+    else:
+        lines.append(f"  on {location['file']} line {location['line']}, "
+                     f"{who}:")
+        lines.append(f"  {location['line']}:   {location['text']}")
+    lines += ["", explanation]
+    return "\n".join(lines)
+
+
+def _names_in_words(names: list) -> str:
+    """Intent:
+        `names` as `a`, `a and b` or `a, b and c`.
+    """
+    if len(names) <= 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _binding_failure(name: str, ref: str, called: bool) -> str:
+    """Intent:
+        The sentence saying why the explicit binding `name = ref` named
+        no function, with its fix.
+    """
+    import importlib
+    module, _, attr = ref.rpartition(".")
+    try:
+        importlib.import_module(module or ref)
+        why = f"{module} has no attribute {attr}"
+    except Exception:
+        why = f"the module {module or ref} does not import"
+    fix = ("Fix the path." if called else
+           f"Fix the path, or remove the binding (the statement does "
+           f"not use {name}).")
+    return f"{name} is bound to {ref}, and {why}. {fix}"
+
+
+def _unresolved_bound_message(cj, fn, unresolved: list) -> str:
+    """Intent:
+        The note for a claim whose bound or called function names
+        resolve to nothing: a one-line summary naming the problem (the clause a
+        summary row keeps, where the row already names the claim), then a diagnostic block naming the claim, the
+        function under test, and one explanation with the fix.
+    """
+    module = getattr(fn, "__module__", None) or "the function's module"
+    key = f"{module}.{getattr(fn, '__qualname__', '')}".rstrip(".")
+    statement = f"{cj.lhs} {cj.relation} {cj.rhs}".strip()
+    generated = cj.name == auto_claim_name(statement.replace("==", "="))
+    called = _called_names(cj)
+    explicit = {n: (cj.funcs or {}).get(n) for n in unresolved
+                if isinstance((cj.funcs or {}).get(n), str)
+                and (cj.funcs or {}).get(n) != n}
+    undefined = [n for n in unresolved if n not in explicit]
+    name = None if generated else cj.name
+    sentences, short = [], []
+    if undefined:
+        many = len(undefined) > 1
+        names = _names_in_words(undefined)
+        binds = (", ".join(f'"{n}": "..."' for n in undefined) if many
+                 else f'"{undefined[0]}": "pkg.mod.{undefined[0]}"')
+        sentences.append(
+            f"{names} {'are' if many else 'is'} not defined in module "
+            f"{module}. Define {'them' if many else 'it'} there, or bind "
+            f"{'them' if many else 'it'}:" + (" " if many else "\n")
+            + f"funcs={{{binds}}}")
+        short.append(f"{names} {'are' if many else 'is'} not defined")
+    for n, ref in explicit.items():
+        sentences.append(_binding_failure(n, ref, n in called))
+        short.append(f"{n} is bound to {ref}, which does not resolve")
+    if explicit:
+        title = "claim has a binding that does not resolve"
+    else:
+        title = ("claim calls undefined functions" if len(undefined) > 1
+                 else "claim calls an undefined function")
+    one = f"{'; '.join(short)}."
+    return f"{one} \n" + _diagnostic(title, name, key, statement,
+                                     "\n".join(sentences))
+
+
+def _unresolved_bound_note(cj, fn, unresolved: list, prior: str) -> str:
+    """Intent:
+        The note for an unresolved-name refusal; `prior`, what the
+        claim's note already said, is not repeated.
+    """
+    return _unresolved_bound_message(cj, fn, unresolved)
+
+
+def _unresolved_bound_probe(ctx: "_ClaimContext", fn, unresolved: list) -> "Probe":
+    """Intent:
+        The refusal for a claim calling or binding names that resolve
+        to nothing: `skipped:misspecified`, with the invalid-conjecture
+        reason code, whatever form the claim takes.
+    """
+    cj = ctx.cj
+    route = cj.route if cj.route == "derive" else None
+    return Probe(cj.name, ctx.statement, "skipped:misspecified", route=route,
+                 note=_unresolved_bound_note(cj, fn, unresolved, ctx.note),
+                 meta={"mathema.invalid_conjecture": True})
 
 
 def _ground_proof_of(ctx: "_ClaimContext", fn, facts):
@@ -12643,11 +13695,9 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         bound_funcs = {}
     if any(v is None for v in bound_funcs.values()):
         unresolved = [name for name, v in bound_funcs.items() if v is None]
-        return Probe(cj.name, statement, "skipped", route=None,
-                     note=note + f"; could not resolve bound function(s) "
-                                 f"{unresolved}, define it in f's module or "
-                                 f"the calling scope, or bind it explicitly "
-                                 f"with funcs=")
+        return Probe(cj.name, statement, "skipped:misspecified", route=None,
+                     note=_unresolved_bound_note(cj, fn, unresolved, note),
+                     meta={"mathema.invalid_conjecture": True})
     from . import _premises
     premise_words = _premises.premise_words()
     assum_eval = None
@@ -14344,8 +15394,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
             and any(getattr(cj_domain.get(p), "base_type", None) == "L" for p in kinds):
         # a witness over a language is shrunk inside the language, as
         # the hazard families' witnesses are
+        def outside_premise() -> bool:
+            # a raise of f is outside a claim read where f is defined,
+            # and outside one read over f's working domain
+            raised = call_raised[0] == "f"
+            call_raised[0] = None
+            return raised and (ctx.assume_defined or ctx.exclude_own_guards)
+        call_raised[0] = None
         found = _shrink_language_witness(
-            cj, kinds, cj_domain, env, args, code_l, code_r)
+            cj, kinds, cj_domain, env, args, code_l, code_r, outside_premise)
         if found is not None:
             args, cx, steps = found
             shrunk_meta = {"mathema.witness_shrunk": {"steps": steps}}

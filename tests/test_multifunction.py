@@ -122,7 +122,7 @@ def test_let_alias_of_a_same_scope_function_resolves():
 
 def test_unresolvable_name_names_the_repair():
     r = _verdict(halve, "f(x) == mystery_fn(x)", route="derive")
-    assert r.verdict == "skipped"
+    assert r.verdict == "skipped:misspecified"
     assert "mystery_fn" in (r.note or "")
     assert "funcs=" in (r.note or "")
 
