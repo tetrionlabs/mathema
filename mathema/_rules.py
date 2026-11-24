@@ -14,10 +14,13 @@ value  what it changed
 1      canonical statement text: each string literal respelled from
        its value, and a negated relation in its parentheses
 =====  ==========================================================
+
+A release raises the number once. Each fix in that release that could
+change a verdict adds its own entry under the release's value.
 """
 from __future__ import annotations
 
-RULES = 1
+RULES = 2
 
 
 def rules_in_force() -> int:
