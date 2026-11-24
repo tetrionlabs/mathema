@@ -5722,11 +5722,11 @@ def language_definition_stamp(cj, fn=None) -> dict:
         record against.
     """
     from . import regular
-    from .languages import resolve_language
+    from .languages import _term_of, resolve_language
     stamp: dict = {}
     for ref in _named_languages(cj, fn):
         try:
-            document = _languages_term_of(resolve_language(ref))
+            document = _term_of(resolve_language(ref))
             if regular.is_definition(document):
                 stamp[repr(ref)] = regular.term_hash(document)
         except Exception:
@@ -11099,23 +11099,24 @@ def _validator_statement(fn, cj_domain) -> "tuple | str | None":
     return validator, param, base, stated
 
 
-def _languages_term_of(language) -> "dict | None":
-    """The term a language's persisted form states (`languages._term_of`)."""
-    from .languages import _term_of
-    return _term_of(language)
-
-
 def _every_text_language():
-    """The language of every text, its persisted form stating the term
-    over all code points under `TERM_KEY`."""
+    """Intent:
+        The language of every text: a `StringLanguage` named `text`
+        that holds every `str`, its persisted form stating the term
+        over all code points (any number of characters, each any code
+        point) under `TERM_KEY` and, as the same term, under the
+        earlier key `definition`, which a predicate word's `refine`
+        may still read from its base language.
+    """
     from . import regular
     from .languages import TERM_KEY, StringLanguage
-    return StringLanguage("text", char_ok=lambda c: True, schema={TERM_KEY: {
-        "kind": regular.KIND, "version": regular.VERSION,
-        "alphabet": [[0, regular.MAX_CODE_POINT]], "exact": True,
-        "language": {"op": "repeat", "arg": {"op": "chars",
-                                             "ranges": [[0, regular.MAX_CODE_POINT]]},
-                     "min": 0, "max": None}}})
+    term = {"kind": regular.KIND, "version": regular.VERSION,
+            "alphabet": [[0, regular.MAX_CODE_POINT]], "exact": True,
+            "language": {"op": "repeat", "arg": {"op": "chars",
+                                                 "ranges": [[0, regular.MAX_CODE_POINT]]},
+                         "min": 0, "max": None}}
+    return StringLanguage("text", char_ok=lambda c: True,
+                          schema={TERM_KEY: term, "definition": term})  # :draft
 
 
 def _accepted_over_every_text(validator):
@@ -11124,7 +11125,7 @@ def _accepted_over_every_text(validator):
     language of all text; a phrase saying why there is none when the
     word does not apply there or states no definition."""
     from . import regular
-    from .languages import word_reading_call
+    from .languages import _term_of, word_reading_call
     reading = word_reading_call(validator.accepts)
     if reading is None:
         return "no registered predicate word reads the call"
@@ -11134,7 +11135,7 @@ def _accepted_over_every_text(validator):
         if word.applies is not None and not word.applies(every):
             return f"the word {word.word} does not apply to every text"
         over = word.refine(every, arguments, False)
-        if regular.is_definition(_languages_term_of(over)):
+        if regular.is_definition(_term_of(over)):
             return over
     except Exception as e:
         return f"the word {word.word} gives no language over every text ({e})"
@@ -11215,11 +11216,14 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
         (returned unchanged, or True,
         for an accepted text; the validator's own exception, or False,
         for a refused one). Returns the assumption the proof rests on,
-        as `domain_relations.check_definition` does: `checked` with the
-        seed and the number of texts run, `assumed` when no member
-        could be drawn or a drawn text was skipped because a
-        language's `contains` raised on it (the artefact names the
-        skipped texts), or `refuted` with the `disagreement`.
+        as `domain_relations.check_definition` does, with its `axiom`
+        (the id taken over the definitions of the parameter's
+        languages): `assumed`, with
+        the corroboration record of the texts run and of those skipped
+        because a language's `contains` raised on them (the artefact
+        names the skipped texts), or `refuted` with the
+        `disagreement`. A reading whose stated language does not
+        resolve carries no corroboration.
     """
     import random
 
@@ -11228,10 +11232,12 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
     text = stated if isinstance(stated, str) else repr(stated)
     seed = domain_relations._guard_seed(f"reading of {text}")
     rng = random.Random(seed)
-    out = {"language": text,
-           "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "  # :draft
-                        f"is in {text}",
-           "status": "assumed", "artefact": {"seed": seed, "texts run": 0}}
+    out = domain_relations._with_axiom(
+        {"language": text,
+         "statement": f"{getattr(fn, '__name__', 'f')} accepts a text exactly when it "  # :draft
+                      f"is in {text}",
+         "status": "assumed", "artefact": {"seed": seed, "texts run": 0}},
+        *(node for _, _, most, least in domain.read for node in (most, least)))
     try:
         accepted_language = over if over is not None else resolve_language(stated)
     except Exception:
@@ -11246,6 +11252,7 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
             skipped.append(value)
             return None
     drawn: list = []
+    draws = 0
     for piece, language, most, least in domain.read:
         try:
             drawn.extend(h.value for h in language.hazards())
@@ -11256,6 +11263,7 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
                 drawn.append(language.sample(rng))
             except Exception:
                 break
+            draws += 1
         # the strings the definition check compares, so a member is run
         # even where the language's own sampler draws none
         compared = domain_relations._guard_strings(
@@ -11287,8 +11295,10 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
     shown = list(dict.fromkeys(skipped))
     out["artefact"].update({"texts skipped": len(shown), "skipped": [
         repr(v) for v in shown[:domain_relations.GUARD_SKIPPED_SHOWN]]})
-    if out["artefact"]["texts run"] and not shown:
-        out["status"] = "checked"
+    out["corroboration"] = domain_relations.corroboration_record(  # :draft
+        out["artefact"]["texts run"], len(shown), seed, draws=draws,
+        **{"draws cap": domain_relations.GUARD_DRAWS,  # :draft
+           "definition strings cap": _READING_FROM_DEFINITION})  # :draft
     return out
 
 
@@ -11327,7 +11337,7 @@ def _validator_proof(cj, fn, cj_domain):
     from . import domain_relations, regular
     from ._validators import read_validator
     from .domain import domain_contains
-    from .languages import resolve_language
+    from .languages import _term_of, resolve_language
     from .symbolic._proof_support import ProofResult
     if len(cj_domain) != 1:
         return None
@@ -11367,7 +11377,7 @@ def _validator_proof(cj, fn, cj_domain):
     if domain is None:
         return undecided(f"the domain of {param} states no regular-language definition")
     try:
-        document = _languages_term_of(resolve_language(stated))
+        document = _term_of(resolve_language(stated))
     except Exception as e:
         return undecided(f"{stated!r} does not resolve ({e})")
     if not regular.is_definition(document):
@@ -11398,7 +11408,7 @@ def _validator_proof(cj, fn, cj_domain):
                     f"{over}" + (f" ({beyond.reason})" if beyond.reason else ""))
             stated_text = f"the texts {validator.described()} accepts"  # :draft
             path = f"smt: membership, {cj.lhs.strip()} in {stated_text}"
-            document = _languages_term_of(over)
+            document = _term_of(over)
             at_most, at_least = regular.bounds(document)
             alphabet = alphabet + regular.alphabet_of(document)
             stated_defined = domain_relations._Defined(
@@ -11465,7 +11475,7 @@ def _validator_proof(cj, fn, cj_domain):
             why = why or "the definitions do not settle where the function is defined"  # :draft
             continue
         text = found.member
-        if not regular.places(text, inside, outside):
+        if not regular._places(text, inside, outside):
             why = why or domain_relations.UNCONFIRMED
             continue
         value = text[len(prefix):len(text) - len(suffix)]

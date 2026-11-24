@@ -95,7 +95,8 @@ def _ranges(raw, where: str) -> list:
     for pair in raw:
         # a pair written as a tuple is the list it stands for
         if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi]")
+            raise InvalidTerm(f"{where}: {pair!r} is not a code point range [lo, hi] "  # :draft
+                              f"(two code points in a list, as JSON writes it, or in a tuple)")
         lo, hi = _code_point(pair[0], where), _code_point(pair[1], where)
         if lo > hi:
             raise InvalidTerm(f"{where}: the range {pair!r} ends before it starts")
@@ -497,7 +498,6 @@ def _derivative(t: tuple, code: int, seen: dict, depth: int = 0) -> tuple:
     return out
 
 
-
 class _Steps(dict):
     """The derivatives one matcher has taken, by `(term, code)`, with
     the most it may take (`budget`, `_MATCH_STEPS` when None)."""
@@ -666,7 +666,7 @@ def matcher(document, *, bound: "str | None" = None, budget: "int | None" = None
     return _prepared_definition(document, bound, budget)
 
 
-def places(text: str, inside, outside) -> bool:
+def _places(text: str, inside, outside) -> bool:
     """Intent:
         Whether the matcher puts `text` in every node of `inside` and in
         no node of `outside`: a second reading of a string a solver
@@ -680,7 +680,7 @@ def places(text: str, inside, outside) -> bool:
         return False
 
 
-def representatives(nodes, alphabet=None) -> list:
+def _representatives(nodes, alphabet=None) -> list:
     """Intent:
         One character for each atom of `alphabet` (all of Unicode when
         None) under the character sets of `nodes`: the characters no
@@ -705,7 +705,7 @@ def atoms(nodes, alphabet=None) -> list:
         character sets of `nodes`, as `(ranges, representative)` pairs:
         the code point ranges, written as lists, of the characters no
         node tells apart, and one character of the atom, a printable
-        ASCII one where the atom has one (as `representatives` gives).
+        ASCII one where the atom has one (as `_representatives` gives).
 
     Raises:
         InvalidTerm: a node or the alphabet is not of the schema.
@@ -916,8 +916,6 @@ class _Lowering:
         return "".join(chr(self.members[ord(ch) - _SYMBOL_BASE]) for ch in plain)
 
 
-
-
 def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -> Found:
     """Intent:
         A string over `alphabet` (code point ranges) that every node in
@@ -972,7 +970,22 @@ def find_member(alphabet, inside, outside, *, timeout_ms: "int | None" = None) -
     return Found("member", member=lowering.decode(value.as_string()))
 
 
-__all__ = ["Found", "InvalidTerm", "KIND", "VERSION", "alphabet_of", "atoms", "bounds",
-           "canonical", "canonical_text", "MatchBudget", "contains", "matcher", "places",
-           "representatives", "shortest_member", "find_member", "is_definition", "term_hash",
-           "validate"]
+__all__ = [
+    "Found",  # :draft
+    "InvalidTerm",  # :draft
+    "KIND",  # :draft
+    "VERSION",  # :draft
+    "alphabet_of",  # :draft
+    "atoms",  # :draft
+    "bounds",  # :draft
+    "canonical",  # :draft
+    "canonical_text",  # :draft
+    "MatchBudget",  # :draft
+    "contains",  # :draft
+    "matcher",  # :draft
+    "shortest_member",  # :draft
+    "find_member",  # :draft
+    "is_definition",  # :draft
+    "term_hash",  # :draft
+    "validate",  # :draft
+]

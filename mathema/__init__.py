@@ -109,7 +109,7 @@ _register_dot_family()
 _register_fold_family()
 _register_sum_family()
 
-__version__ = "0.6.6.1"
+__version__ = "0.6.6.2"
 __all__ = ["claim", "check", "write_spec", "retrieve", "analyze",
            "status", "track_claims",
            "tagged", "Record", "claims", "registry", "SPEC_VERSION",
@@ -321,13 +321,14 @@ class Record:
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
-                # a definition the proof rests on that was not confirmed
-                # on every string it was compared on
+                # a definition the proof rests on whose comparison did
+                # not agree on every value
                 for assumed in ((p.meta or {}).get("mathema.assumptions") or {}).get(
                         "definitions") or ():
-                    if isinstance(assumed, dict) and assumed.get("status") != "checked":
+                    from .domain_relations import agreed_on_every_value, assumption_status
+                    if isinstance(assumed, dict) and not agreed_on_every_value(assumed):
                         line += (f"\n           assuming {assumed.get('statement')} "  # :draft
-                                 f"({assumed.get('status')})")
+                                 f"({assumption_status(assumed)})")
             else:
                 shown = p.statement
                 if (p.condition or "").startswith("let |inf| be ") \

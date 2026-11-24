@@ -2482,14 +2482,14 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             from .spec import recorded_claims_fingerprint
             recorded_now = recorded_claims_fingerprint(verified_entry, fn)
             # the record holds the claims as written, made under an
-            # earlier rules number, or differs from them only in a
-            # spelling an earlier release wrote: only the rules moved
+            # earlier reasoning version, or differs from them only in a
+            # spelling an earlier release wrote: only the reasoning version moved
             spelled_earlier = any(k == key for k, _c in
                                   release_moved + quoting_moved + negation_moved)
             from .spec import recorded_claims
             same_names = ({c.get("name") for c in recorded_claims(verified_entry)}
                           == {c.get("name") for c in current_claims})
-            rules_moved = recorded_fp != current_fp and (
+            reasoning_moved = recorded_fp != current_fp and (
                 recorded_now == current_fp
                 or (spelled_earlier and same_names
                     and not supersessions.get(key)))
@@ -2645,7 +2645,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else "stored text unreadable" if stale_rows.get(key)
                    and same_form(facts_now.form, recorded_form)
                    and recorded_fp == current_fp
-                   else "mathema's claim rules changed" if rules_moved
+                   else "mathema's claim rules changed" if reasoning_moved
                    and same_form(facts_now.form, recorded_form)
                    else "claims changed" if same_form(facts_now.form, recorded_form)
                    else "form changed")
@@ -2658,7 +2658,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
             elif recorded_form:
                 triggers = _fired_triggers(
                     form=not same_form(facts_now.form, recorded_form),
-                    claims=recorded_fp != current_fp and not rules_moved,
+                    claims=recorded_fp != current_fp and not reasoning_moved,
                     defaults=defaults_moved,
                     pseudo_infinity=pinf_moved, definitions=definitions_moved,
                     provenance=body_moved, library_version=version_moved,
