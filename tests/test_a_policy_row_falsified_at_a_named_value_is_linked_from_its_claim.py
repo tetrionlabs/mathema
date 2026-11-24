@@ -32,3 +32,47 @@ def test_an_uncovered_raise_links_the_claim_to_its_falsified_policy_row():
     assert policy.verdict == "falsified", policy.note
     assert main.meta["mathema.claim_group"] == [
         {"row": "absent[x]", "verdict": "falsified", "value": "x = None"}]
+
+
+_SQUARE = '''
+def square(x):
+    return x * x
+'''
+
+
+@pytest.mark.parametrize("written", ["for x in {1, None}, f(x) >= 0",
+                                     "for x in [0, 1] | {None}, f(x) >= 0"])
+def test_a_record_of_a_restated_domain_holds_the_claim_as_written(
+        tmp_path, monkeypatch, written):
+    """The record's row prints the domain with None left out, and the
+    record still holds the claim as written: the next run finds it
+    fresh, with no re-authored claim and no rules change."""
+    import subprocess
+    import sys
+
+    import yaml
+
+    from mathema.verify import verify_project
+    for name in [m for m in sys.modules if m == "lopkg" or m.startswith("lopkg.")]:
+        sys.modules.pop(name, None)
+    (tmp_path / "lopkg").mkdir()
+    (tmp_path / "lopkg" / "__init__.py").write_text("")
+    (tmp_path / "lopkg" / "mod.py").write_text(_SQUARE)
+    (tmp_path / "claims").mkdir()
+    (tmp_path / "claims" / "s.claims.yaml").write_text(yaml.safe_dump(
+        {"lopkg.mod.square": {"claims": [{"name": "c", "statement": written}]}}))
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        first = verify_project(root=str(tmp_path))
+        record = yaml.safe_load((tmp_path / ".mathema" / "verified"
+                                 / "lopkg.mod.square.yaml").read_text())
+        row = {r["name"]: r for r in record["lopkg.mod.square"]["claims"]}["c"]
+        assert "None" not in row["statement"] and "absent" not in row["statement"], row
+        assert [k["why"] for k in first.keys] == ["no baseline record"]
+        again = verify_project(root=str(tmp_path))
+        assert not any("re-authored" in p for p in again.problems), again.problems
+        assert [k["why"] for k in again.keys] == ["fresh"], again.keys
+    finally:
+        for name in [m for m in sys.modules if m == "lopkg" or m.startswith("lopkg.")]:
+            sys.modules.pop(name, None)
