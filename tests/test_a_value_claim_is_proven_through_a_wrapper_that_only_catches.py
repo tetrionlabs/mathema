@@ -150,3 +150,57 @@ def test_a_raises_claim_is_not_read_through_a_wrapper_that_catches():
     (row,) = check_conjectures(fn, [claim(
         "for x in [0, 1], y in [0.75, 1], raises(f(x, y), TypeError)", route="derive")])
     assert row.verdict != "proven", (row.verdict, row.sketch, row.note)
+
+
+def _returns_zero_on(caught):
+    def wrapping(fn):
+        @functools.wraps(fn)
+        def catching(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except caught:
+                return 0
+        return catching
+    return wrapping
+
+
+def one_of(x):
+    return x * 0 + 1
+
+
+def one_unless_missing(x):
+    if x is None:
+        return 1 / 0
+    return 1
+
+
+def plus_one(x, y):
+    return x + y
+
+
+def plus_one_of_second(x, y):
+    return x * 0 + y * 0 + 1
+
+
+_MISSING_LISTED = [
+    (_returns_zero_on(Exception)(one_of), "for x in {1.0, None}, f(x) > 0"),
+    (_returns_zero_on(BaseException)(one_of), "for x in {1.0, None}, f(x) > 0"),
+    (_returns_zero_on((TypeError, KeyError))(one_of), "for x in {1.0, None}, f(x) > 0"),
+    (_returns_zero_on(ArithmeticError)(one_unless_missing), "for x in {1.0, None}, f(x) > 0"),
+    (_returns_zero_on(Exception)(one_unless_missing), "for x in {1.0, None}, f(x) == 1"),
+    (_returns_zero_on(Exception)(one_of), "for x in {1.0, 2.0, None}, f(x) > 0"),
+    (_returns_zero_on(Exception)(one_of), "for x in {1.0, absent}, f(x) > 0"),
+    (_returns_zero_on(Exception)(one_of), "for x in {1.0}|absent, f(x) > 0"),
+    (_returns_zero_on(Exception)(one_of), "for x in {1.0, 2.0}|absent, f(x) > 0"),
+    (_returns_zero_on(Exception)(plus_one), "for x in {1.0, None}, for y in [1, 2], f(x, y) > 0"),
+    (_returns_zero_on(Exception)(plus_one_of_second),
+     "for x in [1, 3], y in {2.0, None}, f(x, y) > 0"),
+]
+
+
+@pytest.mark.parametrize("fn,text", _MISSING_LISTED, ids=[t for _, t in _MISSING_LISTED])
+def test_a_listed_missing_value_is_run_on_the_wrapper_itself(fn, text):
+    # the wrapper returns the except clause's 0 at the listed missing value
+    assert fn(*([None] if fn.__wrapped__.__code__.co_argcount == 1 else [1, None])) == 0
+    (row,) = check_conjectures(fn, [claim(text, route="derive")])
+    assert row.verdict == "falsified", (row.verdict, row.sketch, row.note)

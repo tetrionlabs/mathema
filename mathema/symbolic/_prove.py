@@ -5041,11 +5041,13 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
         - a constant of the claim language (`pi`, `e`, `inf`, `nan`), unless
           the claim binds that name (`taken`), in which case it is a
           variable;
+        - `+a` and `-a` of a truth value, an integer;
         - over integers and floats: `+a`, `-a`, `a + b`, `a - b`, `a * b`,
           and `a / b`, `a // b`, `a % b` with `b` not zero, each computed
           here, so an overflow is seen and leaves it unread;
         - a comparison of integers and floats with `<`, `<=`, `>`, `>=`,
-          `==`, `!=`;
+          `==`, `!=`, and an identity or membership test as
+          `_constant_test` reads it;
         - a call of the claim language that gives a value (`_constant_call`):
           `abs(a)`, `sqrt(a)`, `max(a, b)`, `len`, `sum`, `sorted`, `str`;
         - a power of numbers, computed here; an integer power is read only
@@ -5076,20 +5078,18 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
         return tuple(items) if isinstance(node, ast.Tuple) else items
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         value = _constant_value(node.operand, taken)
-        if not _is_number(value):
+        if not (_is_number(value) or type(value) is bool):  # :draft
             return _UNREAD
-        return -value if isinstance(node.op, ast.USub) else value
+        return -value if isinstance(node.op, ast.USub) else +value
     if isinstance(node, ast.Compare):
         values = [_constant_value(side, taken) for side in [node.left, *node.comparators]]
-        if not all(_is_number(value) for value in values):
+        if any(value is _UNREAD for value in values):
             return _UNREAD
-        tests = {ast.Lt: lambda a, b: a < b, ast.LtE: lambda a, b: a <= b,
-                 ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
-                 ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b}
-        if not all(type(op) in tests for op in node.ops):
+        results = [_constant_test(op, a, b)
+                   for op, a, b in zip(node.ops, values, values[1:])]
+        if any(result is _UNREAD for result in results):
             return _UNREAD
-        return all(tests[type(op)](a, b)
-                   for op, a, b in zip(node.ops, values, values[1:]))
+        return all(results)
     if isinstance(node, ast.Call):
         return _constant_call(node, taken)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
@@ -5154,6 +5154,51 @@ def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
     return _UNREAD
 
 
+_ORDER_TESTS = {ast.Lt: lambda a, b: a < b, ast.LtE: lambda a, b: a <= b,
+                ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
+                ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b}
+
+#: the values Python holds one object of, so `is` on them is decided
+_SINGLETONS = (None, True, False)
+
+
+def _constant_test(op: ast.cmpop, a, b):  # :draft
+    """Intent:
+        `a <op> b` for two constants (`_constant_value`), `_UNREAD` where
+        it is not read: an ordering or equality of integers and floats;
+        `is` and `is not` where one side is None, True or False, the
+        objects Python holds one of, so identity is equality of object;
+        `in` and `not in` of any constant in a tuple or a list, which
+        compares with the builtin `==` and cannot raise, and of a string
+        in a string. A nan on either side of a membership test is not
+        read, since the test then turns on object identity.
+    """
+    if type(op) in _ORDER_TESTS:
+        return _ORDER_TESTS[type(op)](a, b) if _is_number(a) and _is_number(b) else _UNREAD
+    if isinstance(op, (ast.Is, ast.IsNot)):
+        if not any(side is single for side in (a, b) for single in _SINGLETONS):
+            return _UNREAD
+        return (a is b) if isinstance(op, ast.Is) else (a is not b)
+    if isinstance(op, (ast.In, ast.NotIn)):
+        if type(b) is str and type(a) is str:
+            found = a in b
+        elif type(b) in (tuple, list) and not _holds_nan(a) and not _holds_nan(b):
+            found = a in b
+        else:
+            return _UNREAD
+        return found if isinstance(op, ast.In) else not found
+    return _UNREAD
+
+
+def _holds_nan(value) -> bool:
+    """Intent:
+        Whether a constant is a float nan or a tuple or a list holding one.
+    """
+    if type(value) in (tuple, list):
+        return any(_holds_nan(item) for item in value)
+    return type(value) is float and value != value
+
+
 def _is_plain_key(value) -> bool:  # :draft
     """Intent:
         Whether a constant is an `int`, a `float` that is a number, a
@@ -5191,16 +5236,26 @@ def _constant_repeat(a, b):  # :draft
     """Intent:
         `a * b` where one side is a string, a tuple or a list and the
         other an `int` or a `bool`: the sequence repeated, empty for a
-        count of zero or less, which cannot raise. Read only while the
-        result has at most `_REPEAT_ITEMS` items; `_UNREAD` for anything
-        else (`'a' * 1.5` raises TypeError).
+        count of zero or less. Read only while the count is at most
+        `_REPEAT_ITEMS` in magnitude and the sequence's length times that
+        magnitude is at most `_REPEAT_ITEMS`; `_UNREAD` for anything else
+        (`'a' * 1.5` raises TypeError, and a count past the index size,
+        `'a' * -2 ** 64`, raises OverflowError).
     """
     if type(a) in (int, bool) and type(b) in (str, tuple, list):
         a, b = b, a
-    if type(a) not in (str, tuple, list) or type(b) not in (int, bool) \
-            or len(a) * max(int(b), 0) > _REPEAT_ITEMS:
+    if not _is_repetition(a, b) or abs(int(b)) > _REPEAT_ITEMS \
+            or len(a) * abs(int(b)) > _REPEAT_ITEMS:
         return _UNREAD
     return a * b
+
+
+def _is_repetition(a, b) -> bool:  # :draft
+    """Intent:
+        Whether `a * b` repeats a sequence: `a` a string, a tuple or a
+        list and `b` an `int` or a `bool`.
+    """
+    return type(a) in (str, tuple, list) and type(b) in (int, bool)
 
 
 #: the most bits an integer power read as a constant may have
@@ -5344,6 +5399,10 @@ def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":
     if isinstance(node, ast.BinOp) and isinstance(
             node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
         a, b = _constant_value(node.left, taken), _constant_value(node.right, taken)
+        if isinstance(node.op, ast.Mult) and (_is_repetition(a, b) or _is_repetition(b, a)):
+            # :draft
+            return (f"a repetition of a string, a tuple or a list past {_REPEAT_ITEMS} "
+                    f"items or by a count past {_REPEAT_ITEMS}")
         if not (_is_number(a) and _is_number(b)):
             return (f"the operator `{_ARITHMETIC_TEXT[type(node.op)]}` on a value that is "
                     f"not an integer or a float")
@@ -5459,10 +5518,36 @@ def _total_over_the_domain(node: ast.AST, reading: "_CallReading") -> bool:  # :
         Whether an expression over the claim's variables is arithmetic
         that cannot fail at any point of the domain and gives a finite
         number there (`finite_number`): `x / 2`, `1 / (x * x + 1)`, and
-        `1 / x` only where the domain keeps `x` away from zero.
+        `1 / x` only where the domain keeps `x` away from zero; `not x`,
+        `[x][0]` and `(x, 1)[0]` (`_total_with`).
+    """
+    return _total_with(node, _domain_kinds(reading), reading.taken)
+
+
+def _total_with(node: ast.AST, kinds: dict, taken: frozenset) -> bool:  # :draft
+    """Intent:
+        Whether an expression over variables of `kinds` evaluates without
+        raising: a finite number (`finite_number`); a constant
+        (`_constant_value`); `not a`, with `a` read this way and a number,
+        a constant or a display, none of which raises on its truth; a
+        tuple or list display of items read this way; and such a display
+        subscripted by an integer or truth value in range, every item
+        evaluated first.
     """
     from .._raise_reading import finite_number
-    return finite_number(node, _domain_kinds(reading), None) is not None
+    if finite_number(node, kinds, None) is not None \
+            or _constant_value(node, taken) is not _UNREAD:
+        return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return _total_with(node.operand, kinds, taken)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return not any(isinstance(item, ast.Starred) for item in node.elts) \
+            and all(_total_with(item, kinds, taken) for item in node.elts)
+    if isinstance(node, ast.Subscript) and isinstance(node.value, (ast.Tuple, ast.List)):
+        index = _constant_value(node.slice, taken)
+        return type(index) in (int, bool) and -len(node.value.elts) <= index < len(node.value.elts) \
+            and _total_with(node.value, kinds, taken)
+    return False
 
 
 def _unread_variable_form(node: ast.AST, reading: "_CallReading") -> str:  # :draft
@@ -5472,11 +5557,10 @@ def _unread_variable_form(node: ast.AST, reading: "_CallReading") -> str:  # :dr
         (`_total_over_the_domain`): the innermost part not read, in the
         order Python evaluates, whose own parts are all read.
     """
-    from .._raise_reading import finite_number
     kinds = _domain_kinds(reading)
 
     def read(part: ast.AST) -> bool:
-        return finite_number(part, kinds, None) is not None
+        return _total_with(part, kinds, reading.taken)
 
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.expr) and not read(child) \

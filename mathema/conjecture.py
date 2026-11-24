@@ -11969,6 +11969,24 @@ def _kinds_the_claim_passes(cj, cj_domain: dict, inner) -> "dict | None":  # :dr
     return found if len(found) == len(params) and params else None
 
 
+def _lists_a_missing_value(bound) -> bool:  # :draft
+    """Intent:
+        Whether a claim's binding lists a missing value as one of its own
+        points: a sentinel (`None`, `nan`, `absent`, `missing` in any
+        spelling) or a float nan in a finite set, a sentinel in a set
+        piece of a domain, or absence a domain admits (`{1.0}|absent`).
+    """
+    from .domain import Domain, is_sentinel
+    if isinstance(bound, frozenset):
+        return any(v is None or is_sentinel(v) or (type(v) is float and v != v)
+                   for v in bound)
+    if isinstance(bound, Domain):
+        return bool(bound.absent) or any(
+            isinstance(piece, frozenset) and _lists_a_missing_value(piece)
+            for piece in bound.pieces)
+    return False
+
+
 def _through_a_wrapper_that_only_catches(ctx: "_ClaimContext", fn) -> "Probe | None":  # :draft
     """Intent:
         The proven row for a comparison of values claimed on a wrapper
@@ -11994,6 +12012,12 @@ def _through_a_wrapper_that_only_catches(ctx: "_ClaimContext", fn) -> "Probe | N
         Where derive falsifies the claim on the wrapped function, the
         point it names is kept on `ctx.wrapped_witness` for the probe to
         run the wrapper at; nothing is concluded from it here.
+
+        Not attempted where the claim's domain lists a missing value
+        (`_lists_a_missing_value`): derive's proof on the wrapped function
+        accepts a raise there, which is where the wrapper returns an
+        `except` clause's value instead, so the listed point is judged by
+        running it on the wrapper.
     """
     from ._raise_reading import step_that_may_raise
     from .symbolic._base import only_catches
@@ -12005,6 +12029,8 @@ def _through_a_wrapper_that_only_catches(ctx: "_ClaimContext", fn) -> "Probe | N
         return None
     inner = only_catches(fn)
     if inner is None or not any(re.search(r"\bf\(", side) for side in (cj.lhs, cj.rhs)):
+        return None
+    if any(_lists_a_missing_value(bound) for bound in (ctx.cj_domain or {}).values()):
         return None
     try:
         (row,) = check_conjectures(inner, [_dc_replace(cj, route="derive")])

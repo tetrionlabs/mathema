@@ -22,6 +22,7 @@ import builtins
 import functools
 import importlib
 import importlib.util
+import math
 import pathlib
 import sys
 from typing import Annotated
@@ -861,7 +862,17 @@ ARGUMENT_FORMS = [
     ("1 / (2 - x - 1)", "1 / (-1 - x)"),
     ("1 / (x + 0)", "1 / (x + 3)"),
     ("3 / (x * 0 + 2)", "3 / (x * 0)"),
+    ("not x", "not (1 / (x + 1))"),
+    ("[x][0]", "[x][1]"),
+    ("(x, 1)[0]", "(x, 1 / (x + 1))[0]"),
+    ("[1, 2][None is None]", "[1][None is None]"),
+    ("[1, 2][1 in (1, 2)]", "[1][1 in (1, 2)]"),
+    ("[1, 2][-True]", "[][-True]"),
+    ("'ab' * 2048", "'ab' * 2048.0"),
 ]
+
+_REPETITION = ("a repetition of a string, a tuple or a list past 4096 items "
+               "or by a count past 4096")
 
 #: argument forms true at every point and proven at BASE that are not
 #: read here: (argument, the form the row names as not read)
@@ -916,6 +927,10 @@ BACKLOG = [
     ("1 / max(x, -1)", "a call of `max` on a variable"),
     ("1 / min(x, -1)", "a call of `min` on a variable"),
     ("1 / min(x, -5)", "a call of `min` on a variable"),
+    ("1 if x else 2", "a conditional on a variable"),
+    ("1 if x else 1 / x", "a conditional on a variable"),
+    ("'a' * 100000", _REPETITION),
+    ("'ab' * 2049", _REPETITION),
 ]
 
 _FORM_XS = (-5.0, -3.3, -1.0, -5, -3, -2, -1)
@@ -976,3 +991,85 @@ def test_a_form_on_the_backlog_says_what_is_not_read(argument, form):
     shown = ast.unparse(ast.parse(f"f(x, {argument})", mode="eval").body.args[1])
     said = f"{row.sketch} {row.note}"
     assert f"the argument `{shown}` is not read: {form} is a form" in said, said
+
+
+@pytest.mark.parametrize("argument", ["'a' * -2 ** 64", "'a' * 2 ** 64", "[1] * -2 ** 64",
+                                      "'a' * (10 ** 30)", "'' * 2 ** 64"])
+def test_a_repetition_by_a_count_past_the_cap_is_unread(argument):
+    assert all(type(_python_raises(argument, x)) is OverflowError for x in _FORM_XS)
+    row = _form_row(argument)
+    shown = ast.unparse(ast.parse(argument, mode="eval").body)
+    said = f"{row.sketch} {row.note}"
+    assert row.verdict != "proven", (row.verdict, said)
+    assert f"the argument `{shown}` is not read: {_REPETITION} is a form" in said, said
+
+
+def _returning_zero_on(caught):
+    def wrapping(fn):
+        @functools.wraps(fn)
+        def catching(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except caught:
+                return 0
+        return catching
+    return wrapping
+
+
+def _with_else(fn):
+    @functools.wraps(fn)
+    def catching(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ZeroDivisionError:
+            return 0
+        else:
+            return 5
+    return catching
+
+
+def _root(x):
+    return math.sqrt(x)
+
+
+def _two_to(x):
+    return 2 ** x
+
+
+def _same(x):
+    return x
+
+
+def _square_large(x):
+    return x * 1e200 * x * 1e200
+
+
+def _cosh_large(x):
+    return math.cosh(x * 1000)
+
+
+#: true value claims on a wrapper that BASE proves and that are not proven
+#: here, the wrapper read as a call whose surroundings are not read:
+#: (wrapper, claim, points, the reason it is not read)
+WRAPPER_DEBT = [
+    (_returning_zero_on(ValueError)(_root), "for x in [0, 4], f(x) >= 0",
+     (0.0, 1.0, 2.0, 4.0), "`math.sqrt` of a value the domain does not keep above zero"),
+    (_returning_zero_on(ArithmeticError)(_two_to), "for x in [-3, 3], f(x) == 2 ** x",
+     (-3.0, -2, 0.0, 2.0, 3), "a power by a variable exponent"),
+    (_with_else(_same), "for x in [-3, 3], f(x) == x",
+     (-3.0, 0.0, 2.0, 3), "a wrapper with an `else:` clause"),
+    (_returning_zero_on(ArithmeticError)(_square_large), "for x in [0, 3], f(x) >= 0",
+     (0.0, 1.0, 3.0), "arithmetic past the largest float"),
+    (_returning_zero_on(ArithmeticError)(_cosh_large), "for x in [0, 3], f(x) >= 0",
+     (0.0, 0.5, 3.0), "a call of `math.cosh`"),
+]
+
+
+@pytest.mark.parametrize("fn,text,points,reason", WRAPPER_DEBT,
+                         ids=[f"{c[1]} ({c[3]})" for c in WRAPPER_DEBT])
+def test_a_wrapper_claim_on_the_debt_list_is_true_and_never_falsified(fn, text, points,
+                                                                      reason):
+    claimed = text.split("], ", 1)[1]
+    assert all(eval(claimed, {"f": fn, "x": x}) for x in points), text
+    (row,) = check_conjectures(fn, [claim(text, route="derive")])
+    assert row.verdict != "falsified", (row.verdict, row.sketch, row.note)
