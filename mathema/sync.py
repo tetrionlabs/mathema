@@ -279,20 +279,30 @@ def _renders_as(cj, statement: str, names: tuple) -> "tuple | None":
     return None
 
 
-def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
+def _legacy_move(c: dict, row: dict, fn=None,
+                 names: "tuple | None" = None) -> "tuple | None":
     """Intent:
         The earlier renderings, by move name, under which releases up to
         0.6.6.2 wrote a verified row's statement for the authored claim
         `c`, or None when the row's statement is the canonical text
         written now or no earlier rendering (alone or together) gives
         it. A row a move names records `c`, whether or not its old text
-        reads back as `c`. The caller applies this only to a row of a
-        record written under an earlier reasoning version.
+        reads back as `c`. `names` limits the renderings tried (all of
+        them when None). The caller applies every rendering to a row of
+        a record written under an earlier reasoning version, and the
+        named missing value's alone to any other row: builds that wrote
+        the reasoning version in force stored a named value that way
+        too.
     """
     from ._annotation_text import complex_parameters
     from .grammar import complex_in_view
     from .spec import _declared_conjecture
     statement = row.get("statement") or ""
+    if ((row.get("meta") or {}) if isinstance(row.get("meta"), dict) else {}).get(
+            "mathema.statement_as_written"):
+        # a row that keeps the claim as written beside a restated domain
+        # was written by this release's reading
+        return None
     # an earlier rendering differs from today's only at a string
     # literal, a `not`, or a domain's missing values (written after `|`)
     if not statement or ("'" not in statement and '"' not in statement
@@ -301,7 +311,8 @@ def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
     try:
         with complex_in_view(complex_parameters(fn) if fn is not None else ()):
             cj = _completed(_declared_conjecture(c), fn)
-            moved = _renders_as(cj, statement, tuple(sorted(_legacy_renderings())))
+            moved = _renders_as(cj, statement, tuple(sorted(
+                _legacy_renderings() if names is None else names)))
     except Exception:
         return None
     return moved or None
@@ -411,7 +422,9 @@ def claim_conflicts(fn, file_entry: dict,
           no supersession. A move of literal quoting or negation
           parentheses is
           recognised only in a record written under an earlier reasoning
-          version (`spec.written_under_earlier_rules`).
+          version (`spec.written_under_earlier_rules`); the move of a
+          named missing value is recognised by the stored text alone,
+          whatever reasoning version wrote it.
         - kind "ambiguous-text": the verified row's stored text is
           what an earlier release wrote for the authored claim under
           its literal quoting, and is also, read in this release, the
@@ -466,7 +479,8 @@ def claim_conflicts(fn, file_entry: dict,
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
                 continue
-            moved = _legacy_move(c, v, fn) if earlier else None
+            moved = (_legacy_move(c, v, fn) if earlier
+                     else _legacy_move(c, v, fn, names=("named-missing-value",)))
             if moved and not _checked_differently(c, v):
                 # the row records this claim in the text an earlier
                 # rendering wrote for it: adjudicated as written, the

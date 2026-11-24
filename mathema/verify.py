@@ -103,6 +103,16 @@ class GateReport:
 POLICY_ROWS_GATE = True
 
 
+def _group_falsified(meta: dict) -> bool:  # :draft
+    """Intent:
+        Whether a row's claim group (`meta["mathema.claim_group"]`, the
+        policy rows that judge a missing value the claim names) holds a
+        falsified row.
+    """
+    return any(isinstance(e, dict) and e.get("verdict") == "falsified"
+               for e in (meta or {}).get("mathema.claim_group") or ())
+
+
 def _unaccounted_text(report) -> str:
     """One clause per policy row mathema wrote that does not hold:
     `; missing[x]: f drops a missing x (nan in, 1.0 out), the row says
@@ -371,6 +381,10 @@ def gate(claims, *, strict: bool,
         if _volunteered(meta, note) and not (pol and POLICY_ROWS_GATE):
             continue
         kind = classify_verdict(verdict)
+        if kind in ("proven", "holds") and _group_falsified(meta):
+            # one written claim is its rows together: a falsified policy
+            # row judging a value the claim names falsifies the claim
+            kind = "falsified"
         own = c.get("accepted") if isinstance(c, dict) else None
         expired = lapsed_risk.get(name) or (
             str(own["expires"]) if (own or {}).get("as") == "risk"

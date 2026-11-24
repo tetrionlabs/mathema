@@ -1427,6 +1427,85 @@ def admits(bound, sentinel) -> bool:
     return sentinel == MISSING and bool(holes)
 
 
+def restates_missing_defaults(dom, defaults) -> bool:  # :draft
+    """Intent:
+        Whether the domain's type clause admits exactly the missing
+        values one of `defaults` (each a `MissingDefaults`) admits where
+        a domain states nothing: the object's absence when `absent`, the
+        whole hole class when it has `members`, and nothing else. This
+        is the text the renderer writes for an interval or a named type
+        that names no missing value (`[1.0, 5.0] : float|absent|missing`
+        read without its function, `: float|missing` beside a `float`
+        parameter, `R|absent|missing`), so such a clause names none. A
+        set or a union that lists a sentinel (`{1, None}`,
+        `[0, 1] | {None}`), and a clause that admits anything other
+        than a default (`: float|absent` beside a `float` parameter,
+        `: float|nan`), names what it lists.
+    """
+    typed = dom.clause or (dom.explicit_type and not any(
+        not isinstance(piece, frozenset) for piece in dom.pieces))
+    if not typed or _is_enumerated(dom) or dom.dims:
+        return False
+    if any(isinstance(v, _Sentinel) for v in dom.excluded):
+        return False
+    stated = (bool(dom.absent), frozenset(_set_sentinels(dom)))
+    return any(stated == (bool(d.absent),
+                          frozenset({MISSING}) if d.members else frozenset())
+               for d in defaults if d is not None)
+
+
+def named_missing(bound, defaults=None) -> tuple:  # :draft
+    """Intent:
+        The missing values a written binding names as points of its own
+        claim, in the order absence, the hole class, then members: a
+        sentinel a set lists (`{1, None}`, `{0.5, nan}`), one written
+        beside an interval or a named type (`[0, 1] | {None}`,
+        `R | {nan}`, `[0, 1]|absent`), and what a type clause admits
+        (`: float|absent`) unless the clause restates the default of
+        `defaults` (the parameter's `MissingDefaults`) or of a parameter
+        with no annotation (`restates_missing_defaults`). Empty for a
+        plain interval or type, a language or text domain, a vector or
+        matrix space, and a value excluded. A completed domain answers
+        with what its text named before `complete()` filled the rest.
+        Every judgement of whether a claim names a missing value reads
+        this, so the printed text of a claim, read back, names what the
+        claim named.
+    """
+    if bound is None:
+        return ()
+    try:
+        dom = _as_domain(bound)
+    except Exception:
+        return ()
+    if dom.dims or dom.base_type in ("L", "S"):
+        return ()
+    if dom.policy is not None:
+        listed = _set_sentinels(dom)
+        return tuple(s for s in dom.named
+                     if (dom.absent if s == ABSENT else s in listed))
+    if restates_missing_defaults(dom, (NO_ANNOTATION, defaults)):
+        return ()
+    named = set(_set_sentinels(dom)) | ({ABSENT} if dom.absent else set())
+    return tuple(sorted((s for s in named if s not in dom.excluded),
+                        key=_member_sort_key))
+
+
+def names_missing_value(bound, value, defaults=None) -> bool:  # :draft
+    """Intent:
+        Whether a written binding names the missing value `value` (None,
+        or a hole such as nan) as a point of its claim (`named_missing`).
+    """
+    named = named_missing(bound, defaults)
+    if value is None:
+        return ABSENT in named
+    try:
+        dom = _as_domain(bound)
+    except Exception:
+        return False
+    return (any(s.kind == "missing" for s in named)
+            and MISSING not in dom.excluded)
+
+
 def named_beside(bound) -> tuple:  # :draft
     """Intent:
         The missing values a binding's text names beside an interval or
@@ -1444,6 +1523,8 @@ def named_beside(bound) -> tuple:  # :draft
     if dom.policy is not None:
         return tuple(s for s in dom.named
                      if (dom.absent if s == ABSENT else s in listed))
+    if not named_missing(dom):
+        return ()
     if (dom.clause or dom.dims or dom.base_type in ("L", "S") or _is_enumerated(dom)
             or any(isinstance(v, _Sentinel) for v in dom.excluded)
             or any(s.kind != "missing" for s in listed)):

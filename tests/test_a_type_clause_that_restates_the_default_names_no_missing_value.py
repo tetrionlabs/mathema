@@ -133,3 +133,29 @@ def test_a_rendered_claim_on_the_probe_route_keeps_its_verdict():
     again = _row(ident, claim(render_claim_text(cj, unicode=False), route="probe"))
     assert first.verdict == again.verdict == "holds", (first.verdict, again.verdict,
                                                        again.note)
+
+
+def _verdicts(fn, text):
+    import mathema
+    rec = mathema.check(fn, claims=[claim(text, name="c")])
+    return {p.name: (p.verdict, p.counterexample) for p in rec.probes
+            if p.name == "c" or p.name.startswith("c[")}
+
+
+RESTATED = [
+    (minus_one_when_absent, "for x in [0, 1], f(x) >= 0",
+     "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"),
+    (minus_one_when_nan, "for x in [0, 1], f(x) >= 0",
+     "for x in [0.0, 1.0] : float|missing, f(x) >= 0"),
+    (minus_one_when_absent_float, "for x in [0, 1], f(x) >= 0",
+     "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"),
+]
+
+
+@pytest.mark.parametrize("fn, plain, restated", RESTATED,
+                         ids=[f"{fn.__name__}: {r}" for fn, _p, r in RESTATED])
+def test_every_row_of_a_restating_clause_reads_as_the_plain_interval(fn, plain, restated):
+    """The mathematics row and the float companion judge a clause that
+    restates the default as they judge the plain interval: the missing
+    value is the policy rows' alone."""
+    assert _verdicts(fn, restated) == _verdicts(fn, plain)

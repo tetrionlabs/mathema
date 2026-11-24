@@ -40,12 +40,15 @@ def square(x):
 '''
 
 
-@pytest.mark.parametrize("written", ["for x in {1, None}, f(x) >= 0",
-                                     "for x in [0, 1] | {None}, f(x) >= 0"])
+@pytest.mark.parametrize("written, restated", [
+    ("for x in {1, None}, f(x) >= 0", "for x in {1}, f(x) >= 0"),
+    ("for x in [0, 1] | {None}, f(x) >= 0",
+     "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0")])
 def test_a_record_of_a_restated_domain_holds_the_claim_as_written(
-        tmp_path, monkeypatch, written):
-    """The record's row prints the domain with None left out, and the
-    record still holds the claim as written: the next run finds it
+        tmp_path, monkeypatch, written, restated):
+    """The record's row prints the domain with None left out, in the
+    text of the same claim naming nothing, and the record still holds
+    the claim as written: the next run finds it
     fresh, with no re-authored claim and no rules change."""
     import subprocess
     import sys
@@ -68,7 +71,7 @@ def test_a_record_of_a_restated_domain_holds_the_claim_as_written(
         record = yaml.safe_load((tmp_path / ".mathema" / "verified"
                                  / "lopkg.mod.square.yaml").read_text())
         row = {r["name"]: r for r in record["lopkg.mod.square"]["claims"]}["c"]
-        assert "None" not in row["statement"] and "absent" not in row["statement"], row
+        assert row["statement"] == restated, row
         assert [k["why"] for k in first.keys] == ["no baseline record"]
         again = verify_project(root=str(tmp_path))
         assert not any("re-authored" in p for p in again.problems), again.problems

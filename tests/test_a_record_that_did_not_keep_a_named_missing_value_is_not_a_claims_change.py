@@ -174,7 +174,7 @@ def test_the_old_text_cannot_tell_a_named_value_added_since(project):
     assert sum(_NOTE in ln for ln in out.lines) == 1, out.lines
     rows = {r["name"]: r for r in _record(project, PLAIN)["claims"]}
     assert rows["non_negative"]["statement"] == (
-        "for x in [0.0, 1.0] : float|missing, f(x) >= 0"), rows
+        "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"), rows
     assert rows["absent[x]"]["verdict"] == "falsified", rows
     again = verify_project(root=str(project))
     assert _why(again)[PLAIN] == "fresh", _why(again)
