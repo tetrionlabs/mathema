@@ -17,6 +17,7 @@ import datetime
 import functools
 import os
 import re
+import sys
 import unicodedata
 
 from . import _run_scope
@@ -29,6 +30,7 @@ from .routes import examine_predicates, is_proof_route
 # sibling claim-driven-development repo's v0.2.0/record-schema.md and
 # CHANGELOG.md. Stamped into every record's lineage.CDD_spec_version field.
 SPEC_VERSION = "0.3.0"
+
 
 
 def reasoning_chain(ex) -> list[dict]:
@@ -486,6 +488,36 @@ def _dump(value, indent: int = 0) -> str:
     return pad + _scalar(value) + "\n"
 
 
+#: the most decimal digits Python converts between an int and text by
+#: default; a longer int's decimal text cannot be read back by a reader
+#: running under that default
+_INT_DECIMAL_DIGITS = getattr(sys.int_info, "default_max_str_digits", 4300)
+
+
+def _int_text(v: int) -> str:
+    """Intent:
+        `v` as a YAML int that reads back as `v`: its decimal text when
+        that has at most `_INT_DECIMAL_DIGITS` digits, else its YAML
+        hexadecimal spelling (`0x...`, signed `-0x...`), which YAML
+        readers convert in base 16, a base Python's int digit limit
+        does not apply to.
+
+    Notes:
+        The digit count is bounded from the bit length, so no decimal
+        conversion past the limit is attempted.
+    """
+    # a b-bit int has at most ceil(b * log10(2)) decimal digits
+    if v.bit_length() * 0.30103 < _INT_DECIMAL_DIGITS - 1:
+        return int.__repr__(v)
+    try:
+        text = int.__repr__(v)
+    except ValueError:
+        text = None
+    if text is not None and len(text.lstrip("-")) <= _INT_DECIMAL_DIGITS:
+        return text
+    return ("-" if v < 0 else "") + "0x" + format(abs(v), "x")
+
+
 def _scalar(v) -> str:
     if v is None:
         return "null"
@@ -502,7 +534,7 @@ def _scalar(v) -> str:
             r = f"{mantissa}.0e{exponent}"
         return r
     if isinstance(v, int):
-        return int.__repr__(v)
+        return _int_text(v)
     try:
         return _quoted(str(v))
     except ValueError as exc:
@@ -534,13 +566,22 @@ def write_yaml(path: str, data: dict, header: str | None = None) -> str:
 
 def atomic_write_text(path: str, text: str) -> str:
     """Intent:
-        Replace the file at `path` with `text` all at once, creating
-        the parent directory first. The text goes to a temporary file
-        in the same directory, is flushed to disk, and is renamed over
-        `path`; a rename within one filesystem is atomic, so a reader
-        (or an interrupted run) sees either the old file or the new
-        one, never a truncated one. An existing file's permission
-        bits carry over. Returns `path`.
+        Replace the file at `path` with `text`, encoded as UTF-8, all
+        at once (`atomic_write_bytes`). Returns `path`.
+    """
+    return atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def atomic_write_bytes(path: str, data: bytes) -> str:
+    """Intent:
+        Replace the file at `path` with `data` all at once, creating
+        the parent directory first. The bytes go to a temporary file
+        in the same directory, are flushed to disk, and are renamed
+        over `path`; a rename within one filesystem is atomic, so a
+        reader (or an interrupted run) sees either the old file or the
+        new one, never a truncated one. An existing file's permission
+        bits carry over, and the run scope forgets what it kept from
+        the file (`_run_scope.wrote`). Returns `path`.
     """
     import tempfile
     d = os.path.dirname(path)
@@ -550,8 +591,8 @@ def atomic_write_text(path: str, text: str) -> str:
                                prefix=f".{os.path.basename(path)}.",
                                suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
         if os.path.exists(path):
@@ -661,6 +702,87 @@ def claims_fingerprint(raw_claims: list, grammar: str = "mathema",
         parts.append(f"{c.get('name', '')}|{statement}|{c.get('route', 'best')}"
                      f"|{cgrammar}|{c.get('tolerance')}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
+
+
+def stored_claims_fingerprint(raw_claims: list, grammar: str = "mathema",
+                              fn=None) -> str:
+    """Intent:
+        The value a record stores as `identity.claims_fingerprint`, the
+        one a sweep compares to decide freshness: the claim set's
+        `claims_fingerprint` combined with mathema's reasoning version
+        (`_rules.reasoning_version_in_force`). Under version 0 it is the claims
+        fingerprint itself, so a record written before the reasoning version
+        existed reads as written under 0; raising the number moves
+        every stored value, so each record is checked again once.
+    """
+    import hashlib
+
+    from ._rules import reasoning_version_in_force
+    pure = claims_fingerprint(raw_claims, grammar, fn)
+    rules = reasoning_version_in_force()
+    if not rules:
+        return pure
+    return hashlib.sha256(f"{pure}|rules={rules}".encode()).hexdigest()[:12]
+
+
+# :draft
+def recorded_claims(entry: "dict | None") -> list:
+    """Intent:
+        The authored claims a verified record holds, rebuilt from its
+        live rows as the claim dicts its fingerprint was made over:
+        name, the row's statement (its canonical text), the route it
+        was authored with, and any grammar or tolerance the row states.
+        Rows mathema adds (suggestions, built-in and type rows, float
+        companions, `dependencies_current`) are left out.
+    """
+    out = []
+    for row in (entry or {}).get("claims") or []:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        meta: dict = row["meta"] if isinstance(row.get("meta"), dict) else {}
+        statement = row.get("statement") or row.get("law")
+        if (not statement or row.get("name") == "dependencies_current"
+                or meta.get("mathema.surface") in ("mathema", "builtin", "types")
+                or meta.get("mathema.companion_of")):
+            continue
+        rebuilt = {"name": row["name"], "statement": statement,
+                   "route": authored_route(row)}
+        for field_name in ("grammar", "tolerance"):
+            if row.get(field_name) is not None:
+                rebuilt[field_name] = row[field_name]
+        out.append(rebuilt)
+    return out
+
+
+def recorded_claims_fingerprint(entry: "dict | None", fn=None) -> "str | None":
+    """Intent:
+        The stored fingerprint (`stored_claims_fingerprint`), under the
+        rules in force now, of the claims a verified record holds (`recorded_claims`), or None when one of
+        them cannot be fingerprinted.
+    """
+    from .sync import as_recorded
+    claims = [{**c, "statement": as_recorded(c).get("statement")}
+              for c in recorded_claims(entry)]
+    try:
+        return stored_claims_fingerprint(
+            claims, (entry or {}).get("grammar") or "mathema", fn)
+    except Exception:
+        return None
+
+
+# :draft
+def written_under_earlier_rules(entry: "dict | None", fn=None) -> bool:
+    """Intent:
+        Whether a verified record was written under an earlier reasoning
+        version than the one in force (`_rules`): its stored claims
+        fingerprint is not the fingerprint, under the rules now, of the
+        claims it holds. A record with no stored fingerprint, or whose
+        claims cannot be fingerprinted, reads as earlier.
+    """
+    stored = ((entry or {}).get("identity") or {}).get("claims_fingerprint")
+    if not stored:
+        return True
+    return recorded_claims_fingerprint(entry, fn) != stored
 
 
 def _declared_conjecture(c: dict, default_grammar: str = "mathema"):
@@ -1005,12 +1127,13 @@ def authored_route(row: dict) -> str:
 
 def record(ex, key: str | None = None, root: str = ".",
           claims: list | None = None, declared_intent: str | None = None,
-          grammar: str = "mathema", fn=None) -> str:
+          grammar: str = "mathema", fn=None,
+          keep_rows: "list | None" = None) -> str:
     """Write this explanation into the machine layer of the project store:
     one file per function under .mathema/verified/. `claims` (the declared
     entry's raw claim dicts this record was checked against, if any) gets
-    folded into `identity.claims_fingerprint` via claims_fingerprint()
-    above, so a later `mathema verify` can detect a claim being added or
+    folded into `identity.claims_fingerprint` via
+    stored_claims_fingerprint() above, so a later `mathema verify` can detect a claim being added or
     edited even when the code itself hasn't changed. Pass the raw declared
     dicts (as loaded from YAML), not Conjecture objects, the fingerprint
     must stay comparable across implementations, and Conjecture is a
@@ -1023,7 +1146,11 @@ def record(ex, key: str | None = None, root: str = ".",
     own `intent` when the docstring provided none, and stamps
     `meta["mathema.intent_provenance"]: declared`. Every stated intent
     starts on the `declared` rung; `documented` is the human act of
-    accepting it (`mathema accept --intent`)."""
+    accepting it (`mathema accept --intent`).
+
+    `keep_rows` names claims whose row in the record already on disk is
+    written again exactly as it stands, beside the rows `ex` gives (a
+    claim this run did not check)."""
     key = key or getattr(ex.facts, "name", "unknown")
     path = record_path(verified_dir(root), key)
     if os.path.exists(path):
@@ -1036,7 +1163,7 @@ def record(ex, key: str | None = None, root: str = ".",
                 f"and superseded row from both sides of a merge), or "
                 f"restore it from git, and run again")
     spec = to_spec(ex)
-    spec["identity"]["claims_fingerprint"] = claims_fingerprint(claims or [],
+    spec["identity"]["claims_fingerprint"] = stored_claims_fingerprint(claims or [],
                                                                 grammar, fn)
     _stamp_authored_routes(spec, claims or [])
     if declared_intent and not spec.get("intent"):
@@ -1072,6 +1199,9 @@ def record(ex, key: str | None = None, root: str = ".",
                                 & set(sum(sources.values(), [])))
             if documented:
                 sources["documented"] = documented
+    if keep_rows:
+        spec["claims"].extend(_prior_rows(path, key, keep_rows,
+                                          {c.get("name") for c in spec["claims"]}))
     # deterministic claim order, so a re-adjudication never reorders rows
     # in the diff (identity and the checksum sort independently, so this is
     # purely for a clean file)
@@ -1109,6 +1239,23 @@ def record(ex, key: str | None = None, root: str = ".",
     out = write_yaml(path, {key: spec},
                      header=f"machine record; binds to form {ex.facts.form}")
     return out
+
+
+def _prior_rows(path: str, key: str, names: list, have: set) -> list:
+    """Intent:
+        The live claim rows of the record at `path` for `key` named in
+        `names` and not in `have`, as they stand on disk; none when the
+        record does not exist or does not read.
+    """
+    import copy
+    if not os.path.exists(path):
+        return []
+    data, reason = read_verified_file(path)
+    if reason is not None or not isinstance(data, dict):
+        return []
+    rows = ((data.get(key) or {}).get("claims") or [])
+    return [copy.deepcopy(r) for r in rows if isinstance(r, dict)
+            and r.get("name") in set(names) and r.get("name") not in have]
 
 
 def save_verified_entry(key: str, entry: dict, root: str = ".") -> str:
@@ -2397,6 +2544,40 @@ def read_claims_file(path: str, rel_path: str) -> "dict | None":
     return data
 
 
+def claim_statement_line(path: str, key: str, name: str) -> "int | None":
+    """Intent:
+        The 1-based line of the statement of claim `name` under `key`
+        in the claims file or verified record at `path` (the
+        `{key: {claims: [{name, statement}, ...]}}` shape both share),
+        or None when the file does not read or holds no such claim.
+    """
+    import yaml
+    try:
+        with open(path, encoding="utf-8") as fh:
+            node = yaml.compose(fh, Loader=yaml.SafeLoader)
+    except (OSError, yaml.YAMLError, UnicodeDecodeError):
+        return None
+
+    def value(mapping, word):
+        if not isinstance(mapping, yaml.MappingNode):
+            return None
+        for k, v in mapping.value:
+            if getattr(k, "value", None) == word:
+                return v
+        return None
+
+    claims = value(value(node, key), "claims")
+    if not isinstance(claims, yaml.SequenceNode):
+        return None
+    for row in claims.value:
+        named = value(row, "name")
+        if getattr(named, "value", None) != name:
+            continue
+        stated = value(row, "statement") or value(row, "law") or named
+        return stated.start_mark.line + 1
+    return None
+
+
 def stamp_library_rows(data: dict, tag: str) -> None:
     """Intent:
         Mark every claim row of a library claims file (one declaring
@@ -3094,8 +3275,145 @@ def canonical_claim_text(cj) -> str:
     unicode, symbology-renamed) parses to the same Conjecture; this is
     the spelling mathema's own artifacts write back, and the basis
     `claims_fingerprint` hashes. Unicode output stays a display
-    rendering, recomputed from the parse at read time, never stored."""
-    return render_claim_text(cj, unicode=False, canonical=True)
+    rendering, recomputed from the parse at read time, never stored.
+
+    The text is read back before it is returned: it must parse, and
+    state the same relation, the same bound names and the same string
+    literal values (in expressions and in domain sets) as the claim.
+    Text that fails raises `CanonicalTextError`, an `InvalidConjecture`
+    naming the claim and the text."""
+    from ._scan import uses_legacy_rendering
+    text = render_claim_text(cj, unicode=False, canonical=True)
+    if uses_legacy_rendering() or getattr(cj, "relation", None) == "policy" \
+            or getattr(cj, "grammar", "mathema") != "mathema":
+        return text
+    problem = _reads_back_problem(cj, text)
+    if problem is not None:
+        from .conjecture import CanonicalTextError
+        # :draft
+        raise CanonicalTextError(
+            f"the stored text of claim {getattr(cj, 'name', None)!r} does "
+            f"not read back as the claim ({problem}): {text}",
+            claim_name=getattr(cj, "name", None), problem=problem, text=text)
+    return text
+
+
+def _literal_values(text: str) -> list:
+    """Intent:
+        The value of each string literal in one expression text, as
+        Python reads the expression: implicitly concatenated literals
+        (`'a' 'b'`) are one value, and triple quotes and prefixes (`r`,
+        `u`, `b`) are read as Python reads them. A text Python does not
+        read as an expression (an `assuming` conjunct in words, say) is
+        read one quoted token at a time (`_scan.mask_strings`), each
+        token decoded as a literal on its own.
+    """
+    import ast
+
+    from ._scan import mask_strings
+    try:
+        tree = ast.parse(text, mode="eval")
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        tree = None
+    if tree is not None:
+        return [repr(node.value) for node in ast.walk(tree)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, (str, bytes))]
+    values = []
+    for literal in mask_strings(text)[1]:
+        try:
+            values.append(repr(ast.literal_eval(literal)))
+        except (ValueError, SyntaxError, MemoryError, RecursionError):
+            values.append(literal)
+    return values
+
+
+def _string_values(cj) -> list:
+    """Intent:
+        Every string literal value a conjecture states, sorted: those in
+        its expressions (sides, chain links, and each conjunct of its
+        premise, as `_literal_values` reads them) and the string members
+        of its domain sets (read as written), each tagged with where it
+        sits.
+    """
+    from .conjecture import _split_top_and
+    texts = [cj.lhs, cj.rhs]
+    texts += [t for link in (getattr(cj, "links", None) or []) for t in (link[0], link[2])]
+    if isinstance(cj.assuming, str) and cj.assuming:
+        premise = re.sub(r"^assuming\s+", "", cj.assuming.strip())
+        try:
+            texts += _split_top_and(premise)
+        except Exception:
+            texts.append(premise)
+    values = [("expression", v) for t in texts if isinstance(t, str) and t
+              for v in _literal_values(t)]
+    from .domain import _as_domain
+    for name, bound in (cj.domain or {}).items():
+        try:
+            pieces = _as_domain(bound).pieces
+        except Exception:
+            pieces = ()
+        for piece in pieces:
+            if isinstance(piece, frozenset):
+                values.extend(("domain", name, v) for v in piece if isinstance(v, str))
+    return sorted(values)
+
+
+def _read_back_shape(cj) -> tuple:
+    """Intent:
+        What a reading of a claim's stored text has to keep: its
+        relation, its negation, its bound domain names, and its string
+        literal values.
+    """
+    return (cj.relation, bool(getattr(cj, "negated", False)),
+            tuple(sorted(cj.domain or {})), tuple(_string_values(cj)))
+
+
+def _reread(text: str, context: tuple) -> tuple:
+    """Intent:
+        `text` read back as a claim: `(None, its read-back shape)`, or
+        `(the reason, None)` when it does not parse. `context` is the
+        render context the reading happens under. Inside a run scope
+        (`_run_scope.run_scope`) a text read once under one context is
+        not read again in that run; outside one, every call reads it.
+    """
+    from .conjecture import InvalidConjecture
+    from .conjecture import claim as _claim
+    kept = _run_scope.kept("claim_read_back")
+    if kept is not None and (text, context) in kept:
+        return kept[(text, context)]
+    try:
+        back = _claim(text)
+    except InvalidConjecture as e:
+        # :draft
+        found: tuple = (f"it does not parse ({e})", None)
+    else:
+        found = (None, _read_back_shape(back))
+    if kept is not None:
+        kept[(text, context)] = found
+    return found
+
+
+def _reads_back_problem(cj, text: str) -> "str | None":
+    """Intent:
+        Why `text`, rendered as `cj`'s canonical text, does not read
+        back as `cj`, or None when it does: it parses and keeps the
+        relation, the bound names and the string literal values.
+    """
+    from .grammar import (_BAR_MATRICES, _COMPLEX_NAMES, _ORDERED_MATRICES,
+                          _RENDER_MATRICES)
+    context = (_BAR_MATRICES.get(), _COMPLEX_NAMES.get(),
+               _ORDERED_MATRICES.get(), _RENDER_MATRICES.get())
+    problem, shape = _reread(text, context)
+    if problem is not None:
+        return problem
+    want = _read_back_shape(cj)
+    for i, what in enumerate(("relation", "negation", "bound names",
+                              "string literal values")):
+        if shape[i] != want[i]:
+            # :draft
+            return f"it reads back with other {what}"
+    return None
 
 
 def _strip_pinned_regions(assuming: str) -> str:
@@ -3103,7 +3421,9 @@ def _strip_pinned_regions(assuming: str) -> str:
         The assuming clause with every `--> <region>` pin removed, per
         conjunct: `assuming f is defined --> b != 0 and lemma --> x > 0`
         becomes `assuming f is defined and lemma`. A conjunct with no
-        arrow (a plain relation premise) passes through whole.
+        arrow (a plain relation premise) passes through whole. An arrow
+        or an ` and ` inside a string literal (as `_scan.mask_strings`
+        reads them) is part of the literal and never cuts or splits.
 
     Notes:
         The pinned region is resolved evidence, recomputed at
@@ -3113,11 +3433,13 @@ def _strip_pinned_regions(assuming: str) -> str:
     """
     import re as _re
 
+    from ._scan import mask_strings, unmask_strings
     from .conjecture import _split_top_and
     text = _re.sub(r"^assuming\s+", "", assuming.strip())
+    masked, literals = mask_strings(text)
     kept = [_re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=_re.DOTALL).strip()
-            for part in _split_top_and(text)]
-    return "assuming " + " and ".join(k for k in kept if k)
+            for part in _split_top_and(masked)]
+    return "assuming " + unmask_strings(" and ".join(k for k in kept if k), literals)
 
 
 def fingerprint_text(cj) -> str:

@@ -745,14 +745,15 @@ def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
         drawn members, each with one character removed, and with one
         atom character put in or put in place of a character, at every
         position; then the `literals` the claim writes. Returns
-        `(strings, members drawn, length bound, atoms)`. Nothing here asks a solver, so the same call gives the
+        `(strings, members drawn, length bound, atoms, draws made by
+        the sampler)`. Nothing here asks a solver, so the same call gives the
         same strings on any machine.
     """
     import itertools
     import random
 
     from . import regular
-    atoms = regular.representatives([at_most, at_least], alphabet or None)
+    atoms = regular._representatives([at_most, at_least], alphabet or None)
     bound, total = 0, 1
     while atoms and bound < 6 and total + len(atoms) ** (bound + 1) <= GUARD_ENUMERATED:
         bound += 1
@@ -770,11 +771,13 @@ def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
         drawn.extend(h.value for h in language.hazards())
     except Exception:
         pass
+    draws = 0
     for _ in range(GUARD_DRAWS):
         try:
             drawn.append(language.sample(rng))
         except Exception:
             break
+        draws += 1
     drawn = [v for v in drawn if isinstance(v, str)]
     members = sorted({v for v in drawn if _is_member(language, v)}, key=lambda v: (len(v), v))
     for value in drawn:
@@ -788,7 +791,7 @@ def _guard_strings(language, at_most: dict, at_least: dict, alphabet: list,
                 if i < len(value):
                     strings[value[:i] + letter + value[i + 1:]] = None
     strings.update((v, None) for v in literals if isinstance(v, str))
-    return list(strings), len(members), bound, len(atoms)
+    return list(strings), len(members), bound, len(atoms), draws
 
 
 def check_definition(text: str, language, at_most: dict, at_least: dict,
@@ -803,24 +806,29 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
         term, so the term and `contains` must agree on every string;
         for a pair the membership must lie between them. Returns the
         assumption a verdict rests on: the `statement` (`<text> == its
-        stated definition`), its `status`, and the `artefact` to run it
+        stated definition`), its `axiom` (the statement and its id,
+        `axiom_id`), its `status`, the `corroboration` record
+        (`corroboration_record`), and the `artefact` to run it
         again (the seed, the members drawn, the length bound, the
         number of atoms, the number of strings compared and skipped,
         and the first `GUARD_SKIPPED_SHOWN` skipped strings).
 
         A string on which `contains` raises is skipped: the definition
-        is not compared there. The status is `checked` when every
-        string was compared and agreed; `assumed` when a string was
-        skipped or none was compared; and `refuted`, with the
-        `disagreement` naming the string, when the definition and the
-        membership part. When the matcher runs out of its budget the
-        result carries `unfinished` and no status is claimed.
+        is not compared there. Agreement on the strings compared is
+        evidence about the assumption and no proof of it, so the
+        status is `assumed` however many agreed, and the corroboration
+        record says how many were compared and skipped; it is
+        `refuted`, with the `disagreement` naming the string, when the
+        definition and the membership part. When the matcher runs out
+        of its budget the result carries `unfinished` and no
+        corroboration.
     """
     from . import regular
     seed = _guard_seed(text)
-    out = {"language": text, "statement": f"{text} == its stated definition",  # :draft
-           "status": "assumed", "artefact": {"seed": seed}}
-    strings, drawn, bound, atoms = _guard_strings(language, at_most, at_least, alphabet,
+    out = _with_axiom(
+        {"language": text, "statement": f"{text} == its stated definition",  # :draft
+         "status": "assumed", "artefact": {"seed": seed}}, at_most, at_least)
+    strings, drawn, bound, atoms, draws = _guard_strings(language, at_most, at_least, alphabet,
                                                   seed, literals)
     in_most, in_least = regular.matcher(at_most), regular.matcher(at_least)
     compared = 0
@@ -846,9 +854,164 @@ def check_definition(text: str, language, at_most: dict, at_least: dict,
     out["artefact"].update({"members drawn": drawn, "length bound": bound, "atoms": atoms,
                             "strings compared": compared, "strings skipped": len(skipped),
                             "skipped": [repr(v) for v in skipped[:GUARD_SKIPPED_SHOWN]]})
-    if compared and not skipped:
-        out["status"] = "checked"
+    out["corroboration"] = corroboration_record(  # :draft
+        compared, len(skipped), seed, draws=draws,
+        **{"draws cap": GUARD_DRAWS, "enumerated cap": GUARD_ENUMERATED,  # :draft
+           "near misses cap": GUARD_NEAR_MISSES})  # :draft
     return out
+
+
+def axiom_id(statement: str, *terms) -> str:
+    """Intent:
+        A stable id for an assumption a verdict rests on: `ax-` and the
+        first sixteen hex digits of the SHA-256 of the assumption's
+        statement and, each after a line break, the canonical text of
+        every regular-language node in `terms` it is about
+        (`regular.canonical`, as JSON with sorted keys and no white
+        space). The same
+        statement about the same terms has the same id on any machine.
+    """
+    import hashlib
+    import json
+
+    from . import regular
+    parts = [statement, *(json.dumps(regular.canonical(t), sort_keys=True, ensure_ascii=True,
+                                     separators=(",", ":"))
+                          for t in terms)]
+    return "ax-" + hashlib.sha256(  # :draft
+        "\n".join(parts).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def _with_axiom(entry: dict, *terms) -> dict:
+    """The assumption `entry` carrying its `axiom`: the statement and
+    its id over `terms` (`axiom_id`)."""
+    return {**entry, "axiom": {"statement": entry["statement"],  # :draft
+                               "id": axiom_id(entry["statement"], *terms)}}
+
+
+def corroboration_record(compared: int, skipped: int, seed: "int | None", *,
+                         draws: int, **caps) -> dict:
+    """Intent:
+        The record of a run that compared an assumption with a
+        language's own membership and found no disagreement: `values
+        drawn` (every value put to the comparison), `values compared`,
+        `values skipped` (a value is skipped where `contains` raised
+        on it), `disagreed` (zero: a run that finds a disagreement
+        refutes the assumption and returns no record), the `seed` of
+        the sampler (None for a run that draws nothing at random),
+        `draws` (how many values the languages' samplers gave the
+        run), the run's `caps` by name, and the `outcome` in
+        words. The record is evidence about the assumption; a verdict
+        holds given the assumption, never because of the record.
+    """
+    return {"values drawn": compared + skipped,  # :draft
+            "values compared": compared,  # :draft
+            "values skipped": skipped,  # :draft
+            "disagreed": 0,  # :draft
+            "seed": seed,  # :draft
+            "draws": draws,  # :draft
+            **caps,
+            "outcome": "none disagreed" if compared else "none compared"}  # :draft
+
+
+#: the status an assumption was stored with before agreement on the
+#: values tried was recorded as corroboration
+_STORED_AS_CHECKED = "checked"
+
+
+def agreed_on_counts(compared: int, disagreed: int, skipped: int) -> bool:
+    """Intent:
+        Whether a comparison run with these counts agreed on every
+        value: at least one value compared, none disagreeing and none
+        skipped.
+    """
+    return compared > 0 and disagreed == 0 and skipped == 0
+
+
+def corroboration_shortfall(compared: int, disagreed: int, skipped: int) -> str:
+    """Intent:
+        What a comparison run with these counts fell short of, in
+        words, and the empty text exactly when it agreed on every value
+        (`agreed_on_counts`): the number that disagreed; else that no
+        value was compared; else how many of the values put to the
+        comparison (`compared + skipped`) were skipped.
+    """
+    if disagreed > 0:
+        return f"{disagreed} of {compared} values disagreed"  # :draft
+    if compared <= 0:
+        return "no value compared"  # :draft
+    if skipped != 0:
+        return f"{skipped} of {compared + skipped} values skipped"  # :draft
+    return ""
+
+
+def _counts(assumption: dict) -> "tuple | None":
+    """`(compared, disagreed, skipped)` of an assumption's corroboration
+    record, or None when it carries no record or a count is not a whole
+    number."""
+    record = assumption.get("corroboration")
+    if not isinstance(record, dict):
+        return None
+    counts = (record.get("values compared"), record.get("disagreed"),
+              record.get("values skipped"))
+    if not all(type(n) is int for n in counts):
+        return None
+    return counts
+
+
+def agreed_on_every_value(assumption: dict) -> bool:
+    """Intent:
+        Whether the comparison behind an assumption agreed on every
+        value: its corroboration record shows at least one value
+        compared, none disagreeing and none skipped
+        (`agreed_on_counts`). An entry with no record that was stored
+        with the earlier status `checked` agreed on every value, which
+        is what that status said. False for an unfinished comparison
+        and for any other entry with no record. It says how the run
+        went, and nothing about whether the assumption holds.
+    """
+    if assumption.get("unfinished"):
+        return False
+    counts = _counts(assumption)
+    if counts is None:
+        return (not isinstance(assumption.get("corroboration"), dict)
+                and assumption.get("status") == _STORED_AS_CHECKED)
+    return agreed_on_counts(*counts)
+
+
+def assumption_entry_text(assumption: dict) -> str:
+    """Intent:
+        One assumption as the proof outline states it: `<statement>
+        (<status as read>)`, and for an assumed one whose comparison
+        did not agree on every value (`agreed_on_every_value`), what
+        fell short after the status: `(assumed, 3 of 14 values
+        skipped)`, `(assumed, no value compared)`, `(assumed, the
+        comparison did not finish)`, or `(assumed, no corroboration
+        record)`. An assumed entry reads `(assumed)` alone exactly when
+        `agreed_on_every_value` holds of it.
+    """
+    status = assumption_status(assumption)
+    fell_short = ""
+    if status == "assumed" and not agreed_on_every_value(assumption):
+        counts = _counts(assumption)
+        if assumption.get("unfinished"):
+            fell_short = "the comparison did not finish"  # :draft
+        elif counts is not None:
+            fell_short = corroboration_shortfall(*counts)
+        else:
+            fell_short = "no corroboration record"  # :draft
+    return (f"{assumption['statement']} ({status}"  # :draft
+            + (f", {fell_short}" if fell_short else "") + ")")
+
+
+def assumption_status(assumption: dict) -> "str | None":
+    """Intent:
+        The status of an assumption as it is read: `assumed` or
+        `refuted` as stored, and `assumed` for one stored as `checked`,
+        which meant that the values tried agreed.
+    """
+    status = assumption.get("status")
+    return "assumed" if status == _STORED_AS_CHECKED else status
 
 
 def _is_member(language, value) -> bool:
@@ -891,13 +1054,14 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
         that is not a text is not what its definition states. Each
         language is asked about its own hazard values that are not
         texts and about `NOT_TEXTS`. An assumption is `<text> holds only
-        texts`, `checked` with the number of values run; the
-        disagreement names the first value admitted, or is None.
+        texts`, with its `axiom`, `assumed` with the corroboration record of the values
+        run (`corroboration_record`), or `refuted`; the disagreement
+        names the first value admitted, or is None.
     """
     seen: dict = {}
     refuted = None
     for domain in defined:
-        for text, language, _, _ in domain.read:
+        for text, language, most, least in domain.read:
             if text in seen:
                 continue
             values: list = []
@@ -907,14 +1071,24 @@ def check_holds_only_texts(*defined: "_Defined") -> tuple:
             except Exception:
                 pass
             values.extend(NOT_TEXTS)
-            admitted = [v for v in values if _is_member(language, v)]
-            entry = {"language": text, "statement": f"{text} holds only texts",  # :draft
-                     "status": "checked", "artefact": {"values run": len(values)}}
+            admitted, raised = [], 0
+            for value in values:
+                try:
+                    if language.contains(value):
+                        admitted.append(value)
+                except Exception:
+                    raised += 1
+            entry = _with_axiom(
+                {"language": text, "statement": f"{text} holds only texts",  # :draft
+                 "status": "assumed", "artefact": {"values run": len(values)}}, most, least)
             if admitted:
                 entry["status"] = "refuted"
                 entry["disagreement"] = (f"{admitted[0]!r} is a member of {text}, and a "
                                          f"regular-language definition holds only texts")  # :draft
                 refuted = refuted or entry["disagreement"]
+            else:
+                entry["corroboration"] = corroboration_record(  # :draft
+                    len(values) - raised, raised, None, draws=0)
             seen[text] = entry
     return list(seen.values()), refuted
 
@@ -941,14 +1115,16 @@ def standard_assumptions() -> dict:
 
 def assuming_text(assumptions: list, verdict: str = "proven") -> str:
     """Intent:
-        `proven, assuming A (checked), B (assumed)` for the definitions
-        a verdict rests on (`falsified, assuming ...` for a falsified
-        one); the verdict word alone when it read none.
+        `proven, assuming A (assumed), B (assumed, 3 of 14 values
+        skipped)` for the definitions a verdict rests on (`falsified,
+        assuming ...` for a falsified one), each as
+        `assumption_entry_text` states it; the verdict word alone when
+        it read none.
     """
     if not assumptions:
         return verdict
     return f"{verdict}, assuming " + ", ".join(  # :draft
-        f"{a['statement']} ({a['status']})" for a in assumptions)
+        assumption_entry_text(a) for a in assumptions)
 
 
 def _decide_languages(rel: Relation) -> Decision:
@@ -993,7 +1169,7 @@ def _decide_languages(rel: Relation) -> Decision:
             if found.status != "member":
                 continue
             member = found.member
-            if not regular.places(member, *question):
+            if not regular._places(member, *question):
                 # the matcher reads the solver's string otherwise than
                 # the solver did, so the string settles nothing
                 why = why or UNCONFIRMED
@@ -1153,7 +1329,9 @@ def parameter_named_as_a_set(statement: Statement, written: str, parameters) -> 
 
 
 __all__ = ["Decision", "InvalidDomainRelation", "LANGUAGE", "NO_LOWERING", "NUMBERS",
-           "RELATION", "Relation", "Statement", "Term", "WORDS", "assuming_text",
+           "RELATION", "Relation", "Statement", "Term", "WORDS", "agreed_on_counts", "agreed_on_every_value",
+           "assumption_entry_text", "assuming_text", "corroboration_shortfall",
+           "assumption_status", "axiom_id", "corroboration_record",
            "check_definition", "check_definitions", "check_holds_only_texts", "decide",
            "not_as_written",
            "standard_assumptions",

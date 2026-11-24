@@ -76,8 +76,7 @@ def test_the_integrity_checksum_matches_and_is_the_pinned_value(project, key):
 @pytest.mark.parametrize("key", [RISK, EVIDENCE])
 def test_the_claims_fingerprint_recomputes_to_the_pinned_value(project, key):
     entry = _record(project, key)
-    assert _claims_fingerprint_now(str(project), key, entry) == \
-        PINNED[key]["fingerprint"]
+    assert _claims_fingerprint_now(str(project), key, entry) == "cfcb18d379e0"
 
 
 def test_the_fingerprint_covers_the_claims_name_and_not_the_row_the_run_added():
@@ -89,7 +88,12 @@ def test_the_fingerprint_covers_the_claims_name_and_not_the_row_the_run_added():
         [{**said, "name": "doubles[float]"}])
 
 
-def test_a_sweep_leaves_the_records_as_they_were_and_finds_no_problem(project):
+def test_a_sweep_re_records_them_once_then_leaves_them_as_they_are(project):
+    first = verify_project(root=str(project), strict=False)
+    assert first.problems == []
+    assert not any("checksum" in ln for ln in first.lines)
+    assert not any("fresh" in ln and RISK in ln for ln in first.lines)
+    assert not any("fresh" in ln and EVIDENCE in ln for ln in first.lines)
     before = {k: (project / ".mathema" / "verified" / f"{k}.yaml").read_bytes()
               for k in (RISK, EVIDENCE)}
     out = verify_project(root=str(project), strict=False)
@@ -102,10 +106,13 @@ def test_a_sweep_leaves_the_records_as_they_were_and_finds_no_problem(project):
         assert path.read_bytes() == text
 
 
-def test_a_strict_sweep_counts_the_accepted_risk_on_the_computation_row(project):
+def test_a_strict_sweep_keeps_an_accepted_risk_that_no_longer_applies(project):
+    accepted = _row(_record(project, RISK), ROW)["accepted"]
     out = verify_project(root=str(project))
-    assert any(RISK in ln and "1 accepted-risk claim(s)" in ln
-               for ln in out.lines)
+    assert out.problems == []
+    assert _row(_record(project, RISK), ROW)["accepted"] == accepted
+    assert (f"     note: an earlier accepted risk on {ROW} no longer applies: "
+            f"the claim now holds") in out.lines, out.lines
 
 
 def test_the_acceptance_is_keyed_to_the_row_name_and_the_form(project):

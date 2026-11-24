@@ -234,3 +234,39 @@ def interval_text_is_stable(relation: int, a: int, b: int, c: int, d: int) -> bo
     from mathema import domain_relations
     once = domain_relations.parse(interval_statement(relation, a, b, c, d)).text()
     return domain_relations.parse(once).text() == once
+
+
+def agreement_stated(compared: int, disagreed: int, skipped: int) -> bool:
+    """A comparison agreed on every value when at least one value was
+    compared, none disagreed and none was skipped."""
+    return int(compared) > 0 and int(disagreed) == 0 and int(skipped) == 0
+
+
+def record_agreed(compared: int, disagreed: int, skipped: int) -> bool:
+    """What `domain_relations.agreed_on_every_value` says of an
+    assumption whose corroboration record has these counts."""
+    from mathema import domain_relations
+    compared, disagreed, skipped = int(compared), int(disagreed), int(skipped)
+    return domain_relations.agreed_on_every_value({"statement": "A", "status": "assumed", "corroboration": {
+        "values drawn": compared + skipped, "values compared": compared,
+        "values skipped": skipped, "disagreed": disagreed}})
+
+
+def outline_entry_is_bare(compared: int, disagreed: int, skipped: int) -> bool:
+    """Whether the proof outline states an assumption whose
+    corroboration record has these counts as `A (assumed)` and nothing
+    more."""
+    from mathema import domain_relations
+    compared, disagreed, skipped = int(compared), int(disagreed), int(skipped)
+    entry = domain_relations.assumption_entry_text({"statement": "A", "status": "assumed", "corroboration": {
+        "values drawn": compared + skipped, "values compared": compared,
+        "values skipped": skipped, "disagreed": disagreed}})
+    return entry == "A (assumed)"
+
+
+def shortfall_is_empty(compared: int, disagreed: int, skipped: int) -> bool:
+    """Whether `domain_relations.corroboration_shortfall` has nothing
+    to say of these counts."""
+    from mathema import domain_relations
+    return domain_relations.corroboration_shortfall(
+        int(compared), int(disagreed), int(skipped)) == ""

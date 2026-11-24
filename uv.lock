@@ -1274,7 +1274,7 @@ requires-dist = [
     { name = "filelock", marker = "python_full_version >= '3.11' and extra == 'dev'", specifier = ">=4.2.1" },
     { name = "mathema", extras = ["coverage", "language", "mcp", "numpy", "smt"], marker = "extra == 'all'" },
     { name = "mathema", extras = ["coverage", "numpy", "pandas", "polars", "smt"], marker = "extra == 'test'" },
-    { name = "mathema-language", marker = "extra == 'language'", specifier = ">=0.2.0,<0.4" },
+    { name = "mathema-language", marker = "extra == 'language'", specifier = ">=0.2.0,<0.5" },
     { name = "mathema-symbology", marker = "extra == 'symbology'", specifier = ">=0.3" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2,<3" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
