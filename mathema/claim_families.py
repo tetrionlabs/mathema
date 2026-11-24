@@ -1625,20 +1625,25 @@ def _examined_verdict(found: list, unread: list, clean: str,
                       effects=None, domain: dict | None = None):
     """Intent:
         The ProofResult of an examination: disproven at the first site
-        found (its sentence is the witness), undecided naming what could
-        not be read, proven otherwise, saying what the examination
-        established (`clean`). A site whose enclosing branch cannot run
-        anywhere in `domain` still disproves, and its witness says so.
+        found that is not in unreachable code (its sentence is the
+        witness), undecided naming what could not be read, proven
+        otherwise, saying what the examination established (`clean`)
+        and naming each site found in a branch proven unreachable over
+        `domain` (`_branch_unreachable_over`), with how it was shown.
     """
     from .symbolic import ProofResult
-    if found:
-        witness = found[0].text
-        guard = (effects.guards.get(found[0], ()) if effects is not None
+    reachable: list = []
+    unreachable: list = []
+    for site in found:
+        guard = (effects.guards.get(site, ()) if effects is not None
                  else ())
-        dead = _branch_dead_over(guard, domain)
-        if dead:
-            witness += (f"; the branch it sits in cannot run over the "
-                        f"domain ({dead} never holds there)")
+        why = _branch_unreachable_over(guard, domain, effects)
+        if why is None:
+            reachable.append(site)
+        else:
+            unreachable.append((site, why))
+    if reachable:
+        witness = reachable[0].text
         return ProofResult("disproven", sketch=witness,
                            counterexample=witness)
     if unread:
@@ -1647,56 +1652,188 @@ def _examined_verdict(found: list, unread: list, clean: str,
     assumes = sorted(getattr(effects, "assumes", ()) or ())
     return ProofResult("proven", sketch=f"examined from its source: the "
                                         f"function {clean}" + "".join(
-                                            f"; it assumes {a}"
-                                            for a in assumes))
+                                            f"; the line where {site.text} "  # :draft
+                                            f"is unreachable code over the "
+                                            f"domain ({why})"
+                                            for site, why in unreachable)
+                       + "".join(f"; it assumes {a}" for a in assumes))
 
 
-def _branch_dead_over(guard: tuple, domain: dict | None) -> "str | None":
+def _branch_unreachable_over(guard: tuple, domain: dict | None,
+                             effects=None) -> "str | None":
     """Intent:
-        The branch condition, of those in `guard` (pairs of a condition's
-        source and whether the branch is its body or its else), that no
-        point of `domain` satisfies, or None when none is shown to fail
-        everywhere. A condition counts only when it reads a single
-        parameter the domain bounds by an interval; any other is taken
-        as possibly true.
-    Raises:
-        Nothing: a condition sympy cannot read, or one whose solving
-        runs past the fast cap, is taken as possibly true.
+        How the branch around a site is shown unreachable over `domain`,
+        or None when it is not. `guard` holds pairs of a condition's
+        source and whether the site is in its body (True) or its else
+        (False). The branch is unreachable when one condition is the
+        constant that never takes it, or when one condition compares a
+        single parameter with numeric literals (`_literal_test_region`),
+        the reals where it takes the branch miss the interval the domain
+        gives that parameter, and it does not take the branch at a
+        missing value the bound admits either.
+
+    Notes:
+        The comparison is read from the condition's text, so it is
+        about the argument only where the name holds the argument when
+        the test runs: the parameter is one nothing in the function
+        binds again (`Effects.fixed_params`), and the test stands in
+        the function's own body, not in a function defined there
+        (`Effects.own_tests`, `Effects.nested_tests`). A comparison of
+        a float or an integer with a literal is exact in Python, so the
+        reals decide it; a condition with arithmetic, another operator,
+        a call or a second name is not read.
     """
-    if not guard or not domain:
-        return None
+    import ast as _ast
+
     import sympy
-    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
-    for source, taken in guard:
+    for source, taken in guard or ():
         shown = source if taken else f"not ({source})"
         try:
-            condition = sympy.sympify(
-                source, locals={name: sympy.Symbol(name, real=True)
-                                for name in domain})
-        except Exception:
+            constant = _ast.literal_eval(source)
+        except (ValueError, SyntaxError, TypeError):
+            pass
+        else:
+            if bool(constant) != taken:
+                return (f"its test `{source}` is the constant "  # :draft
+                        f"{constant!r}, so the branch never runs")
             continue
-        if not taken:
-            condition = sympy.Not(condition)
-        names = {str(sym) for sym in getattr(condition, "free_symbols", ())}
-        if len(names) != 1:
+        if not domain or effects is None:
             continue
-        (name,) = names
+        # :draft the rule: one parameter against numeric literals only
+        if (source not in effects.own_tests
+                or source in effects.nested_tests):
+            continue
+        read = _literal_test_region(source)
+        if read is None:
+            continue
+        name, region = read
+        if name not in effects.fixed_params:
+            continue
         bounds = domain.get(name)
         if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2
-                and all(isinstance(b, (int, float)) for b in bounds)):
+                and all(isinstance(b, (int, float))
+                        and not isinstance(b, bool) and b == b
+                        for b in bounds)):
             continue
         lo, hi = (sympy.oo if b == math.inf else -sympy.oo if b == -math.inf
-                  else sympy.nsimplify(b) for b in bounds)
-        symbol = next(iter(condition.free_symbols))
+                  else sympy.Rational(b) for b in bounds)
+        if not taken:
+            region = sympy.Complement(sympy.S.Reals, region)
+        if sympy.Intersection(region, sympy.Interval(lo, hi)) \
+                is not sympy.S.EmptySet:
+            continue
+        if _taken_at_a_missing_value(source, taken, name, bounds):
+            continue
+        return (f"`{shown}` holds nowhere in [{bounds[0]:g}, {bounds[1]:g}], "  # :draft
+                f"solved exactly, nor at a missing value the domain admits")
+    return None
+
+
+def _literal_test_region(source: str) -> "tuple | None":
+    """Intent:
+        `(name, region)` for a condition built only from comparisons
+        (`<`, `<=`, `>`, `>=`, `==`, `!=`) between the one bare name
+        `name` and a numeric literal on either side, joined by `and`,
+        `or` and `not`: `region` is the set of reals at which the
+        condition is true, each literal taken at its exact value. None
+        for any other condition.
+
+    Notes:
+        A literal is an integer or a finite float, with an optional
+        sign; a chained comparison is not read.
+    """
+    import ast as _ast
+
+    import sympy
+    try:
+        tree = _ast.parse(source, mode="eval").body
+    except SyntaxError:
+        return None
+    names: set = set()
+
+    def literal(node):
+        sign = 1
+        if isinstance(node, _ast.UnaryOp) and isinstance(
+                node.op, (_ast.USub, _ast.UAdd)):
+            sign = -1 if isinstance(node.op, _ast.USub) else 1
+            node = node.operand
+        if not (isinstance(node, _ast.Constant)
+                and type(node.value) in (int, float)
+                and math.isfinite(node.value)):
+            return None
+        return sign * sympy.Rational(node.value)
+
+    def region(node):
+        if isinstance(node, _ast.BoolOp):
+            parts = [region(v) for v in node.values]
+            if any(p is None for p in parts):
+                return None
+            return (sympy.Intersection if isinstance(node.op, _ast.And)
+                    else sympy.Union)(*parts)
+        if isinstance(node, _ast.UnaryOp) and isinstance(node.op, _ast.Not):
+            inner = region(node.operand)
+            return None if inner is None else sympy.Complement(
+                sympy.S.Reals, inner)
+        if not (isinstance(node, _ast.Compare) and len(node.ops) == 1):
+            return None
+        left, op, right = node.left, node.ops[0], node.comparators[0]
+        flipped = not isinstance(left, _ast.Name)
+        if flipped:
+            left, right = right, left
+        value = literal(right)
+        if not isinstance(left, _ast.Name) or value is None:
+            return None
+        names.add(left.id)
+        kind = type(op)
+        if flipped:
+            kind = {_ast.Lt: _ast.Gt, _ast.LtE: _ast.GtE, _ast.Gt: _ast.Lt,
+                    _ast.GtE: _ast.LtE}.get(kind, kind)
+        if kind is _ast.Lt:
+            return sympy.Interval.open(-sympy.oo, value)
+        if kind is _ast.LtE:
+            return sympy.Interval(-sympy.oo, value)
+        if kind is _ast.Gt:
+            return sympy.Interval.open(value, sympy.oo)
+        if kind is _ast.GtE:
+            return sympy.Interval(value, sympy.oo)
+        if kind is _ast.Eq:
+            return sympy.FiniteSet(value)
+        if kind is _ast.NotEq:
+            return sympy.Complement(sympy.S.Reals, sympy.FiniteSet(value))
+        return None
+
+    found = region(tree)
+    if found is None or len(names) != 1:
+        return None
+    return names.pop(), found
+
+
+def _taken_at_a_missing_value(source: str, taken: bool, name: str,
+                              bounds) -> bool:
+    """Intent:
+        Whether the branch condition `source` takes the branch (its
+        truth equal to `taken`) when `name` is one of the missing values
+        `bounds` admits (`domain.admitted`, each realised): `nan < 10`
+        is False, so the else of `x < 10` runs at nan. A condition that
+        raises at a value does not take the branch there; one whose
+        source cannot be compiled is taken.
+    """
+    from .domain import ABSENT, admitted, realise_sentinel
+    absent, holes = admitted(bounds)
+    values = [v for s in ([ABSENT] if absent else []) + list(holes)
+              for v in realise_sentinel(s)]
+    try:
+        code = compile(source, "<guard>", "eval")
+    except SyntaxError:
+        return True
+    for value in values:
         try:
-            found = _with_timeout(
-                lambda c=condition, x=symbol, a=lo, b=hi: sympy.solveset(
-                    c, x, sympy.Interval(a, b)), FAST_TIMEOUT_SECONDS)
+            outcome = bool(eval(code, {"__builtins__": {}}, {name: value}))
         except Exception:
             continue
-        if found is sympy.S.EmptySet:
-            return shown
-    return None
+        if outcome == taken:
+            return True
+    return False
 
 
 def _is_state_safe_derive(fn, facts, lhs_src: str, rhs_src: str,
@@ -1729,7 +1866,9 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
         domain. Proven when the function is wrapped by
         @enforce_domain (values) or @enforce_dimensions (shape) covering
         this parameter, rejection by construction, the wrapper checks
-        every call before the body runs. Undecided (None) otherwise:
+        every call before the body runs, the wrapper being one those
+        decorators built (`authoring._built_by_enforcement`), not any
+        function carrying their attributes. Undecided (None) otherwise:
         the trials at concrete out-of-domain values decide empirically.
 
     Notes:
@@ -1743,8 +1882,17 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
     param = lhs_src
     if _declared((domain or {}).get(param), "refusal"):
         return None
+    from .authoring import _built_by_enforcement
+    if not _built_by_enforcement(fn):
+        # a function mathema's enforcement did not build checks nothing,
+        # whatever attributes it carries
+        return None
     enforced = getattr(fn, "__mathema_enforced_domain__", None)
     if enforced is not None and param in enforced:
+        if not _enforced_inside(enforced[param], (domain or {}).get(param)):
+            # the wrapper admits values outside the claim's domain, or
+            # the two cannot be compared: the trials decide
+            return None
         return ProofResult(
             "proven",
             sketch=f"rejection by construction: the enforce_domain "
@@ -1759,6 +1907,69 @@ def _excluded_outside_domain_derive(fn, facts, lhs_src: str, rhs_src: str,
                    f"wrapper checks {param}'s shape ({expected(shaped[param])}) "
                    f"before the body ever runs")
     return None
+
+
+def _enforced_inside(enforced, stated) -> bool:
+    """Intent:
+        Whether every number the enforced domain admits is in the
+        claim's stated domain for the parameter, so that the wrapper
+        refuses every number outside the claim's: the claim states none
+        (the enforced domain is then the declared one), or both read as
+        sets of reals (`_number_set`), the enforced one is a subset, an
+        end that one includes and the other leaves out counted as the
+        number it is, and neither infinity is admitted by the enforced
+        domain and left out by the claim's, each read as the wrapper
+        reads a number (`domain.number_member`). A
+        named set bound as a string (`"R"`, `"Z"`, `"N"`) is read as
+        the claims read it (`domain._as_domain`). Two domains that do
+        not read as sets of reals are inside one another only when
+        they are the same domain, of the same type. False when they
+        cannot be compared.
+    """
+    if stated is None:
+        return True
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import _as_domain, number_member
+    try:
+        if isinstance(enforced, str):
+            enforced = _as_domain(enforced)
+        if isinstance(stated, str):
+            stated = _as_domain(stated)
+        for end in (math.inf, -math.inf):
+            if number_member(end, enforced) is not False \
+                    and number_member(end, stated) is not True:
+                return False
+        inner, outer = _number_set(enforced), _number_set(stated)
+        if inner is None and outer is None:
+            return type(stated) is type(enforced) \
+                and not isinstance(stated, tuple) \
+                and bool(stated == enforced)
+        if inner is None or outer is None:
+            return False
+        return _with_timeout(lambda: inner.is_subset(outer),
+                             FAST_TIMEOUT_SECONDS) is True
+    except Exception:
+        return False
+
+
+def _number_set(bound):
+    """Intent:
+        A domain bound as the sympy set of the numbers it holds: a
+        finite set of numbers written as a set (a missing value it
+        lists is no number and is left out), else what
+        `conjecture._real_set` reads, open ends kept open. None for
+        anything else.
+    """
+    from .conjecture import _real_set
+    if isinstance(bound, (set, frozenset)):
+        import sympy
+        from .domain import exact_number, is_sentinel
+        numbers = [v for v in bound if v is not None and not is_sentinel(v)]
+        if not all(type(v) in (int, float) and math.isfinite(v)
+                   for v in numbers):
+            return None
+        return sympy.FiniteSet(*[exact_number(v) for v in numbers])
+    return _real_set(bound)
 
 
 def _excluded_probe(fn, facts, cj, domain: dict, rng: random.Random,
@@ -2295,6 +2506,88 @@ def _empty_value(fn, facts, target: str, cj=None) -> tuple:
     return [], f"{target} = [] (an empty list)"
 
 
+def _empty_values(fn, facts, target: str, cj=None) -> list:
+    """Intent:
+        Every `(value, shown)` empty input `target` admits: the empty
+        container `_empty_value` builds, and, where that is the empty
+        list, the empty value of every other type the annotation
+        admits. A parameter that takes a plain sequence of any kind (no
+        annotation, a tuple, an abstract `Sequence`, `Collection`,
+        `Iterable`, `Any`) admits the empty tuple; a member of a union
+        or an optional's inner type that is `str`, `bytes`,
+        `bytearray`, `dict`, `set` or `frozenset` admits that type's
+        empty value.
+    """
+    import collections.abc as _abc
+    import re
+    import types
+    import typing
+    first = _empty_value(fn, facts, target, cj)
+    if not isinstance(first[0], list) or first[0] != [] \
+            or not first[1].endswith("(an empty list)"):
+        return [first]
+    try:
+        annotation = typing.get_type_hints(fn).get(
+            target, inspect.signature(fn).parameters[target].annotation)
+    except Exception:
+        try:
+            annotation = inspect.signature(fn).parameters[target].annotation
+        except (KeyError, TypeError, ValueError):
+            return [first]
+    # :draft the words each empty value is shown by
+    others = {tuple: ((), "() (an empty tuple)"),
+              str: ("", "'' (an empty str)"),
+              bytes: (b"", "b'' (an empty bytes)"),
+              bytearray: (bytearray(), "bytearray() (an empty bytearray)"),
+              dict: ({}, "{} (an empty dict)"),
+              set: (set(), "set() (an empty set)"),
+              frozenset: (frozenset(), "frozenset() (an empty frozenset)")}
+    by_word = {"tuple": tuple, "Tuple": tuple, "str": str, "bytes": bytes,
+               "bytearray": bytearray, "dict": dict, "Dict": dict,
+               "set": set, "Set": set, "frozenset": frozenset,
+               "FrozenSet": frozenset}
+    admitted: list = []
+
+    def admit(kind) -> None:
+        if kind not in admitted:
+            admitted.append(kind)
+
+    def read(note, member: bool) -> None:
+        """Note the types `note` admits; `member` when it is a member
+        of a union or optional."""
+        if isinstance(note, str):
+            # an annotation left as text: read by the words it names
+            if re.search(r"\b(Sequence|Collection|Iterable|Reversible|"
+                         r"Container|Sized|Any|object)\b", note):
+                admit(tuple)
+            joined = bool(re.search(r"\||\b(Union|Optional)\b", note))
+            for word, kind in by_word.items():
+                if re.search(rf"\b{word}\b", note) \
+                        and (kind is tuple or joined):
+                    admit(kind)
+            return
+        origin = typing.get_origin(note) or note
+        if origin is typing.Union or isinstance(note, types.UnionType):
+            for inner in typing.get_args(note):
+                read(inner, True)
+            return
+        if origin is typing.Annotated:
+            read(typing.get_args(note)[0], member)
+            return
+        if (note is inspect.Parameter.empty or origin is tuple
+                or origin in (typing.Any, object)
+                or origin in (_abc.Sequence, _abc.Collection,
+                              _abc.Iterable, _abc.Reversible,
+                              _abc.Container, _abc.Sized)):
+            admit(tuple)
+        elif member and origin in others:
+            admit(origin)
+
+    read(annotation, False)
+    return [first, *((others[kind][0], f"{target} = {others[kind][1]}")
+                     for kind in others if kind in admitted)]
+
+
 def _realised(fn, facts, target: str, cells: list, cj=None):
     """A container of `cells` for `target`, through its runtime type: a
     float numpy array, a float pandas or polars Series (an int one when
@@ -2366,14 +2659,16 @@ def _empty_outcome(out, declared: "str | None") -> "str | None":
 
 def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                  trials: int):
-    """Empirical half of is_empty_safe[xs]: call fn with the empty
-    container, realised through the parameter's runtime type, then a
-    single-element and a longer one (every other parameter freshly
-    sampled). At the empty input a raise behind a recognized emptiness
-    guard passes, an unguarded raise fails, a finite value passes, a
-    hole fails, and a None fails unless the return type declares it. A
-    raise or non-finite result on the non-empty inputs fails outright.
-    The row says what f did at the empty input."""
+    """Empirical half of is_empty_safe[xs]: call fn with every empty
+    input the parameter admits (`_empty_values`: the empty container
+    realised through its runtime type, and the empty tuple beside the
+    empty list for a plain sequence), then a single-element and a
+    longer one (every other parameter freshly sampled). At an empty
+    input a raise behind a recognized emptiness guard passes, an
+    unguarded raise fails, a finite value passes, a hole fails, and a
+    None fails unless the return type declares it. What f does on a
+    non-empty input says nothing about the empty one and never fails
+    the claim. The row says what f did at the empty input."""
     from ._missing_words import declared_optional_return, value_shown
     from .hazards import _emptiness_guard_params
     target = cj.lhs
@@ -2381,9 +2676,10 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
         return None
     guarded = target in _emptiness_guard_params(facts)
     declared = declared_optional_return(fn)
-    shapes = ("empty", "single", "longer")
+    empties = _empty_values(fn, facts, target, cj)
+    shapes = ("empty", "single", "longer") + tuple(
+        f"empty:{i}" for i in range(1, len(empties)))
     state: dict = {"idx": 0, "said": None}
-    empty, shown = _empty_value(fn, facts, target, cj)
 
     element = (_typed_element_draw(fn, target, None, rng)
                or (lambda: rng.uniform(-10, 10)))
@@ -2391,24 +2687,30 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
     def trial(args):
         shape = shapes[state["idx"] % len(shapes)]
         state["idx"] += 1
-        cells = ([] if shape == "empty"
+        empty_at = (0 if shape == "empty" else int(shape.split(":")[1])
+                    if shape.startswith("empty:") else None)
+        cells = ([] if empty_at is not None
                  else [element()] if shape == "single"
                  else [element() for _ in range(5)])
-        value = empty if shape == "empty" else _realised(fn, facts, target, cells, cj)
+        if empty_at is not None:
+            value, shown = empties[empty_at]
+        else:
+            value = _realised(fn, facts, target, cells, cj)
         try:
             with _pinned_float_env():
                 out = _call_with_target(fn, facts, target, args, value)
         except Exception as exc:
             name = type(exc).__name__
-            if shape == "empty":
+            if empty_at is not None:
                 if guarded:
                     state["said"] = state["said"] or f"{shown}: f raised {name} behind a guard"
                     return True   # deliberate rejection
                 return (f"{shown}: f raised {name} with no guard for the empty input; "
                         f"guard it (`if not {target}: raise ValueError(...)`) so the "
                         f"raise is deliberate, or return a value")
-            return (f"{target} = {cells!r} raised {name}")
-        if shape == "empty":
+            # a non-empty input is no case of the empty one
+            return True
+        if empty_at is not None:
             why = _empty_outcome(out, declared)
             if why is not None:
                 return f"{shown}: {why}"
@@ -2416,12 +2718,6 @@ def _empty_probe(fn, facts, cj, domain: dict, rng: random.Random,
                 f"{shown}: f returned None, as its return type {declared} declares"
                 if out is None else f"{shown}: f returned {value_shown(out)}")
             return True
-        try:
-            as_float = float(out)
-        except (TypeError, ValueError):
-            return True
-        if as_float != as_float or math.isinf(as_float):
-            return (f"{target} = {cells!r} returned {out!r}")
         return True
 
     result = _probe_trials(fn, facts, target, domain, rng,

@@ -136,12 +136,11 @@ def test_brute_force_never_trusts_a_body_whose_helper_writes_state():
     assert p.route != "derive:brute_force", (p.verdict, p.route)
 
 
-def test_a_write_in_a_branch_the_domain_never_reaches_still_falsifies():
+def test_a_write_in_unreachable_code_over_the_domain_is_proven_state_safe():
     p = _row(ex.dead_branch, "for x in [0, 5], is_state_safe(f)")
-    assert (p.verdict, p.route) == ("falsified", "examine"), (p.verdict, p.note)
-    assert "changes os.environ" in p.counterexample
-    assert ("the branch it sits in cannot run over the domain "
-            "(x > 10 never holds there)") in p.counterexample, p.counterexample
+    assert (p.verdict, p.route) == ("proven", "examine"), (p.verdict, p.note)
+    assert ("is unreachable code over the domain (`x > 10` holds nowhere in [0, 5]"
+            ) in p.sketch, p.sketch
 
 
 def test_a_write_in_a_branch_the_domain_reaches_carries_no_dead_branch_note():
@@ -150,11 +149,10 @@ def test_a_write_in_a_branch_the_domain_reaches_carries_no_dead_branch_note():
     assert "cannot run" not in p.counterexample, p.counterexample
 
 
-def test_the_else_of_a_branch_the_domain_always_takes_is_named_as_dead():
+def test_the_else_a_missing_value_takes_is_reachable():
     p = _row(ex.dead_else, "for x in [0, 5], is_state_safe(f)")
     assert p.verdict == "falsified"
-    assert "not (x < 10) never holds there" in p.counterexample, \
-        p.counterexample
+    assert "unreachable" not in p.counterexample, p.counterexample
 
 
 def test_a_helper_filling_a_list_the_call_made_is_no_write():

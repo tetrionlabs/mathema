@@ -122,6 +122,217 @@ def _inferred_literal_domain(text: str, sig_params: list) -> dict:
     return inferred
 
 
+def _constant_float(node) -> "float | None":
+    """Intent:
+        The float an argument written without any variable holds: a
+        number, `nan`, `inf` (bare or as `math.nan`, `np.inf`),
+        `float("nan")`, and `+`, `-`, `*`, `/` of these in float
+        arithmetic (`inf - inf` is nan). None for anything else.
+    """
+    if isinstance(node, ast.Constant):
+        if type(node.value) in (int, float):
+            try:
+                return float(node.value)
+            except OverflowError:
+                return None
+        return None
+    if isinstance(node, ast.Name) and node.id in ("nan", "inf"):
+        return float(node.id)
+    if isinstance(node, ast.Attribute) and node.attr in ("nan", "inf") \
+            and isinstance(node.value, ast.Name):
+        return float(node.attr)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == "float" and len(node.args) == 1 \
+            and not node.keywords and isinstance(node.args[0], ast.Constant) \
+            and isinstance(node.args[0].value, str):
+        try:
+            return float(node.args[0].value)
+        except ValueError:
+            return None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op,
+                                                    (ast.USub, ast.UAdd)):
+        inner = _constant_float(node.operand)
+        if inner is None:
+            return None
+        return -inner if isinstance(node.op, ast.USub) else inner
+    if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+        left, right = _constant_float(node.left), _constant_float(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            return {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+                    ast.Mult: lambda a, b: a * b,
+                    ast.Div: lambda a, b: a / b}[type(node.op)](left, right)
+        except (ZeroDivisionError, OverflowError):
+            return None
+    return None
+
+
+def _passes_nan(node) -> bool:
+    """Whether an argument written without any variable is nan."""
+    value = _constant_float(node)
+    return value is not None and value != value
+
+
+def _non_real_literal_args(text: str) -> list:
+    """Intent:
+        The source of every argument of an `f(...)` call in `text`, by
+        position or keyword, that is the literal `None` or `...`, or is
+        nan as written (`nan`, `float("nan")`, `inf - inf`). Derive
+        reads each argument as a real symbol, so a call passing one of
+        these is a call derive does not model.
+    """
+    try:
+        tree = ast.parse(text or "0", mode="eval")
+    except SyntaxError:
+        return []
+    found: list = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        for arg in [*node.args, *(k.value for k in node.keywords)]:
+            if isinstance(arg, ast.Constant) and (
+                    arg.value is None or arg.value is Ellipsis):
+                found.append(ast.unparse(arg))
+            elif _passes_nan(arg):
+                found.append(ast.unparse(arg))
+    return found
+
+
+def _passes_a_named_value(node) -> bool:
+    """Whether an argument is the literal `None`, or nan as written."""
+    return (isinstance(node, ast.Constant) and node.value is None
+            or _passes_nan(node))
+
+
+def _named_value_arguments(text: str, params: list) -> "dict | None":
+    """Intent:
+        How the `f(...)` calls in `text` pass `None` or nan as written:
+        `{param: [every argument some call passes for it]}` for each
+        parameter some call passes one of them to. None when a call
+        passes `...`, passes an argument where no named parameter takes
+        it, or stars its arguments.
+    """
+    try:
+        tree = ast.parse(text or "0", mode="eval")
+    except SyntaxError:
+        return None
+    passed: dict = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "f"):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) \
+                or any(k.arg is None for k in node.keywords):
+            return None
+        pairs = [*zip(params, node.args),
+                 *((k.arg, k.value) for k in node.keywords)]
+        if len(node.args) > len(params):
+            return None
+        for p, arg in pairs:
+            if isinstance(arg, ast.Constant) and arg.value is Ellipsis:
+                return None
+            if p not in params:
+                return None
+            passed.setdefault(p, []).append(arg)
+    return {p: args for p, args in passed.items()
+            if any(_passes_a_named_value(a) for a in args)}
+
+
+def _never_reads(fn, facts, param: str) -> bool:
+    """Intent:
+        Whether the source shows `fn`'s result cannot depend on what is
+        passed for `param`: `fn` is a plain function with no wrapper
+        and no decorator, `param` is an ordinary named parameter, its
+        name appears nowhere in the body or in a default, and the body
+        names none of `locals`, `vars`, `eval`, `exec`, `globals`,
+        `dir`.
+    """
+    from ._examine import _project_source
+    if not inspect.isfunction(fn) or hasattr(fn, "__wrapped__") \
+            or getattr(fn, "__mathema_facts__", None) is not None:
+        return False
+    try:
+        tree = _project_source(fn)
+    except Exception:
+        return False
+    if not isinstance(tree, ast.FunctionDef) or tree.decorator_list:
+        return False
+    named = {a.arg for a in (*tree.args.posonlyargs, *tree.args.args,
+                             *tree.args.kwonlyargs)}
+    if param not in named or param not in (facts.params or ()):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in (
+                param, "locals", "vars", "eval", "exec", "globals", "dir"):
+            return False
+        if isinstance(node, (ast.Global, ast.Nonlocal)) \
+                and param in node.names:
+            return False
+    return True
+
+
+def _named_value_call(ctx: "_ClaimContext", fn, facts, assumption, statement,
+                      note):
+    """Intent:
+        The exact reading of a claim whose calls pass `None` or nan as
+        written, a named value and not a real number. "unread" when
+        every parameter given one is a parameter the function never
+        reads (`_never_reads`): the result does not depend on it, and
+        derive reads the rest of the claim as it does any other. A
+        proven row when the claim binds a finite domain and visiting
+        every point of it, each call run with the named value passed as
+        itself (`_brute_force.brute_force_proof`), proves it. None
+        otherwise: a call passing `...`, a claim over other functions,
+        a literal with more digits than a double carries, or a sweep
+        that does not prove it, which the probe decides.
+    """
+    cj = ctx.cj
+    if ctx.extra or cj.negated or overlong_literals(cj.raw or ""):
+        return None
+    passed: dict = {}
+    for text in (cj.lhs, cj.rhs or ""):
+        found = _named_value_arguments(text, list(facts.params))
+        if found is None:
+            return None
+        for p, args in found.items():
+            passed.setdefault(p, []).extend(args)
+    if not passed:
+        return None
+    family = ctx.family
+    if family is not None and family.routes().get("derive") is not None:
+        return None
+    if cj.relation in routes.examine_predicates() or cj.relation == "raises":
+        return None
+    if all(all(_passes_a_named_value(a) for a in args)
+           and _never_reads(fn, facts, p)
+           for p, args in passed.items()):
+        return "unread"
+    from ._brute_force import brute_force_proof
+    from ._timeout import EXTENSIVE_TIMEOUT_SECONDS, _with_timeout
+    from .runtime_types import calling
+    try:
+        swept = _with_timeout(
+            lambda: brute_force_proof(cj, calling(fn, facts), facts,
+                                      ctx.cj_domain or {}, {},
+                                      assumption=assumption or [],
+                                      resolution=ctx.missing),
+            EXTENSIVE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return None
+    if swept is None or swept.status != "proven":
+        return None
+    mechanism = swept.meta.get("mathema.derive_route", "brute_force")
+    capped = mechanism.endswith(":within_float64")
+    return Probe(cj.name, statement, "proven", sketch=swept.sketch,
+                 note=(f"{note}; {swept.sketch}".lstrip("; ")
+                       if capped else note),
+                 condition=swept.quantifier, route=f"derive:{mechanism}",
+                 meta=_provenance_meta(swept))
+
+
 def _names_in_text(text: str) -> set:
     """The bare names a claim expression reads (its variables, not the
     functions it calls)."""
@@ -137,8 +348,9 @@ def _names_in_text(text: str) -> set:
 
 def _literal_call_args(text: str, sig_params: list,
                        varied: "set | None" = None) -> dict:
-    """`{param: value}` for every `f(...)` call argument that is a plain
-    literal at a real parameter's position: the call passes that value
+    """`{param: value}` for every `f(...)` call argument, by position or
+    keyword, that is a plain literal (or nan as written) for a real
+    parameter: the call passes that value
     verbatim, so the parameter is FIXED to it, not synthesized. Unlike
     `_inferred_literal_domain` (numeric only, for branch pruning), this
     keeps every literal kind (a string `"nope"`, a `True`, a number, a
@@ -158,9 +370,13 @@ def _literal_call_args(text: str, sig_params: list,
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "f"):
             continue
-        for p, arg in zip(sig_params, node.args):
+        for p, arg in [*zip(sig_params, node.args),
+                       *((k.arg, k.value) for k in node.keywords
+                         if k.arg in sig_params)]:
             if isinstance(arg, ast.Constant):
                 fixed[p] = arg.value
+            elif _passes_nan(arg):
+                fixed[p] = math.nan
             elif isinstance(arg, (ast.List, ast.Tuple)):
                 # a literal container (`f([])`, `f([1.0, 2.0])`) passes
                 # that container verbatim
@@ -6852,6 +7068,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         # family-owned name reaches the family's own empirical
         # technique rather than the generic sampling loop
         ctx.family = _claim_family(cj, fn, facts)
+        refused_at = _named_point_refused(ctx, fn, facts, statement)
+        if refused_at is not None:
+            out.append(stamp(refused_at))
+            continue
         from . import _premises
         from .types import shapes_from_signature
         not_read = _premises.pinned_container_words(
@@ -8258,6 +8478,123 @@ def _bound_funcs_of(cj) -> dict:
         return {}
 
 
+def _claim_side_has_exact_value(code_l, code_r, env: dict,
+                                callees: dict) -> "bool | None":
+    """Intent:
+        Whether the claim's sides have a value at the point `env` when
+        read exactly: every number of the point and every result of a
+        callee in `callees` read as the exact rational it holds, and the
+        claim's own functions (`exp`, `log`, ...) as sympy's over the
+        reals. True when each side is a finite real number there; False
+        when a side divides by zero, leaves the reals at any step or is
+        not finite in that reading; None when it cannot be read so (a
+        value or function with no exact reading).
+    """
+    import sympy
+
+    from ._math_vocab import _MATH_ATTRS, _SYMPY_FUNCS
+
+    class _NoReading(Exception):
+        pass
+
+    class _NotReal(Exception):
+        pass
+
+    def real_only(function):
+        # the claim's functions are the real ones: `log(-1)`, `sqrt(-1)`
+        # and a negative number to a fractional power have no value
+        def call(*args):
+            out = function(*args)
+            if isinstance(out, sympy.Basic):
+                if out.is_extended_real is False:
+                    raise _NotReal
+                if out.is_extended_real is None:
+                    raise _NoReading
+            return out
+        return call
+
+    def exact(value):
+        if isinstance(value, bool):
+            raise _NoReading
+        if isinstance(value, int):
+            return sympy.Integer(value)
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise _NoReading
+            return sympy.Rational(value)
+        raise _NoReading
+
+    def read_callee(callee):
+        def call_exactly(*args):
+            floats = [float(a) if isinstance(a, sympy.Basic) else a
+                      for a in args]
+            return exact(callee(*floats))
+        return call_exactly
+
+    scope: dict = {}
+    for name, value in env.items():
+        if name == "__builtins__":
+            continue
+        if name in callees:
+            continue
+        if name in _SYMPY_FUNCS:
+            scope[name] = real_only(_SYMPY_FUNCS[name])
+        elif name in _MATH_ATTRS:
+            scope[name] = _MATH_ATTRS[name]
+        elif callable(value) or (isinstance(value, float)
+                                 and not math.isfinite(value)):
+            # a word the claim may not read; read, it has no exact value
+            continue
+        else:
+            try:
+                scope[name] = exact(value)
+            except _NoReading:
+                return None
+    for name, fn_ in _SYMPY_FUNCS.items():
+        scope.setdefault(name, real_only(fn_))
+    from ._linalg_eval import _OPERATORS, ARITH
+    # the claim's own arithmetic (`a / b` compiles to this word) on the
+    # exact values
+    scope[ARITH] = real_only(lambda op, a, b: _OPERATORS[op](a, b))
+    for name, callee in callees.items():
+        scope[name] = read_callee(callee)
+    try:
+        sides = [eval(code, {"__builtins__": {}}, scope)
+                 for code in (code_l, code_r) if code is not None]
+    except (ZeroDivisionError, _NotReal):
+        return False
+    except Exception:
+        return None
+    for side in sides:
+        if isinstance(side, (int, float)) and not isinstance(side, bool):
+            side = sympy.sympify(side)
+        if not isinstance(side, sympy.Basic) or not side.is_number:
+            return None
+        if side.has(sympy.zoo, sympy.nan, sympy.oo, -sympy.oo):
+            return False
+        if side.is_real is False:
+            return False
+        if side.is_finite is not True or side.is_real is not True:
+            return None
+    return True
+
+
+def _claim_side_valued_exactly(code_l, code_r, env: dict,
+                               callees: dict) -> bool:
+    """Intent:
+        `_claim_side_has_exact_value` under the fast wall-clock cap:
+        True only when the claim's sides are shown to have a finite
+        value at `env` read exactly.
+    """
+    from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    try:
+        return _with_timeout(
+            lambda: _claim_side_has_exact_value(code_l, code_r, env, callees),
+            FAST_TIMEOUT_SECONDS) is True
+    except TimeoutError:
+        return False
+
+
 def _exactly_decided(cj, code_l, code_r, env, callees, ok, *,
                      within: "float | None" = None, input_scaled: float = 0.0,
                      side: "int | None" = None):
@@ -8673,6 +9010,10 @@ def _claim_array_ranks(cj_domain: dict, fn, facts) -> dict:
             structures = structures_from_signature(fn)
         except Exception:
             shapes, structures = {}, {}
+    # a parameter the claim binds to numbers is a number, whatever its
+    # marker says of that number
+    structures = {p: props for p, props in structures.items()
+                  if not _binds_numbers((cj_domain or {}).get(p))}
     return linalg.array_ranks(cj_domain, shapes,
                               getattr(facts, "param_kinds", None),
                               structures)
@@ -9350,6 +9691,133 @@ def _admitted_scalar_points(ctx) -> list:
     return out
 
 
+def _an_ordinary_value(bound):
+    """Intent:
+        One value, not a missing one, that `bound` admits: a listed
+        member, an interval's closed end or midpoint, else 0, 1 or -1
+        when the bound admits it. `_NO_VALUE` when none of these is
+        admitted. An unbound parameter (`None`) reads over the reals, so
+        0.0.
+    """
+    from .domain import _as_domain, _Sentinel, domain_contains
+    if bound is None:
+        return 0.0
+    dom = _as_domain(bound)
+    candidates: list = []
+    for piece in dom.pieces:
+        if isinstance(piece, frozenset):
+            candidates += sorted((v for v in piece
+                                  if v is not None and not isinstance(v, _Sentinel)),
+                                 key=repr)
+        elif isinstance(piece, tuple) and len(piece) == 2:
+            lo, hi = piece
+            candidates += [lo, hi]
+            if all(isinstance(v, (int, float)) and math.isfinite(v)
+                   for v in (lo, hi)):
+                candidates.append((lo + hi) / 2)
+    candidates += [0.0, 1.0, -1.0]
+    for value in candidates:
+        if isinstance(value, float) and not math.isfinite(value):
+            continue
+        try:
+            if domain_contains(value, bound):
+                return value
+        except Exception:
+            continue
+    return _NO_VALUE
+
+
+_NO_VALUE = object()
+
+
+def _all_plain_scalars(facts, cj_domain: dict) -> bool:
+    """Whether every parameter is a single value: none is read as a
+    sequence, a table or a matrix, and no bound gives one a shape."""
+    from .domain import _as_domain
+    kinds = getattr(facts, "param_kinds", None) or {}
+    for p in facts.params:
+        if kinds.get(p, "scalar") not in ("scalar", "unknown"):
+            return False
+        bound = (cj_domain or {}).get(p)
+        try:
+            if bound is not None and getattr(_as_domain(bound), "dims", ()):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _definedness_at_listed_missing(ctx, fn, facts, cj_domain: dict, proof):
+    """Intent:
+        A proven `is_defined`, or an undecided one with no premise over
+        single-valued parameters, checked at every missing value its
+        domain lists (`{1, None}`, `[0, 1] | absent`, `{nan}`):
+        the body's raise region is read over the real numbers, so each
+        listed value is run, every other parameter at one ordinary value
+        of its domain. `disproven` with the first raising call as an
+        executed witness. Otherwise an undecided `proof` comes back
+        unchanged, and a proven one unchanged when nothing is listed,
+        saying each listed value returned when every call returns, and
+        `undecided` when a listed value cannot be run because some other
+        parameter has no ordinary value to call it with.
+    """
+    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _member_sort_key,
+                         _set_sentinels, realise_sentinel)
+    from .gates import _fmt_point
+    from .runtime_types import calling
+    from .symbolic._proof_support import ProofResult
+    listed: dict = {}
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        dom = _as_domain(bound)
+        sentinels = set(_set_sentinels(dom))
+        if dom.absent:
+            sentinels.add(ABSENT)
+        if not sentinels:
+            continue
+        policy = ctx.missing.get(p, NO_ANNOTATION)
+        listed[p] = [v for s in sorted(sentinels, key=_member_sort_key)
+                     for v in realise_sentinel(s, policy.members, policy.absence)]
+    if not listed:
+        return proof
+    base = {p: _an_ordinary_value((cj_domain or {}).get(p)) for p in facts.params}
+    run = calling(fn, facts, _declared_elements(cj_domain))
+    from ._brute_force import _raised_at
+    for p, values in listed.items():
+        others = [q for q in facts.params if q != p and base[q] is _NO_VALUE]
+        if others and proof.status != "proven":
+            return proof
+        if others:
+            return ProofResult(
+                "undecided",
+                sketch=(f"is_defined: the domain lists missing values for "  # :draft
+                        f"{p}, and no ordinary value of {', '.join(others)} "
+                        f"was found to run them with"))
+        for value in values:
+            point = {**base, p: value}
+            raised = _raised_at(run, facts, point)
+            if raised is not None:
+                where = _fmt_point(point, list(facts.params))
+                return ProofResult(
+                    "disproven",
+                    sketch=(f"is_defined: the listed value {p} = {value!r} "  # :draft
+                            f"was run, and f raised {raised}"),
+                    counterexample=f"{where}: raised {raised}",
+                    meta={"mathema.corroboration": "reproduced",
+                          "mathema.witness_executed": True})
+    if proof.status != "proven":
+        return proof
+    shown = ", ".join(f"{p} = {v!r}" for p, vs in listed.items() for v in vs)
+    return ProofResult(
+        proof.status,
+        sketch=(f"{proof.sketch}; f returned at each listed missing "  # :draft
+                f"value, run ({shown})"),
+        counterexample=proof.counterexample, quantifier=proof.quantifier,
+        meta=dict(proof.meta or {}))
+
+
 def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                            assumption, statement: str, note: str) -> "Probe | None":
     """Intent:
@@ -9732,6 +10200,153 @@ def _set_element(bound) -> "str | None":
         if values and all(isinstance(v, cls) for v in values):
             return name
     return None
+
+
+def _named_infinite_points(cj) -> list:
+    """Intent:
+        The infinite points a claim names, as (parameter, value): an
+        infinite member of a finite set it binds (`{0, inf}`), and an
+        infinite closed end of an interval it writes (`[0, oo]`). An
+        open end (`[0, oo)`) names no point, nor does a space of
+        vectors or matrices or a language.
+    """
+    from .domain import _as_domain
+
+    def infinite(v) -> bool:
+        return isinstance(v, float) and math.isinf(v)
+
+    named: list = []
+    for p, bound in (cj.domain or {}).items():
+        if isinstance(bound, list):
+            bound = tuple(bound)
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            continue
+        if dom.dims or dom.base_type == "L":
+            continue
+        for piece in dom.pieces:
+            if isinstance(piece, frozenset):
+                values = sorted(v for v in piece if infinite(v))
+            elif isinstance(piece, tuple) and len(piece) == 2:
+                values = [v for v, closed in (
+                    (piece[0], getattr(piece, "closed_lo", True)),
+                    (piece[1], getattr(piece, "closed_hi", True)))
+                    if closed and infinite(v)]
+            else:
+                values = []
+            named += [(p, v) for v in values
+                      if v not in dom.excluded and (p, v) not in named]
+    return named
+
+
+def _named_point_refused(ctx: "_ClaimContext", fn, facts,
+                         statement: str) -> "Probe | None":
+    """Intent:
+        The falsified row of a value claim that names an infinite point
+        (`_named_infinite_points`) at which the function's own guard
+        refuses the call, or None. The draws stand a finite reach in
+        for an infinite end, so the named point itself is called here:
+        a raise there by a `raise` of f's own body or by a mathema
+        guard around it is the witness, with the exception named.
+
+    Notes:
+        Read only for a comparison with no premise, whose every call of
+        f passes each parameter as itself; the other parameters take an
+        ordinary value of their bounds. A call that returns, or raises
+        from anything else, is left to the claim's ordinary reading.
+    """
+    from ._examine import _MATHEMA_DIR
+    from .gates import _fmt_point
+    from .runtime_types import calling
+    cj = ctx.cj
+    if (ctx.family is not None or cj.relation not in _COMPARISON_RELATIONS
+            or cj.negated or cj.links or ctx.extra or ctx.assumption
+            or ctx.assume_defined):
+        return None
+    named = _named_infinite_points(cj)
+    params = list(facts.params)
+    if not named or not params:
+        return None
+    calls = 0
+    for text in (cj.lhs, cj.rhs or "0"):
+        try:
+            tree = ast.parse(text, mode="eval")
+        except SyntaxError:
+            return None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id == "f":
+                calls += 1
+                if node.keywords or [getattr(a, "id", None)
+                                     for a in node.args] != params:
+                    return None
+    if not calls:
+        return None
+    run = calling(fn, facts, _declared_elements(ctx.cj_domain))
+    for p, value in named:
+        if p not in params:
+            continue
+        point = {q: value if q == p
+                 else _an_ordinary_value((ctx.cj_domain or {}).get(q))
+                 for q in params}
+        if any(v is _NO_VALUE for v in point.values()):
+            continue
+        try:
+            run(*[point[q] for q in params])
+        except Exception as exc:
+            tb = exc.__traceback__
+            while tb is not None and tb.tb_next is not None:
+                tb = tb.tb_next
+            raised_in = os.path.abspath(tb.tb_frame.f_code.co_filename) \
+                if tb is not None else ""
+            if not (deliberate_raise(exc, fn)
+                    or raised_in.startswith(_MATHEMA_DIR + os.sep)):
+                continue
+            where = _fmt_point(point, params)
+            name = _exits.exception_name(exc)
+            return Probe(
+                cj.name, statement, "falsified", route="probe",
+                counterexample=(f"{where}: raised {name}, at a point the "  # :draft
+                                f"claim names and f's own guard refuses"),
+                note=ctx.note,
+                meta={"mathema.corroboration": "reproduced",
+                      "mathema.witness_executed": True})
+    return None
+
+
+def _binds_numbers(bound) -> bool:
+    """Intent:
+        Whether a claim's binding of one parameter is a set of numbers:
+        a real interval, a finite set that lists a number, or R, Z or N
+        with no dimensions. False for no binding (a parameter read over
+        its undeclared reach included), a space of vectors or matrices
+        (`R^n`, `R^(n,n)`), and a language.
+    """
+    from .domain import _as_domain, is_sentinel
+    if bound is None or getattr(bound, "bare", False):
+        return False
+    if isinstance(bound, list):
+        bound = tuple(bound)
+    try:
+        dom = _as_domain(bound)
+    except Exception:
+        return False
+    if dom.dims or dom.base_type not in ("R", "Z", "N"):
+        return False
+
+    def number(v) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    for piece in dom.pieces:
+        if isinstance(piece, frozenset):
+            members = [v for v in piece if not is_sentinel(v)]
+            if not all(number(v) for v in members):
+                return False
+        elif not (isinstance(piece, tuple) and len(piece) == 2
+                  and all(number(v) for v in piece)):
+            return False
+    return bool(dom.pieces) or dom.explicit_type or isinstance(bound, str)
 
 
 def _declared_elements(cj_domain) -> dict:
@@ -10451,6 +11066,633 @@ def replace_proof(proof, status: str, sketch: str):
                        quantifier=proof.quantifier, meta=dict(proof.meta))
 
 
+def _executed_disproof(proof) -> bool:
+    """Whether a disproof's witness is a call that ran: the only
+    disproof a negation is proven from."""
+    return bool((proof.meta or {}).get("mathema.witness_executed"))
+
+
+def _unexecuted_negation(proof):
+    """Intent:
+        The not-form of a claim whose positive was disproven without an
+        executed witness (a line read from the source, which may sit in
+        a branch no call reaches): undecided, saying so, never proven.
+    """
+    from .symbolic._proof_support import ProofResult
+    return ProofResult(
+        "undecided",
+        sketch=("the positive claim is falsified only from the source, "  # :draft
+                "and that line was not executed, so its negation is not "
+                "proven: " + (proof.counterexample or proof.sketch or "")),
+        meta=dict(proof.meta or {}))
+
+
+def _witness_points(facts, cj_domain: dict, tests=()) -> list:
+    """The points of `_witness_search`, without what it says of the
+    budget."""
+    return _witness_search(facts, cj_domain, tests)[0]
+
+
+def _witness_search(facts, cj_domain: dict, tests=()) -> tuple:
+    """Intent:
+        `(points, short)`: a few points of the claim's domain to look
+        for a witness at, in this order: every parameter at its bound's
+        upper end, at its lower end, at its midpoint, and at one
+        ordinary value (`_an_ordinary_value`), a parameter with no
+        interval at its ordinary value throughout; then, for each
+        number an `if` test in `tests` (sources) compares a parameter
+        with (in a chained comparison, each number in the chain), that
+        parameter at the number and at the float on each side of it,
+        and for a bound over the integers at the integers around it,
+        and for a bound that lists numbers at the listed numbers nearest
+        it on each side, where its bound admits them; then each
+        parameter at each
+        missing value its bound admits (`domain.admitted`, realised:
+        nan, None); then, for a bound over the integers, at a few small
+        integers it admits; then each parameter at every number its
+        bound lists (the members of a finite set), in order. No more
+        than `WITNESS_POINTS` points. `short` is None when every point
+        of that order is among them, else `(members tried, members
+        listed, points in the order)`: the budget was reached. Empty
+        points when some parameter has no ordinary value.
+
+    Notes:
+        A parameter over the integers has an integer for its ordinary
+        value: the first of 0, 1, -1 its bound admits.
+    """
+    import itertools
+    from .domain import (ABSENT, _as_domain, _Sentinel, admitted,
+                         domain_contains, realise_sentinel)
+
+    def inside(value, bound) -> bool:
+        try:
+            return bound is None or bool(domain_contains(value, bound))
+        except Exception:
+            return False
+
+    def over_integers(bound) -> bool:
+        try:
+            return bound is not None and \
+                _as_domain(bound).base_type in ("Z", "N")
+        except Exception:
+            return False
+
+    def key(point: dict) -> tuple:
+        def one(v):
+            if type(v) in (int, float) and v == v:
+                try:
+                    return ("number", float(v))
+                except OverflowError:
+                    return ("number", repr(v))
+            return (type(v).__name__, repr(v))
+        return tuple((k, one(point[k])) for k in sorted(point))
+
+    base = {p: _an_ordinary_value((cj_domain or {}).get(p))
+            for p in facts.params}
+    for p, value in base.items():
+        bound = (cj_domain or {}).get(p)
+        if value is _NO_VALUE and over_integers(bound):
+            base[p] = next((k for k in (0, 1, -1) if inside(k, bound)),
+                           _NO_VALUE)
+    if any(v is _NO_VALUE for v in base.values()):
+        return [], None
+    points: list = []
+    seen: dict = {}
+    members = [0, 0]
+
+    def add(point: dict, member: bool = False) -> None:
+        found = key(point)
+        if found not in seen:
+            seen[found] = len(points)
+            points.append(point)
+        if member:
+            members[0] += seen[found] < WITNESS_POINTS
+            members[1] += 1
+
+    for pick in (lambda lo, hi: hi, lambda lo, hi: lo,
+                 lambda lo, hi: (lo + hi) / 2):
+        point = dict(base)
+        for p in facts.params:
+            bound = (cj_domain or {}).get(p)
+            if not (isinstance(bound, (list, tuple)) and len(bound) == 2
+                    and all(isinstance(b, (int, float)) and math.isfinite(b)
+                            for b in bound)):
+                continue
+            value = pick(*bound)
+            try:
+                if domain_contains(value, bound):
+                    point[p] = value
+            except Exception:
+                pass
+        add(point)
+    add(dict(base))
+    listed_of: dict = {}
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        try:
+            pieces = _as_domain(bound).pieces
+        except Exception:
+            pieces = ()
+        listed_of[p] = sorted(
+            (v for piece in pieces if isinstance(piece, frozenset)
+             for v in piece
+             if type(v) in (int, float) and not isinstance(v, _Sentinel)
+             and math.isfinite(v)), key=lambda v: (v, repr(v)))
+    for source in sorted(tests):
+        try:
+            tree = ast.parse(source, mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            sides = [node.left, *node.comparators]
+            for name, number in itertools.permutations(sides, 2):
+                if not (isinstance(name, ast.Name) and name.id in base
+                        and isinstance(number, ast.Constant)
+                        and type(number.value) in (int, float)
+                        and math.isfinite(number.value)):
+                    continue
+                at = float(number.value)
+                bound = (cj_domain or {}).get(name.id)
+                around = [math.nextafter(at, math.inf), at,
+                          math.nextafter(at, -math.inf)]
+                if over_integers(bound):
+                    around += [math.floor(at) + 1, math.ceil(at),
+                               math.floor(at), math.ceil(at) - 1]
+                listed = listed_of.get(name.id, [])
+                if listed:
+                    import bisect
+                    at_or_after = bisect.bisect_left(listed, at)
+                    after = bisect.bisect_right(listed, at)
+                    around += [listed[i] for i in (at_or_after - 1, after)
+                               if 0 <= i < len(listed)]
+                for value in around:
+                    if inside(value, bound):
+                        add({**base, name.id: value})
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        try:
+            absent, holes = admitted(bound)
+            missing = [v for s in ([ABSENT] if absent else []) + list(holes)
+                       for v in realise_sentinel(s)]
+        except Exception:
+            continue
+        for value in missing:
+            add({**base, p: value})
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None or not over_integers(bound):
+            continue
+        for value in (0, 1, -1, 2, -2):
+            if inside(value, bound):
+                add({**base, p: value})
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        for value in listed_of.get(p, []):
+            if inside(value, bound):
+                add({**base, p: value}, member=True)
+    short = (None if len(points) <= WITNESS_POINTS
+             else (members[0], members[1], len(points)))
+    return points[:WITNESS_POINTS], short
+
+
+# :draft how many points one witness search tries: a budget of calls
+WITNESS_POINTS = 24
+
+
+def _same_point(a: dict, b: dict) -> bool:
+    """Whether two points hold the same values, nan equal to nan."""
+    return a.keys() == b.keys() and all(
+        a[k] is b[k] or a[k] == b[k]
+        or (isinstance(a[k], float) and isinstance(b[k], float)
+            and a[k] != a[k] and b[k] != b[k])
+        for k in a)
+
+
+def _negation_witnessed(ctx, fn, facts, disproof=None):
+    """Intent:
+        The proof of `not is_state_safe(f)` or `not is_deterministic(f)`
+        by a witness that was run, a result that says why none could be
+        looked for, or None when none was found. Each claim says a call
+        exists: one after which a module-level value the examination
+        names as written has changed, or two calls with the same
+        arguments whose results differ. The calls are made in a child
+        process (`_contained.witness`) at a few points of the claim's
+        domain (`_witness_points`); the sketch names the point and what
+        changed, describes each value by its type and size and never
+        shows one, and says the child imported the module afresh.
+        Nothing in this process is called or changed.
+
+    Notes:
+        The function is run only when its examination read everything
+        and found no write other than to module-level values of its
+        project, draws from the shared random generator, items of
+        `os.environ`, text printed to standard output and an entry of
+        `sys.modules` assigned under a key written out, of each of
+        which the child has its own, so that the calls change nothing
+        outside the child. A call that raises has written what it wrote
+        before the raise, and returns no result to compare. A function
+        that writes anything else, or that no child can import, is not
+        called: `not is_state_safe(f)` is then read from the source
+        where it shows a call that writes (`_write_read_as_run`), a
+        function that opens a file for writing is undecided, saying
+        that file writers are not run, and a function no child can
+        import is undecided with the reason otherwise. An environment
+        variable is named only when the source writes its name out.
+    """
+    from . import _contained
+    from ._examine import _unwrapped, examine
+    from .claim_families import _generator_parameter
+    from .gates import _fmt_point
+    from .symbolic._proof_support import ProofResult
+    kind = getattr(ctx.family, "_base_name", None)
+    if kind not in ("is_state_safe", "is_deterministic"):
+        return None
+    effects = examine(fn, _generator_parameter(fn, facts)
+                      if kind == "is_state_safe" else None)
+    # an item of os.environ written is written in the child's own copy
+    in_environ = [site for site in effects.writes
+                  if " changes os.environ (" in site.text]
+    drawn = [site for site in effects.writes
+             if "the shared random generator" in site.text]
+    printed = [site for site in effects.writes
+               if site.text.endswith(" calls print(), which writes to "
+                                     "standard output")]
+    entered = {site: ast.literal_eval(found.group(1))
+               for site in effects.writes
+               if (found := re.search(
+                   r" changes sys\.modules \(sys\.modules\[('[^'\\]*'"
+                   r"|\"[^\"\\]*\")\] = \.\.\.\)$", site.text))}
+    runnable = not (effects.unknowns or effects.unknown_writes) and all(
+        "module-level" in site.text
+        or site in drawn or site in in_environ or site in printed
+        or site in entered
+        for site in effects.writes)
+    cj_domain = ctx.cj_domain or {}
+    names = list(facts.params)
+    meta = dict(getattr(disproof, "meta", None) or {})
+    why_not = _contained.not_importable(fn)
+    if why_not is not None or not runnable:
+        shown = (disproof.counterexample or disproof.sketch or ""
+                 if disproof is not None else "")
+        read = (_write_read_as_run(fn, facts, effects, cj_domain)
+                if kind == "is_state_safe" else None)
+        if read is not None:
+            what, conditions, point = read
+            if conditions:
+                under = " and ".join(
+                    f"`{source}`" if taken else f"`not ({source})`"
+                    for source, taken in conditions)
+                where = (f"under {under}, which holds at "
+                         f"{_fmt_point(point, names)} in the claim's domain")
+            else:
+                where = "which every call executes"
+            return ProofResult(
+                "proven",
+                sketch=("the positive claim is falsified, and that "
+                        "evidence proves the negation: " + shown
+                        + f"; read from the source and not run: f {what} "  # :draft
+                        f"as the first statement of its body, {where}"),
+                meta=meta)
+        if kind == "is_state_safe" and any(
+                site.text.endswith(" opens a file for writing")
+                for site in effects.writes):
+            return ProofResult(
+                "undecided",
+                sketch=("a file is opened for writing; whether it is "  # :draft
+                        "changed is not decided without running, and "
+                        "file writers are not run: " + shown),
+                meta=meta)
+        if why_not is None:
+            return None
+        return ProofResult(
+            "undecided",
+            sketch=(f"f cannot be run contained ({why_not}, so no child "  # :draft
+                    "process can import it), no call was run to witness "
+                    "the negation, and the positive claim is falsified "
+                    "only from the source: " + shown),
+            meta=meta)
+    points, short = _witness_search(facts, cj_domain, effects.own_tests)
+    if not points:
+        return None
+    watched = set(effects.module_writes)
+    own = _unwrapped(fn)
+    rebinds = f"{getattr(own, '__name__', '')} rebinds the module-level "
+    for site in effects.writes:
+        # `global n; n += 1` in f itself: the name is in f's own module
+        if site.text.startswith(rebinds) and getattr(own, "__module__", None):
+            watched.add((own.__module__, site.text[len(rebinds):]))
+    seen = _contained.witness(
+        fn, kind, [[point[p] for p in names] for point in points],
+        sorted(watched), _declared_elements(cj_domain),
+        environ=bool(in_environ), generators=bool(drawn),
+        stdout=bool(printed),
+        entries=({"sys.modules": sorted(set(entered.values()))}
+                 if entered else None))
+    if "failed" in seen or (not seen.get("seen") and seen.get("unread")):
+        return ProofResult(
+            "undecided",
+            sketch=("no witness of the negation was seen: "  # :draft
+                    + _shown(seen.get("failed") or seen.get("unread"), 240)),
+            meta=meta)
+    if not seen.get("seen") and short is not None:
+        tried, listed, ordered = short
+        searched = (f"{tried} of the {listed} members of the claim's set "
+                    f"were tried" if listed
+                    else f"{WITNESS_POINTS} of {ordered} points were tried")
+        return ProofResult(
+            "undecided",
+            sketch=(f"no witness of the negation was seen: the budget of "  # :draft
+                    f"{WITNESS_POINTS} points was reached before the "
+                    f"search was done, and {searched}"),
+            meta=meta)
+    ran = seen.get("ran")
+    if not seen.get("seen") and isinstance(ran, int) and ran > 0:
+        calls = f"{ran} point{'' if ran == 1 else 's'} of the claim's domain"
+        happened = ("the call was run at " + calls + ", and nothing "  # :draft
+                    "it holds changed"
+                    if kind == "is_state_safe" else
+                    "the call was run twice at " + calls + ", and the "  # :draft
+                    "two results did not differ")
+        return ProofResult(
+            "undecided",
+            sketch=("the positive claim is falsified only from the source, "  # :draft
+                    "and " + happened + ", so its negation is not proven: "
+                    + (disproof.counterexample or disproof.sketch or ""
+                       if disproof is not None else "")),
+            meta=meta)
+    try:
+        point = points[seen["point"]] if seen.get("seen") else None
+    except (IndexError, TypeError):
+        point = None
+    if point is None:
+        return None
+    where = _fmt_point(point, names) or "the call with no arguments"
+    ran = (f"the call at {where} was run in a child process that "  # :draft
+           f"imported f's module afresh, and ")
+    what = seen.get("seen")
+    if kind == "is_state_safe" and what == "write" \
+            and seen.get("name") in {name for _module, name in watched}:
+        said = ran + (f"the module-level {_shown(seen.get('name'))} "  # :draft
+                      f"changed ({_shown(seen.get('before'))} before it, "
+                      f"{_shown(seen.get('after'))} after it)")
+    elif kind == "is_state_safe" and what == "environ":
+        def length(n) -> str:
+            return ("not set" if not isinstance(n, int)
+                    else f"{n} character{'' if n == 1 else 's'} long")
+        name = str(seen.get("name"))
+        written_out = any(repr(name) in site.text or f'"{name}"' in site.text
+                          for site in in_environ)
+        variable = (f"the environment variable {_shown(name)}"
+                    if written_out else
+                    "an environment variable whose name the source does "  # :draft
+                    "not write out")
+        said = ran + (f"{variable} was "  # :draft
+                      f"{length(seen.get('before'))} before it and "
+                      f"{length(seen.get('after'))} after it")
+    elif kind == "is_state_safe" and what == "generator" \
+            and seen.get("name") in ("random", "numpy.random"):
+        said = ran + (f"the state of the shared random generator "  # :draft
+                      f"({_shown(seen.get('name'))}) changed")
+    elif kind == "is_state_safe" and what == "stdout" \
+            and isinstance(seen.get("count"), int):
+        count = seen["count"]
+        said = ran + (f"{count} character{'' if count == 1 else 's'} "  # :draft
+                      f"{'was' if count == 1 else 'were'} written to "
+                      f"standard output")
+    elif kind == "is_state_safe" and what == "entry" \
+            and seen.get("key") in entered.values():
+        said = ran + (f"sys.modules[{str(seen.get('key'))!r}] changed "  # :draft
+                      f"({_shown(seen.get('before'))} before it, "
+                      f"{_shown(seen.get('after'))} after it)")
+    elif kind == "is_deterministic" and what == "results":
+        said = (f"two calls at {where} were run in a child process that "  # :draft
+                f"imported f's module afresh, and returned two results "
+                f"that differ ({_shown(seen.get('first'))}, then "
+                f"{_shown(seen.get('second'))})")
+    else:
+        return None
+    return ProofResult(
+        "proven",
+        sketch=f"proven by a witness: {said}",  # :draft
+        meta={"mathema.corroboration": "reproduced",
+              "mathema.witness_executed": True})
+
+
+def _shown(text, limit: "int | None" = None) -> str:
+    """Words a child process sent back (a name, or a value described
+    by its type and size), as one line no longer than `limit`."""
+    from ._contained import SHOWN
+    limit = limit or SHOWN
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _write_read_as_run(fn, facts, effects, cj_domain) -> "tuple | None":
+    """Intent:
+        `(what, conditions, point)` when the source of `fn` shows a call
+        that writes outside it, else None. `what` says the write, a
+        recognised one (`_recognised_write`) that is the first statement
+        of the body, or the first statement of the branch of an `if`
+        that is itself first, at any depth. `conditions` are the tests
+        on the way to it, as (source, True for the body or False for the
+        else), and `point` is a point of the claim's domain
+        (`_witness_points`) at which every one of them is taken, None
+        when there are no conditions: the write runs on every call.
+
+    Notes:
+        Before the write only a docstring, `global`, `pass` and the
+        import of a standard-library module already loaded may stand:
+        none can raise or return. A test is read only in the form the
+        unreachable-code rule reads (`_literal_test_region`: one
+        parameter nothing binds again against numeric literals, joined
+        by `and`, `or`, `not`), in the function's own body; it is
+        evaluated at the point as Python evaluates it, a float or an
+        integer against a literal.
+    """
+    from ._examine import _project_source
+    from .claim_families import _literal_test_region
+    if not inspect.isfunction(fn) or hasattr(fn, "__wrapped__") \
+            or inspect.isgeneratorfunction(fn) \
+            or inspect.iscoroutinefunction(fn) \
+            or inspect.isasyncgenfunction(fn):
+        return None
+    try:
+        tree = _project_source(fn)
+    except Exception:
+        return None
+    if not isinstance(tree, ast.FunctionDef) or tree.decorator_list:
+        return None
+    modules: dict = {}
+    declared_global: set = set()
+
+    def first_of(body, top: bool = False):
+        body = list(body)
+        if top and body and isinstance(body[0], ast.Expr) \
+                and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            body = body[1:]
+        for stmt in body:
+            if isinstance(stmt, ast.Global):
+                declared_global.update(stmt.names)
+            # :draft the import of a loaded standard-library module is
+            # read as unable to raise
+            elif isinstance(stmt, ast.Import) and all(
+                    "." not in a.name and a.name in sys.stdlib_module_names
+                    and a.name in sys.modules for a in stmt.names):
+                for a in stmt.names:
+                    modules[a.asname or a.name] = sys.modules[a.name]
+            elif not isinstance(stmt, ast.Pass):
+                return stmt
+        return None
+
+    def found(body, conditions, top=False):
+        first = first_of(body, top)
+        if first is None:
+            return None
+        what = _recognised_write(first, fn, tree, modules, declared_global)
+        if what is not None:
+            return what, conditions
+        if not isinstance(first, ast.If):
+            return None
+        source = ast.unparse(first.test)
+        read = _literal_test_region(source)
+        if read is None or read[0] not in effects.fixed_params \
+                or source not in effects.own_tests \
+                or source in effects.nested_tests:
+            return None
+        return (found(first.body, [*conditions, (source, True, read[0])])
+                or found(first.orelse, [*conditions, (source, False, read[0])]))
+
+    got = found(tree.body, [], top=True)
+    if got is None:
+        return None
+    what, conditions = got
+    if not conditions:
+        return what, [], None
+    for point in _witness_points(facts, cj_domain, effects.own_tests):
+        try:
+            if all(type(point[name]) in (int, float)
+                   and bool(eval(compile(source, "<test>", "eval"),
+                                 {"__builtins__": {}},
+                                 {name: point[name]})) == taken
+                   for source, taken, name in conditions):
+                return what, [(s, t) for s, t, _n in conditions], point
+        except Exception:
+            continue
+    return None
+
+
+def _recognised_write(stmt, fn, tree, modules: dict,
+                      declared_global: set) -> "str | None":
+    """Intent:
+        What a statement writes outside the call, when it is one of the
+        writes read from the source: `NAME.append(arg)` on a
+        module-level list; `NAME += k` under `global NAME` for a
+        module-level integer and a non-zero integer literal `k`; and
+        `del os.environ["K"]` for a key set when it is read. Each
+        changes what it writes on every call that reaches it. None for
+        any other statement: `os.environ["K"] = "V"` changes nothing
+        when the variable already holds V, and `open(path, mode)`
+        changes a file only where the path can be written, neither of
+        which the source shows.
+
+    Notes:
+        `arg` is a parameter or a literal. A name is module-level when
+        nothing in the function binds it; `modules` holds the modules
+        the body's leading imports bind. Each value's type is the one
+        held when it is read.
+    """
+    import builtins
+    params = {a.arg for a in (*tree.args.posonlyargs, *tree.args.args,
+                              *tree.args.kwonlyargs)}
+    every = set(params)
+    for extra in (tree.args.vararg, tree.args.kwarg):
+        if extra is not None:
+            every.add(extra.arg)
+    stored = {node.id for node in ast.walk(tree)
+              if isinstance(node, ast.Name)
+              and isinstance(node.ctx, (ast.Store, ast.Del))}
+    bound = {node.name for node in ast.walk(tree) if node is not tree
+             and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef))}
+    imported = {(alias.asname or alias.name).split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.Import, ast.ImportFrom))
+                for alias in node.names}
+    scope = getattr(fn, "__globals__", None) or {}
+    free = set(getattr(fn.__code__, "co_freevars", ()))
+    missing = object()
+
+    def value_of(name: str):
+        """What a name read in the body holds: a leading import's
+        module, or the module-level value when nothing binds it."""
+        if name in modules and name not in stored and name not in every \
+                and name not in bound:
+            return modules[name]
+        if name in every or name in free or name in bound \
+                or name in imported or name in stored:
+            return missing
+        if name in scope:
+            return scope[name]
+        return getattr(builtins, name, missing)
+
+    def module_level(name: str) -> bool:
+        return (name in scope and name not in every and name not in free
+                and name not in bound and name not in imported)
+
+    def environ_item(target) -> "str | None":
+        if not (isinstance(target, ast.Subscript)
+                and isinstance(target.slice, ast.Constant)
+                and isinstance(target.slice.value, str)):
+            return None
+        holder = target.value
+        if isinstance(holder, ast.Attribute) and holder.attr == "environ" \
+                and isinstance(holder.value, ast.Name) \
+                and value_of(holder.value.id) is os:
+            return target.slice.value
+        if isinstance(holder, ast.Name) and value_of(holder.id) is os.environ:
+            return target.slice.value
+        return None
+
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+        call = stmt.value
+        target = call.func
+        if not (isinstance(target, ast.Attribute) and target.attr == "append"
+                and isinstance(target.value, ast.Name)
+                and len(call.args) == 1 and not call.keywords):
+            return None
+        name, arg = target.value.id, call.args[0]
+        if not module_level(name) or name in stored \
+                or name in declared_global or type(scope[name]) is not list:
+            return None
+        if (isinstance(arg, ast.Constant)
+                or isinstance(arg, ast.Name) and arg.id in params
+                and arg.id not in stored):
+            return f"appends to the module-level {name}"
+        return None
+    if isinstance(stmt, ast.AugAssign) and isinstance(stmt.op, ast.Add) \
+            and isinstance(stmt.target, ast.Name):
+        name, step = stmt.target.id, stmt.value
+        if (name in declared_global and module_level(name)
+                and type(scope[name]) is int
+                and isinstance(step, ast.Constant)
+                and type(step.value) is int and step.value != 0):
+            return f"adds to the module-level {name}"
+        return None
+    if isinstance(stmt, ast.Delete) and len(stmt.targets) == 1:
+        key = environ_item(stmt.targets[0])
+        if key is not None and key in os.environ:
+            return f"deletes os.environ[{key!r}]"
+        return None
+    return None
+
+
 def _provenance_meta(proof) -> dict:
     """Intent:
         The proof-mechanism provenance worth carrying onto the output
@@ -10489,6 +11731,7 @@ from .gates import (  # noqa: E402
     _float_companion as _float_companion,
     _fmt_point as _fmt_point,
     _point_evaluator as _point_evaluator,
+    passed_not_called as passed_not_called,
 )
 
 def _stmt_lines(nodes) -> set:
@@ -10573,6 +11816,9 @@ def _adjudicate_examined(ctx: "_ClaimContext", fn, facts) -> "Probe":
             proof = replace_proof(proof, "disproven",
                                   "the positive claim is proven, so its "
                                   "negation is falsified: " + (proof.sketch or ""))
+        elif proof.status == "disproven" and not _executed_disproof(proof):
+            proof = (_negation_witnessed(ctx, fn, facts, proof)
+                     or _unexecuted_negation(proof))
         elif proof.status == "disproven":
             proof = replace_proof(proof, "proven",
                                   "the positive claim is falsified, and that "
@@ -11962,6 +13208,22 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                   f"the body reads as a sequence").lstrip("; "),
             meta={"mathema.derive_status": "undecided"})
         return None
+    non_real = sorted(set(_non_real_literal_args(cj.lhs)
+                          + _non_real_literal_args(cj.rhs or "")))
+    named = (_named_value_call(ctx, fn, facts, assumption, statement, note)
+             if non_real else None)
+    if isinstance(named, Probe):
+        return named
+    if non_real and named != "unread":
+        # a call passing None is one concrete call that
+        # derive's real symbols do not model, so running it decides
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=(f"{note}; the claim calls f with {', '.join(non_real)}, "  # :draft
+                  f"which derive does not read as a real number, so the "
+                  f"call is run").lstrip("; "),
+            meta={"mathema.derive_status": "undecided"})
+        return None
     family_derive = family.routes().get("derive") if family is not None else None
     # literals a double does not read exactly reach only the ordinary
     # prover exactly (`exact_literal_text`); every other derive route
@@ -12009,6 +13271,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                                                 tolerance=cj.tolerance,
                                                 assumption=assumption)
                             if family_derive is not None else None)
+    if (family_proof is not None
+            and (family_proof.status == "proven"
+                 or family_proof.status == "undecided" and not assumption
+                 and _all_plain_scalars(facts, cj_domain))
+            and "is_defined" in (region_row_kind(cj.name), cj.relation)):
+        family_proof = _definedness_at_listed_missing(ctx, fn, facts,
+                                                      cj_domain, family_proof)
     if family_proof is not None and cj.negated:
         # the not-form: a decided positive claim decides its negation
         # the other way (the falsifying witness IS the proof); an
@@ -12017,6 +13286,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             family_proof = replace_proof(family_proof, "disproven",
                                          "the positive claim is proven, so its "
                                          "negation is falsified: " + (family_proof.sketch or ""))
+        elif (family_proof.status == "disproven"
+              and not _executed_disproof(family_proof)):
+            family_proof = _unexecuted_negation(family_proof)
         elif family_proof.status == "disproven":
             family_proof = replace_proof(family_proof, "proven",
                                          "the positive claim is falsified, and that "
@@ -13737,7 +15009,11 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a parameter's structure comes from its signature marker and from
     # an `assuming A is symmetric` premise; both narrow synthesis the
     # same way, the premise's set unioned onto the marker's
-    param_structures = dict(structures_from_signature(fn))
+    # a parameter the claim binds to numbers is drawn as a number: its
+    # marker then says something of that number, and names no matrix
+    param_structures = {p: props
+                        for p, props in structures_from_signature(fn).items()
+                        if not _binds_numbers((cj.domain or {}).get(p))}
     for _pp, _props in (ctx.premise_structures or {}).items():
         param_structures[_pp] = tuple(sorted(
             set(param_structures.get(_pp, ())) | set(_props)))
@@ -14073,7 +15349,8 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     # a witness names each argument the claim reads or passes, by name,
     # and each parameter held at its default or pin, the value it ran at
     arg_names, shown_names = _witness_labels(cj, kinds, cj_domain)
-    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins}
+    shown_names = (shown_names | {p for p in {**kept_defaults, **call_pins,
+                                              **literal_args}
                                   if p in kinds}
                    if shown_names is not None else None)
     table_columns = {p: _table_columns(p, cj, facts)
@@ -14246,6 +15523,10 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
     bound_tagged = {name: (f_call.wrap(_tagged(v, name)) if _is_under_test(v, fn)
                            else _tagged(v, name))
                     for name, v in bound_funcs.items()}
+    # a bound function the claim only passes as an argument is passed
+    # as the object the reference names
+    for name in passed_not_called(cj.lhs, cj.rhs, original_bound):
+        bound_tagged[name] = original_bound[name]
     # the lengths the samples inside the premise region actually had,
     # per sequence parameter, for the sampling note
     sequence_params = [p for p, k in kinds.items()
@@ -14568,6 +15849,28 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
                     cx = (f"{_point_text(args)}: the claim is false here, "
                           f"its own side read exactly as written")
                     break
+            if not call_raised[0] and claim_side_has_no_value(e) \
+                    and _claim_side_valued_exactly(
+                        code_l, code_r, env, {"f": fn_call, **bound_funcs}):
+                # the division by zero, or the argument outside a
+                # function's real domain, is the float evaluation's
+                # alone (an underflow to 0.0): read exactly, the claim's
+                # side has a value here, so the point is no
+                # counterexample and is left undecided
+                call_raised[0] = call_nan[0] = call_inf[0] = None
+                call_hole[0] = None
+                if undecided_at is None:
+                    undecided_at = (
+                        f"{_point_text(args)}: the claim's own "  # :draft
+                        f"side divided by a float that rounded "
+                        f"to zero, while read exactly it has a "
+                        f"value" if isinstance(e, ZeroDivisionError) else
+                        f"{_point_text(args)}: the claim's own "  # :draft
+                        f"side has no float value ({e}) because a float "
+                        f"before it rounded, while read exactly it has a "
+                        f"value")
+                undecided += 1
+                continue
             if not call_raised[0]:
                 if isinstance(e, (IndexError, ZeroDivisionError)):
                     # the claim's own expression has no value at this

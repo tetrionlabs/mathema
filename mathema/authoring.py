@@ -18,11 +18,26 @@ decorator or docstring claim without editing code.
 from __future__ import annotations
 
 import re
+import weakref
 
 from .analysis import _read_block
 from .conjecture import claim as _claim
 from .spec import declare as _declare
 from ._signatures import callable_signature
+
+#: the wrappers `enforce_domain` and `enforce_dimensions` built, which
+#: check every call before the body runs
+_ENFORCING_WRAPPERS: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def _built_by_enforcement(fn) -> bool:
+    """Whether `fn` is a wrapper `enforce_domain` or
+    `enforce_dimensions` built, so its own check rejects every call
+    outside the declared domain or shape before the body runs."""
+    try:
+        return fn in _ENFORCING_WRAPPERS
+    except TypeError:
+        return False
 
 
 def _fn_key(fn) -> str:
@@ -703,6 +718,7 @@ def enforce_domain(domain: dict | None = None, key: str | None = None,
             return fn(*args, **kwargs)
 
         wrapper.__mathema_enforced_domain__ = merged_domain
+        _ENFORCING_WRAPPERS.add(wrapper)
         if not policies:
             # the check the wrapper makes before calling `fn`, which then
             # returns as it is
@@ -1193,6 +1209,7 @@ def enforce_dimensions(key: str | None = None, root: str = "."):
         # never the draws the guard rejects
         wrapper.__mathema_enforced_dimensions__ = {
             p: dims for p, (dims, _source) in plan.params.items()}
+        _ENFORCING_WRAPPERS.add(wrapper)
         # the checks the wrapper makes before and after calling `fn`
         wrapper.__mathema_dimension_check__ = (entry, leave)
         _declare_exclusions(wrapper, fn, sorted(plan.params),

@@ -2556,6 +2556,21 @@ def _where(call: Call, p: str, member: str) -> str:
     return f"at {_at(call, p)}"
 
 
+#: verdicts from weakest to strongest, for a roll-up no stronger than
+#: the weakest row it rests on
+_VERDICT_STRENGTH = ("falsified", "unknown", "holds", "proven")
+
+
+def _weaker(current: str, *verdicts: str) -> str:
+    """The weakest of `current` and `verdicts` on `_VERDICT_STRENGTH`. A
+    row's own falsification reaches the gate as a failure with its
+    witness, so here it, and a verdict outside the scale (a skip),
+    counts as unknown."""
+    ranks = [_VERDICT_STRENGTH.index(v) if v in _VERDICT_STRENGTH[1:] else 1
+             for v in (current, *verdicts)]
+    return _VERDICT_STRENGTH[min(ranks)]
+
+
 def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
     """Intent:
         Adjudicate `is_missing_safe(f)` or `is_absent_safe(f)` (or one
@@ -2684,6 +2699,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                 behaviour, call = next(iter(ways.items()))
                 entry.update({"source": "stated", "behaviour": behaviour})
                 said.append(f"{m} {_did(call)}, stated")
+                weakest = _weaker(weakest, *(r.verdict for r in stated))
                 continue
             if premised or (library_here and any(pol.premise for pol in library_here)):
                 stated_pols = [q for q in (parse_policy(r.statement) for r in premised)
@@ -2714,6 +2730,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
                     continue
                 if stated_pols:
                     entry["source"] = "stated"
+                    weakest = _weaker(weakest, *(r.verdict for r in premised))
                     pieces = []
                     if rest:
                         pieces.append(f"{_library_words(rest)}, from "
@@ -2867,6 +2884,7 @@ def safety_gate(cj, fn, facts, domain: dict, stated_rows: list, guards: dict):
             if stated:
                 entry["source"] = "stated"
                 said.append(f"{m} {_did(call)}, stated")
+                weakest = _weaker(weakest, *(r.verdict for r in stated))
                 continue
             if behaviour == "raises":
                 row = _default_row(fn, path, kind, m, calls, "path", None, guards,

@@ -188,13 +188,14 @@ mathema.Record(mean_return) · source, no side effects · form py:8f26488fb001
     proven     policy       f([..., missing, ...]) assuming count(xs) >= 1   drops, from pandas.Series.mean's own policy row, which f calls
   proven    is_empty_safe[xs]: is_empty_safe(xs)
   holds     no_values: assuming count(xs) == 0, missing(f, xs) raises(ValueError)   [stated; confirmed on the 124 draws of bounded]
-  proven    is_missing_safe[f]: is_missing_safe(f)
+  holds     is_missing_safe[f]: is_missing_safe(f)
            xs (pandas.Series): nan, null and NA drop when values remain, from pandas.Series.mean's own policy row; raises ValueError when every slot is missing, stated
 ```
 
 Every member now has a policy the code follows, from pandas' row where
-values remain and from the stated one where none do, so the gate is
-proven; the empty series meets the guard, a deliberate rejection, so
+values remain and from the stated one where none do, so the gate
+holds: the stated row was confirmed by running it, which is evidence and
+not a proof; the empty series meets the guard, a deliberate rejection, so
 `is_empty_safe` is proven too. The value claim holds, and its headline
 with it: the policy lines under it are the empty series, which meets
 the guard, and pandas' row for a series with values in it, and the
