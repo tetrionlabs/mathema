@@ -3437,9 +3437,19 @@ def _strip_pinned_regions(assuming: str) -> str:
     from .conjecture import _split_top_and
     text = _re.sub(r"^assuming\s+", "", assuming.strip())
     masked, literals = mask_strings(text)
-    kept = [_re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=_re.DOTALL).strip()
-            for part in _split_top_and(masked)]
+    kept = [_before_region_arrow(part) for part in _split_top_and(masked)]
     return "assuming " + unmask_strings(" and ".join(k for k in kept if k), literals)
+
+
+def _before_region_arrow(part: str) -> str:
+    """Intent:
+        The text of one `assuming` conjunct before the first arrow
+        (`-->`, `=>` or `⟹`) that begins an advisory region, with
+        leading and trailing whitespace removed. A conjunct with no
+        arrow comes back stripped and otherwise unchanged.
+    """
+    import re as _re
+    return _re.sub(r"\s*(?:-->|=>|⟹).*$", "", part, flags=_re.DOTALL).strip()
 
 
 def fingerprint_text(cj) -> str:
