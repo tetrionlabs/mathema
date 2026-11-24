@@ -321,8 +321,8 @@ class Record:
                 detail = "; ".join(t for t in (p.condition, missing.get("means")) if t)
                 if detail:
                     line += f"\n           {detail}"
-                # a definition the proof rests on whose corroboration
-                # record does not show every value compared and agreeing
+                # a definition the proof rests on whose comparison did
+                # not agree on every value
                 for assumed in ((p.meta or {}).get("mathema.assumptions") or {}).get(
                         "definitions") or ():
                     from .domain_relations import agreed_on_every_value, assumption_status

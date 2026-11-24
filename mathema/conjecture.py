@@ -11222,6 +11222,7 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
             skipped.append(value)
             return None
     drawn: list = []
+    draws = 0
     for piece, language, most, least in domain.read:
         try:
             drawn.extend(h.value for h in language.hazards())
@@ -11232,6 +11233,7 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
                 drawn.append(language.sample(rng))
             except Exception:
                 break
+            draws += 1
         # the strings the definition check compares, so a member is run
         # even where the language's own sampler draws none
         compared = domain_relations._guard_strings(
@@ -11264,8 +11266,9 @@ def _validator_reading_check(fn, validator, stated, domain, *, over=None,
     out["artefact"].update({"texts skipped": len(shown), "skipped": [
         repr(v) for v in shown[:domain_relations.GUARD_SKIPPED_SHOWN]]})
     out["corroboration"] = domain_relations.corroboration_record(  # :draft
-        out["artefact"]["texts run"], len(shown), seed, draws=domain_relations.GUARD_DRAWS,
-        **{"definition strings cap": _READING_FROM_DEFINITION})
+        out["artefact"]["texts run"], len(shown), seed, draws=draws,
+        **{"draws cap": domain_relations.GUARD_DRAWS,  # :draft
+           "definition strings cap": _READING_FROM_DEFINITION})  # :draft
     return out
 
 
