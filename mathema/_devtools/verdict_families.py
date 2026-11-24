@@ -70,7 +70,8 @@ INTEGER_BUDGET = 7  # :draft at most this many integers are taken from each end 
 # (`ZQXMK7f3a`) is found as well as the whole text.
 MARKER_PATTERN = re.compile(r"zqx|7f3a", re.IGNORECASE)
 
-VERDICT_STRENGTH = {"proven": 3, "holds": 2, "unknown": 1, "skipped": 1, "falsified": 0}
+DECISIVE = ("proven", "falsified")
+UNDECIDED_VERDICTS = ("unknown", "skipped", "crash")
 
 # Judgement statuses.
 RIGHT = "right"
@@ -1092,22 +1093,28 @@ def marker_hits(rows: Sequence[Any]) -> list:
     return hits
 
 
-def check_case(case: Case, rules_text: "str | None" = None, honour_rules: bool = True) -> Outcome:
-    """Run `check_conjectures` on one case in this interpreter's tree.
+def check_case(case: Case, rules_text: "str | None" = None, honour_rules: bool = True,
+               checker: "Callable | None" = None) -> Outcome:
+    """Run `check_conjectures` on one case in this interpreter's tree
+    (or `checker(fn, text)`, which returns the rows, in its place).
     A case whose rule the tree lacks is not run, and says so, unless
     `honour_rules` is False."""
-    rules_text = rules_in_tree() if rules_text is None else rules_text
+    rules: str = rules_in_tree() if rules_text is None else rules_text
     needs_rule = bool(case.rule) and (not case.rule_if_false
                                       or known_truth(case, ground_truth(case)) is False)
-    if honour_rules and needs_rule and case.rule not in rules_text:
+    if honour_rules and needs_rule and str(case.rule) not in rules:
         return Outcome(case.name, NOT_RUN, skipped_for=f"the tree lacks {case.rule}")
-    from mathema.conjecture import check_conjectures, claim
+    if checker is None:
+        from mathema.conjecture import check_conjectures, claim
+
+        def checker(fn: Callable, text: str) -> list:
+            return check_conjectures(fn, [claim(text)])
     teardown = resolve(case.setup)() if case.setup else None
     try:
         fn = resolve(case.function)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            rows = check_conjectures(fn, [claim(case.claim)])
+            rows = checker(fn, case.claim)
     except Exception as error:
         return Outcome(case.name, "crash", note=f"{type(error).__name__}: {error}"[:300])
     finally:
@@ -1201,10 +1208,6 @@ def judge(case: Case, outcome: Outcome, ground: GroundTruth) -> Judgement:
     return made(UNDECIDED, outcome.verdict + (f": {outcome.note[:160]}" if outcome.note else ""))
 
 
-def strength(verdict: str) -> int:
-    return VERDICT_STRENGTH.get(verdict, 1)
-
-
 def classify(base_verdict: str, base_wrong: bool, head_verdict: str, head_wrong: bool,
              truth: "bool | None") -> str:
     """Intent:
@@ -1213,8 +1216,8 @@ def classify(base_verdict: str, base_wrong: bool, head_verdict: str, head_wrong:
         head, not on base), `unchanged` (the same verdict), `still wrong`
         (wrong on both, verdicts differ), `lost` (a proof of a claim not
         known false, or a falsification of a claim not known true, that
-        head no longer gives), `gained` (head stronger, neither wrong),
-        `moved` (anything else).
+        head no longer gives), `gained` (head decisive, or `holds`
+        where base was undecided, neither wrong), `moved` (anything else).
     """
     if base_wrong and not head_wrong:
         return FIXED
@@ -1228,9 +1231,18 @@ def classify(base_verdict: str, base_wrong: bool, head_verdict: str, head_wrong:
         return LOST
     if base_verdict == "falsified" and truth is not True:
         return LOST
-    if head_verdict in ("proven", "falsified") or strength(head_verdict) > strength(base_verdict):
+    if head_verdict in DECISIVE or (head_verdict == "holds" and base_verdict in UNDECIDED_VERDICTS):
         return GAINED
     return MOVED
+
+
+def weaker(recorded: str, found: str) -> bool:
+    """Whether a verdict says less than the one recorded: a decisive
+    verdict (`proven`, `falsified`) become anything else, or `holds`
+    become `unknown` or `skipped`."""
+    if recorded in DECISIVE:
+        return found != recorded
+    return recorded == "holds" and found in UNDECIDED_VERDICTS
 
 
 # --------------------------------------------------------------------
@@ -1307,15 +1319,18 @@ def outcomes_in_tree(tree: "str | None", cases: Sequence[Case], workers: int = 1
 
 
 def _witness_points(case: Case, outcomes: Iterable[Outcome]) -> list:
+    """The printed witnesses of falsified rows that read back as points
+    inside the claim's domain."""
     try:
-        names = [n for n, _ in parse_claim(case.claim, case.points).bindings]
+        bindings = parse_claim(case.claim, case.points).bindings
     except CannotEvaluate:
         return []
+    names = [n for n, _ in bindings]
     pts = []
     for o in outcomes:
         if o.verdict == "falsified" and names:
             p = witness_point(o.counterexample, names)
-            if p is not None:
+            if p is not None and all(d.contains(p[n]) for n, d in bindings):
                 pts.append(p)
     return pts
 
@@ -1399,6 +1414,8 @@ def main(argv: "Sequence[str] | None" = None) -> int:
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--json", help="write the table as JSON lines here")
     parser.add_argument("--only", help="run only cases whose name contains this text")
+    parser.add_argument("--record", help="write each case's verdict and status here, as the "
+                        "expectations a later run is compared with")
     parser.add_argument("--all-rules", action="store_true",
                         help="run cases whose rule the tree lacks as well")
     args = parser.parse_args(argv)
@@ -1420,6 +1437,10 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         judgements = judge_tree(cases, head)
         lines = [judgement_line(j) for j in judgements]
         text = summary(judgements)
+        if args.record:
+            Path(args.record).write_text(json.dumps(
+                {j.case: {"verdict": j.verdict, "status": j.status, "issue": j.issue}
+                 for j in judgements}, indent=1, sort_keys=True) + "\n")
     if args.json:
         Path(args.json).write_text("\n".join(lines) + "\n")
     print(text)

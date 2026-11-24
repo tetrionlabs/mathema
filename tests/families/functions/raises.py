@@ -165,3 +165,16 @@ def ignores_second(x, y):
     if x < 0:
         raise ValueError("n")
     return x
+
+
+@enforce_structure()
+def structure_value(x: Annotated[float, Finite]):
+    return x + 1
+
+
+def halve(x: float) -> float:
+    return x / 2
+
+
+def name_of(fn):
+    return fn.__name__
