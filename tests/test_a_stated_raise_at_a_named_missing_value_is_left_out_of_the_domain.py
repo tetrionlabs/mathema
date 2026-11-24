@@ -14,7 +14,7 @@ STATED = "absent(f, x) raises(TypeError)"
 
 
 def scaled(x: Optional[float], y: float) -> float:
-    return (x - 1) * y
+    return (x - 1) * y  # type: ignore[operator]
 
 
 def test_a_stated_raise_leaves_the_value_out_and_its_row_holds():

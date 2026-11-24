@@ -34,7 +34,7 @@ _NAMED_CLAIM = "for x in [0, 1] | {None}, f(x) >= 0"
 _PLAIN_CLAIM = "for x in [0, 1], f(x) >= 0"
 _OLD_TEXT = "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0"
 _NEW_TEXT = "for x in [0.0, 1.0] | {absent}, f(x) >= 0"
-_NOTE = "names a missing value"
+_NOTE = "a missing value (such as None or nan) that the earlier stored text"
 
 
 def _forget():
@@ -162,7 +162,9 @@ def test_a_changed_relation_beside_the_named_value_is_a_claims_change(project):
 def test_the_old_text_cannot_tell_a_named_value_added_since(project):
     """The old text of `[0, 1] | {None}` is the text of plain `[0, 1]`,
     so a record of the plain claim whose author has since named None
-    reads as the same move: checked again as written, with the note."""
+    reads as the same move: checked again as written, with the note.
+    `square` raises at None, so None is its own row, falsified, and the
+    row of the relation keeps the interval, as a record written now does."""
     from mathema.verify import verify_project
     _old_records(project)
     _write_claims(project, plain="for x in [0, 1] | {None}, f(x) >= 0")
@@ -170,9 +172,12 @@ def test_the_old_text_cannot_tell_a_named_value_added_since(project):
     assert not any("re-authored" in p for p in out.problems), out.problems
     assert _why(out)[PLAIN] == "mathema's claim rules changed", _why(out)
     assert sum(_NOTE in ln for ln in out.lines) == 1, out.lines
-    row = {r["name"]: r for r in _record(project, PLAIN)["claims"]}["non_negative"]
-    assert row["statement"] == _NEW_TEXT
-    assert row["verdict"] == "falsified", row
+    rows = {r["name"]: r for r in _record(project, PLAIN)["claims"]}
+    assert rows["non_negative"]["statement"] == (
+        "for x in [0.0, 1.0] : float|missing, f(x) >= 0"), rows
+    assert rows["absent[x]"]["verdict"] == "falsified", rows
+    again = verify_project(root=str(project))
+    assert _why(again)[PLAIN] == "fresh", _why(again)
 
 
 def test_the_move_is_named_for_the_row_it_explains():

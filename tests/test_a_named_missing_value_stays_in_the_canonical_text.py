@@ -32,7 +32,7 @@ def floats(x: float) -> float:
 
 
 def optional(x: Optional[float]) -> float:
-    return x
+    return x  # type: ignore[return-value]
 
 
 def whole(x: int) -> int:

@@ -17,7 +17,7 @@ TEXT = "for x in {1, None}, y in [0, 1], f(x, y) == 0"
 
 
 def scaled(x: Optional[float], y: float) -> float:
-    return (x - 1) * y
+    return (x - 1) * y  # type: ignore[operator]
 
 
 @pytest.mark.needs_smt

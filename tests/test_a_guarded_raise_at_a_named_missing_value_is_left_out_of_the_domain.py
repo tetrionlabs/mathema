@@ -19,7 +19,7 @@ def guarded(x: Optional[float], y: float) -> float:
 
 
 def unguarded(x: Optional[float], y: float) -> float:
-    return (x - 1) * y
+    return (x - 1) * y  # type: ignore[operator]
 
 
 def _rows(fn):

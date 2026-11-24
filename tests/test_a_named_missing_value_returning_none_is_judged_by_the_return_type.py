@@ -18,7 +18,7 @@ TEXT = "for x in {1, None}, y in [0, 1], f(x, y) == 0"
 
 def none_under_float(x: Optional[float], y: float) -> float:
     if x is None:
-        return None
+        return None  # type: ignore[return-value]
     return (x - 1) * y
 
 
