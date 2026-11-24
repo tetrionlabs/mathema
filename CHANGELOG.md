@@ -2,7 +2,7 @@
 
 Notable changes to mathema are recorded here from its first public release onward.
 
-## Unreleased
+## 0.6.6.2
 
 ### Highlights
 - A function read as a pattern validator is decided on the solver route for more claim forms: `assuming f is defined, f(s) == s` for a validator that refuses every text outside its language; a match on `s or ''` over a language of texts; a `let`-bound variable with another name than the parameter; literal text added around the variable, decided over all text when the texts called on leave the variable's language; an exception class of the function's own package with a builtin exception as its only base and nothing of its own; and a message reading a module-level text constant.
@@ -12,6 +12,7 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A record whose verdict rests on a language's stated definition, compared with the language's `contains()`, goes stale when that `contains()` changes, or a text constant a validator's message reads.
 
 ### Upgrading from 0.6.6.1
+- The `language` extra takes mathema-language 0.2 to 0.4.
 - An assumption a proof rests on, compared with a language's `contains()` on the values tried, has the status `assumed` where it read `checked`; a stored `checked` is still read, as a comparison that agreed on every value. In a proof outline an entry may say what the comparison fell short of: `(assumed, 3 of 14 values skipped)`, `(assumed, no value compared)`.
 - A claim whose every variable is a text has no `[float]` companion row.
 - Every record is checked again once. The claims fingerprint a record stores for freshness now carries mathema's rules number (`mathema._rules.RULES`, 1 in this release: canonical statement text). A record written before it reads as written under earlier rules and is re-adjudicated by the next `mathema verify`, then fresh. The claim identity (`claims_fingerprint`) does not carry the rules number; it moves only for a claim whose stored text this release writes differently (a negated relation, a string literal an earlier release quoted ambiguously).
@@ -30,6 +31,10 @@ Notable changes to mathema are recorded here from its first public release onwar
 - A risk accepted on a claim that a later check proves or finds holding stays in the record as history, is no longer counted as accepted risk, and the sweep says so.
 - After an earlier key's release move, a moved key still names its rename remedy.
 - A note names each character it shows (`a tab (U+0009)`), a claim whose stored text moved in more than one way gets every note that applies, and docsync's diagnostics follow `--root`.
+
+### Known limits
+- In a few narrow cases a result is reported at a higher level than its evidence supports, or a verdict is wrong; each is described with a small example in the issue tracker (#120 to #132). The statement checked is true in most of them and the effect on ordinary claims is small. They were found by checking mathema's verdicts against executed results and by mutation runs over KOINE.
+- A claim someone wrote still runs its function on values drawn from the claim's domain. A function that writes, deletes or sends should not carry claims that are probed.
 
 ## 0.6.6.1
 
