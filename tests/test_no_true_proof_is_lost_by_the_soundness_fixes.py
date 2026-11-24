@@ -10,8 +10,12 @@ statement changes nothing), and is not proven. Each row of `EXCEPTIONS`
 is a true claim that was proven before and is unknown now, with the
 reason the row gives: the function cannot be run contained, the run
 did not finish within its budget, the function opens a file for
-writing and file writers are not run, or what it writes is not
-something a child process's witness watches.
+writing and file writers are not run, what it writes is not something
+a child process's witness watches, the value it changes is larger than
+the comparison's budget, is an object whose class defines how its
+attributes are read, or keeps state the comparison cannot read (a
+generator, a numpy array of objects), or the witness search reached its budget of
+points before the member that writes.
 
 Three rows were proven before the fixes, lost to the reading of a
 `None` or nan argument, and are proven again. `for x in [0, 1],
@@ -38,6 +42,18 @@ _SHOWN = "test_a_witness_names_what_changed_and_shows_no_value"
 _ENDS = "test_an_enforced_domain_inside_the_claims_is_read_with_exact_ends"
 _EMPTY = "test_is_empty_safe_runs_every_empty_value_the_parameter_admits"
 _STATE = "test_is_state_safe_sees_process_state"
+_HOLD = "test_a_witness_reads_values_by_what_they_hold"
+_ST = "for x in [0, 1], not is_state_safe(f)"
+_ND = "for x in [0, 1], not is_deterministic(f)"
+_MEMBERS = "{" + ", ".join(str(k) for k in range(5000)) + "}"
+_OVER_BUDGET = ("the comparison's budget of 1000000 values was reached "
+                "before all of it was read")
+_POINTS_BUDGET = ("the budget of 24 points was reached before the search "
+                  "was done, and 24 of the 5000 members of the claim's set "
+                  "were tried")
+_READS_ITSELF = ("could not be compared before and after the call (an "
+                 "object has a class that defines how its attributes are "
+                 "read)")
 _FILE = ("a file is opened for writing; whether it is changed is not decided "
          "without running, and file writers are not run")
 _LOCAL_REASON = ("f cannot be run contained (it is defined inside another "
@@ -272,6 +288,60 @@ TRUE = [
      'falsified'),
     (_LET, 'halve',
      f'let g = {_LET}.also_halve, for x in [0, 1], f(x) == g(x)', 'proven'),
+    # a type named at run time, said as an object
+    (_HOLD, 'rebinds_to_a_type_named_at_run_time', _ST, 'proven'),
+    (_HOLD, 'rebinds_to_a_qualname_set_at_run_time', _ST, 'proven'),
+    (_HOLD, 'rebinds_to_a_name_set_at_run_time', _ST, 'proven'),
+    (_HOLD, 'rebinds_to_a_module_set_at_run_time', _ST, 'proven'),
+    (_HOLD, 'appends_a_named_object', _ST, 'proven'),
+    (_HOLD, 'enters_a_named_object', _ST, 'proven'),
+    (_HOLD, 'returns_a_named_object_with_a_draw', _ND, 'proven'),
+    # standard-library values, read by their contents
+    (_HOLD, 'appends_to_a_deque', _ST, 'proven'),
+    (_HOLD, 'sets_an_ordered_entry', _ST, 'proven'),
+    (_HOLD, 'moves_an_ordered_entry_to_the_end', _ST, 'unknown'),
+    (_HOLD, 'binds_a_decimal', _ST, 'proven'),
+    (_HOLD, 'binds_a_date', _ST, 'proven'),
+    (_HOLD, 'appends_to_an_array', _ST, 'proven'),
+    (_HOLD, 'binds_a_pattern', _ST, 'proven'),
+    (_HOLD, 'appends_to_a_large_list', _ST, 'proven'),
+    (_HOLD, 'appends_to_a_list_that_holds_itself', _ST, 'proven'),
+    (_HOLD, 'makes_a_list_hold_itself', _ST, 'proven'),
+    (_HOLD, 'rebinds_to_a_stateless_named_object', _ST, 'proven'),
+    (_HOLD, 'returns_a_deque_of_a_draw', _ND, 'proven'),
+    (_HOLD, 'returns_a_list_of_a_draw_that_holds_itself', _ND, 'proven'),
+    # a write at a member a guard names, over a large set
+    (_HOLD, 'writes_at_the_last_member',
+     f'for x in {_MEMBERS}, not is_state_safe(f)', 'proven'),
+    (_HOLD, 'writes_past_a_late_member',
+     f'for x in {_MEMBERS}, not is_state_safe(f)', 'proven'),
+    (_HOLD, 'writes_at_a_middle_member',
+     f'for x in {_MEMBERS}, not is_state_safe(f)', 'proven'),
+    # a named set enforced, read as the claims read it
+    (_ENDS, 'over_the_reals', 'for x in R, excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_reals', 'for x in (-oo, oo), excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_integers', 'for x in Z, excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_integers', 'for x in R, excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_integers',
+     'for x in (-oo, oo), excluded_outside_domain(x)', 'proven'),
+    (_ENDS, 'over_the_naturals', 'for x in N, excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_naturals', 'for x in Z, excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_naturals', 'for x in R, excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_naturals', 'for x in [0, oo), excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_naturals', 'for x in [0, inf), excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_naturals', 'for x in [0, inf], excluded_outside_domain(x)',
+     'proven'),
+    (_ENDS, 'over_the_naturals',
+     'for x in (-oo, oo), excluded_outside_domain(x)', 'proven'),
     # test_verdicts_beside_the_false_proofs_fixed
     ('test_verdicts_beside_the_false_proofs_fixed',
      'one_at_nan',
@@ -397,6 +467,26 @@ NOT_PROVEN = [
      "for x in [0, 1], not is_state_safe(f)"),
     (_HERE, "appends_where_the_square_is_large",
      "for x in [0, 1], not is_state_safe(f)"),
+    # a standard-library value left as it was
+    (_HOLD, "extends_a_deque_by_nothing", _ST),
+    (_HOLD, "moves_both_ordered_entries_back", _ST),
+    (_HOLD, "writes_a_list_that_holds_itself_back", _ST),
+    (_HOLD, "writes_the_box_back", _ST),
+    # an object whose class decides how it is read, written as it was
+    (_HOLD, "writes_an_attribute_back_beside_a_dict_property", _ST),
+    (_HOLD, "writes_a_slot_beside_a_property_shadowing_it", _ST),
+    (_HOLD, "returns_an_object_that_reads_itself", _ND),
+    # a write at no member of a large set
+    (_HOLD, "writes_at_no_member",
+     f"for x in {_MEMBERS}, not is_state_safe(f)"),
+    # the wrapper admits inf, which the claim's domain leaves out
+    (_ENDS, "up_to_infinity", "for x in [0, oo), excluded_outside_domain(x)"),
+    (_ENDS, "up_to_infinity", "for x in [0, inf), excluded_outside_domain(x)"),
+    (_ENDS, "up_to_infinity",
+     "for x in (-oo, oo), excluded_outside_domain(x)"),
+    # a named set enforced that admits what the claim's leaves out
+    (_ENDS, "over_the_reals", "for x in Z, excluded_outside_domain(x)"),
+    (_ENDS, "over_the_integers", "for x in N, excluded_outside_domain(x)"),
 ]
 
 #: module, function, claim, the verdict before the fixes, the reason
@@ -445,6 +535,19 @@ EXCEPTIONS = [
     (_CHILD, "writes_then_never_returns",
      "for x in [0, 1], not is_state_safe(f)", "proven",
      "the run did not finish within its budget"),
+    # a value larger than the comparison's budget
+    (_HOLD, "appends_to_a_list_over_the_budget", _ST, "proven", _OVER_BUDGET),
+    # a write at a member no guard names, past the budget of points
+    (_HOLD, "writes_where_arithmetic_picks_a_member",
+     f"for x in {_MEMBERS}, not is_state_safe(f)", "proven", _POINTS_BUDGET),
+    # an object whose class decides how its attributes are read
+    (_HOLD, "rebinds_to_an_object_that_reads_itself", _ST, "proven",
+     _READS_ITSELF),
+    # state the comparison cannot read: a generator, an array of objects
+    (_HOLD, "rebinds_to_a_generator", _ST, "proven",
+     "(a generator object keeps state the comparison cannot read)"),
+    (_HOLD, "writes_into_an_array_of_objects", _ST, "proven",
+     "(it is a numpy array of objects)"),
 ]
 
 

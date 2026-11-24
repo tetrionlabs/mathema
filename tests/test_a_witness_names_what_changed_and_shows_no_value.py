@@ -230,10 +230,9 @@ def test_a_value_from_the_environment_is_nowhere_in_the_row(
 
 @pytest.mark.parametrize("fn, said", [
     (moves_the_point,
-     "_point changed (a Point object before it, a Point object after it)"),
+     "_point changed (an object before it, an object after it)"),
     (moves_the_slot,
-     "_slotted changed (a Slotted object before it, a Slotted object "
-     "after it)"),
+     "_slotted changed (an object before it, an object after it)"),
 ], ids=lambda v: getattr(v, "__name__", None))
 def test_an_object_whose_state_changed_is_witnessed(fn, said):
     p = _row(fn, "for x in [0, 1], not is_state_safe(f)")
@@ -259,15 +258,15 @@ def test_two_equal_objects_returned_do_not_differ():
     p = _row(a_later_point_after_reading_the_clock,
              "for x in [0, 1], not is_deterministic(f)")
     assert p.verdict == "proven", (p.verdict, p.sketch, p.note)
-    assert ("returned two results that differ (a Point object, then a "
-            "Point object)") in p.sketch, p.sketch
+    assert ("returned two results that differ (an object, then an "
+            "object)") in p.sketch, p.sketch
 
 
 def test_a_result_that_cannot_be_compared_is_unknown_with_the_reason():
     p = _row(a_bare_object_after_reading_the_clock,
              "for x in [0, 1], not is_deterministic(f)")
     assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
-    assert ("the two results could not be compared (an object object has no "
+    assert ("the two results could not be compared (an object has no "
             "state the comparison can read)") in (p.note or ""), p.note
 
 
@@ -276,7 +275,7 @@ def test_a_value_that_cannot_be_compared_is_unknown_with_the_reason():
              "for x in [0, 1], not is_state_safe(f)")
     assert p.verdict == "unknown", (p.verdict, p.sketch, p.note)
     assert ("the module-level _lock_like could not be compared before and "
-            "after the call (an object object has no state the comparison "
+            "after the call (an object has no state the comparison "
             "can read)") in (p.note or ""), p.note
 
 

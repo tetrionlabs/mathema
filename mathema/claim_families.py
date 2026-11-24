@@ -1915,16 +1915,30 @@ def _enforced_inside(enforced, stated) -> bool:
         claim's stated domain for the parameter, so that the wrapper
         refuses every number outside the claim's: the claim states none
         (the enforced domain is then the declared one), or both read as
-        sets of reals (`_number_set`) and the enforced one is a subset,
-        an end that one includes and the other leaves out counted as
-        the number it is. Two domains that do not read as sets of reals
-        are inside one another only when they are the same domain, of
-        the same type. False when they cannot be compared.
+        sets of reals (`_number_set`), the enforced one is a subset, an
+        end that one includes and the other leaves out counted as the
+        number it is, and neither infinity is admitted by the enforced
+        domain and left out by the claim's, each read as the wrapper
+        reads a number (`domain.number_member`). A
+        named set bound as a string (`"R"`, `"Z"`, `"N"`) is read as
+        the claims read it (`domain._as_domain`). Two domains that do
+        not read as sets of reals are inside one another only when
+        they are the same domain, of the same type. False when they
+        cannot be compared.
     """
     if stated is None:
         return True
     from ._timeout import FAST_TIMEOUT_SECONDS, _with_timeout
+    from .domain import _as_domain, number_member
     try:
+        if isinstance(enforced, str):
+            enforced = _as_domain(enforced)
+        if isinstance(stated, str):
+            stated = _as_domain(stated)
+        for end in (math.inf, -math.inf):
+            if number_member(end, enforced) is not False \
+                    and number_member(end, stated) is not True:
+                return False
         inner, outer = _number_set(enforced), _number_set(stated)
         if inner is None and outer is None:
             return type(stated) is type(enforced) \

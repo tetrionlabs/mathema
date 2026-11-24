@@ -66,7 +66,7 @@ def test_a_negation_is_proven_by_a_call_that_ran_and_wrote(fn, text):
 def test_the_negation_says_why_it_is_not_decided():
     p = _row(writes_past_a_half, "for x in [0, 1], not is_deterministic(f)")
     assert p.verdict == "unknown", (p.verdict, p.route, p.sketch)
-    assert "not executed" in (p.note or ""), p.note
+    assert "the two results did not differ" in (p.note or ""), p.note
 
 
 def test_a_function_that_writes_is_still_not_state_safe():

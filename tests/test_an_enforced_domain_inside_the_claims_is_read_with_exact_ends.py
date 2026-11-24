@@ -99,3 +99,70 @@ def test_a_finite_enforced_set_is_inside_what_holds_every_member(
 
 def test_an_interval_is_not_inside_a_finite_set():
     assert _inside(closed, "{0, 1}") is False
+
+
+# a named set bound as a bare string, read as the claims read it
+@enforce_domain({"x": "R"})
+def over_the_reals(x):
+    return x * 2.0
+
+
+@enforce_domain({"x": "Z"})
+def over_the_integers(x):
+    return x * 2.0
+
+
+@enforce_domain({"x": "N"})
+def over_the_naturals(x):
+    return x * 2.0
+
+
+@enforce_domain({"x": "[0, inf]"})
+def up_to_infinity(x):
+    return x * 2.0
+
+
+_NAMED = {"R": over_the_reals, "Z": over_the_integers,
+          "N": over_the_naturals}
+
+
+@pytest.mark.parametrize("enforced, stated", [
+    ("R", "R"), ("Z", "Z"), ("Z", "R"), ("N", "N"), ("N", "Z"),
+    ("N", "R"), ("N", "[0, oo)"),
+])
+def test_a_named_set_enforced_is_inside_what_holds_it(enforced, stated):
+    assert _inside(_NAMED[enforced], stated) is True
+    p = _row(_NAMED[enforced], f"for x in {stated}, excluded_outside_domain(x)")
+    assert p.verdict == "proven", (p.verdict, p.route, p.sketch)
+    assert "rejection by construction" in p.sketch, p.sketch
+
+
+@pytest.mark.parametrize("enforced, stated", [
+    ("R", "Z"), ("Z", "N"), ("R", "[0, 1]"), ("Z", "{0, 1}"),
+])
+def test_a_named_set_enforced_is_not_inside_what_leaves_out_a_member(
+        enforced, stated):
+    assert _inside(_NAMED[enforced], stated) is False
+    p = _row(_NAMED[enforced], f"for x in {stated}, excluded_outside_domain(x)")
+    assert p.verdict != "proven", (p.verdict, p.route, p.sketch)
+
+
+def _accepts(fn, value) -> bool:
+    try:
+        fn(value)
+    except Exception:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("stated", ["[0, oo)", "[0, inf)", "(-oo, oo)"])
+def test_an_enforced_closed_infinite_end_is_not_inside_an_open_one(stated):
+    # the oracle: the wrapper admits inf, which the claim's domain leaves out
+    assert _accepts(up_to_infinity, float("inf"))
+    assert _inside(up_to_infinity, stated) is False
+    p = _row(up_to_infinity, f"for x in {stated}, excluded_outside_domain(x)")
+    assert p.verdict != "proven", (p.verdict, p.route, p.sketch)
+
+
+def test_an_enforced_closed_infinite_end_is_inside_a_closed_one():
+    assert _inside(up_to_infinity, "[0, inf]") is True

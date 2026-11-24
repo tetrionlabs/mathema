@@ -11088,23 +11088,33 @@ def _unexecuted_negation(proof):
 
 
 def _witness_points(facts, cj_domain: dict, tests=()) -> list:
+    """The points of `_witness_search`, without what it says of the
+    budget."""
+    return _witness_search(facts, cj_domain, tests)[0]
+
+
+def _witness_search(facts, cj_domain: dict, tests=()) -> tuple:
     """Intent:
-        A few points of the claim's domain to look for a witness at:
-        every parameter at its bound's upper end, at its lower end, at
-        its midpoint, and at one ordinary value (`_an_ordinary_value`),
-        a parameter with no interval at its ordinary value throughout;
-        then each parameter at every number its bound lists (the
-        members of a finite set), and, for a bound over the integers,
-        at a few small integers it admits;
-        then each parameter at each missing value its bound admits
-        (`domain.admitted`, realised: nan, None);
-        then, for each number an `if` test in `tests` (sources) compares
-        a parameter with (in a chained comparison, each number in the
-        chain), that parameter at the number and at the float
-        on each side of it, and for a bound over the integers at the
-        integers around it, where its bound admits them. No more than
-        `WITNESS_POINTS` points. Empty when some parameter has no
-        ordinary value.
+        `(points, short)`: a few points of the claim's domain to look
+        for a witness at, in this order: every parameter at its bound's
+        upper end, at its lower end, at its midpoint, and at one
+        ordinary value (`_an_ordinary_value`), a parameter with no
+        interval at its ordinary value throughout; then, for each
+        number an `if` test in `tests` (sources) compares a parameter
+        with (in a chained comparison, each number in the chain), that
+        parameter at the number and at the float on each side of it,
+        and for a bound over the integers at the integers around it,
+        and for a bound that lists numbers at the listed numbers nearest
+        it on each side, where its bound admits them; then each
+        parameter at each
+        missing value its bound admits (`domain.admitted`, realised:
+        nan, None); then, for a bound over the integers, at a few small
+        integers it admits; then each parameter at every number its
+        bound lists (the members of a finite set), in order. No more
+        than `WITNESS_POINTS` points. `short` is None when every point
+        of that order is among them, else `(members tried, members
+        listed, points in the order)`: the budget was reached. Empty
+        points when some parameter has no ordinary value.
 
     Notes:
         A parameter over the integers has an integer for its ordinary
@@ -11127,6 +11137,16 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
         except Exception:
             return False
 
+    def key(point: dict) -> tuple:
+        def one(v):
+            if type(v) in (int, float) and v == v:
+                try:
+                    return ("number", float(v))
+                except OverflowError:
+                    return ("number", repr(v))
+            return (type(v).__name__, repr(v))
+        return tuple((k, one(point[k])) for k in sorted(point))
+
     base = {p: _an_ordinary_value((cj_domain or {}).get(p))
             for p in facts.params}
     for p, value in base.items():
@@ -11135,8 +11155,20 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
             base[p] = next((k for k in (0, 1, -1) if inside(k, bound)),
                            _NO_VALUE)
     if any(v is _NO_VALUE for v in base.values()):
-        return []
-    points = []
+        return [], None
+    points: list = []
+    seen: dict = {}
+    members = [0, 0]
+
+    def add(point: dict, member: bool = False) -> None:
+        found = key(point)
+        if found not in seen:
+            seen[found] = len(points)
+            points.append(point)
+        if member:
+            members[0] += seen[found] < WITNESS_POINTS
+            members[1] += 1
+
     for pick in (lambda lo, hi: hi, lambda lo, hi: lo,
                  lambda lo, hi: (lo + hi) / 2):
         point = dict(base)
@@ -11152,10 +11184,9 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
                     point[p] = value
             except Exception:
                 pass
-        if point not in points:
-            points.append(point)
-    if base not in points:
-        points.append(base)
+        add(point)
+    add(dict(base))
+    listed_of: dict = {}
     for p in facts.params:
         bound = (cj_domain or {}).get(p)
         if bound is None:
@@ -11164,30 +11195,11 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
             pieces = _as_domain(bound).pieces
         except Exception:
             pieces = ()
-        listed = sorted(
+        listed_of[p] = sorted(
             (v for piece in pieces if isinstance(piece, frozenset)
              for v in piece
              if type(v) in (int, float) and not isinstance(v, _Sentinel)
              and math.isfinite(v)), key=lambda v: (v, repr(v)))
-        small = [0, 1, -1, 2, -2] if over_integers(bound) else []
-        for value in [*listed, *small]:
-            point = {**base, p: value}
-            if inside(value, bound) and point not in points:
-                points.append(point)
-    for p in facts.params:
-        bound = (cj_domain or {}).get(p)
-        if bound is None:
-            continue
-        try:
-            absent, holes = admitted(bound)
-            missing = [v for s in ([ABSENT] if absent else []) + list(holes)
-                       for v in realise_sentinel(s)]
-        except Exception:
-            continue
-        for value in missing:
-            point = {**base, p: value}
-            if not any(_same_point(point, seen) for seen in points):
-                points.append(point)
     for source in sorted(tests):
         try:
             tree = ast.parse(source, mode="eval")
@@ -11210,11 +11222,43 @@ def _witness_points(facts, cj_domain: dict, tests=()) -> list:
                 if over_integers(bound):
                     around += [math.floor(at) + 1, math.ceil(at),
                                math.floor(at), math.ceil(at) - 1]
+                listed = listed_of.get(name.id, [])
+                if listed:
+                    import bisect
+                    at_or_after = bisect.bisect_left(listed, at)
+                    after = bisect.bisect_right(listed, at)
+                    around += [listed[i] for i in (at_or_after - 1, after)
+                               if 0 <= i < len(listed)]
                 for value in around:
-                    point = {**base, name.id: value}
-                    if inside(value, bound) and point not in points:
-                        points.append(point)
-    return points[:WITNESS_POINTS]
+                    if inside(value, bound):
+                        add({**base, name.id: value})
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None:
+            continue
+        try:
+            absent, holes = admitted(bound)
+            missing = [v for s in ([ABSENT] if absent else []) + list(holes)
+                       for v in realise_sentinel(s)]
+        except Exception:
+            continue
+        for value in missing:
+            add({**base, p: value})
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        if bound is None or not over_integers(bound):
+            continue
+        for value in (0, 1, -1, 2, -2):
+            if inside(value, bound):
+                add({**base, p: value})
+    for p in facts.params:
+        bound = (cj_domain or {}).get(p)
+        for value in listed_of.get(p, []):
+            if inside(value, bound):
+                add({**base, p: value}, member=True)
+    short = (None if len(points) <= WITNESS_POINTS
+             else (members[0], members[1], len(points)))
+    return points[:WITNESS_POINTS], short
 
 
 # :draft how many points one witness search tries: a budget of calls
@@ -11333,7 +11377,7 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
                     "the negation, and the positive claim is falsified "
                     "only from the source: " + shown),
             meta=meta)
-    points = _witness_points(facts, cj_domain, effects.own_tests)
+    points, short = _witness_search(facts, cj_domain, effects.own_tests)
     if not points:
         return None
     watched = set(effects.module_writes)
@@ -11355,6 +11399,32 @@ def _negation_witnessed(ctx, fn, facts, disproof=None):
             "undecided",
             sketch=("no witness of the negation was seen: "  # :draft
                     + _shown(seen.get("failed") or seen.get("unread"), 240)),
+            meta=meta)
+    if not seen.get("seen") and short is not None:
+        tried, listed, ordered = short
+        searched = (f"{tried} of the {listed} members of the claim's set "
+                    f"were tried" if listed
+                    else f"{WITNESS_POINTS} of {ordered} points were tried")
+        return ProofResult(
+            "undecided",
+            sketch=(f"no witness of the negation was seen: the budget of "  # :draft
+                    f"{WITNESS_POINTS} points was reached before the "
+                    f"search was done, and {searched}"),
+            meta=meta)
+    ran = seen.get("ran")
+    if not seen.get("seen") and isinstance(ran, int) and ran > 0:
+        calls = f"{ran} point{'' if ran == 1 else 's'} of the claim's domain"
+        happened = ("the call was run at " + calls + ", and nothing "  # :draft
+                    "it holds changed"
+                    if kind == "is_state_safe" else
+                    "the call was run twice at " + calls + ", and the "  # :draft
+                    "two results did not differ")
+        return ProofResult(
+            "undecided",
+            sketch=("the positive claim is falsified only from the source, "  # :draft
+                    "and " + happened + ", so its negation is not proven: "
+                    + (disproof.counterexample or disproof.sketch or ""
+                       if disproof is not None else "")),
             meta=meta)
     try:
         point = points[seen["point"]] if seen.get("seen") else None
