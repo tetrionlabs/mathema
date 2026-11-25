@@ -524,12 +524,14 @@ def _each_as_point(cj, name, members, fn, facts, domain):
         return (f"the collection with its other bindings gives "  # :draft
                 f"{total * len(members)} points, more than the budget of "
                 f"{_brute_force.BRUTE_FORCE_POINT_BUDGET}")
-    stateful = _brute_force._examination_obstacle(fn)
-    if stateful is _brute_force._STATEFUL:
-        return ("the function writes or reads state outside its arguments, so "  # :draft
-                "one call per member is not the whole story")
-    unread = stateful if stateful is not None else (
-        None if facts.is_pure is True else "the function is not shown to be pure")
+    # a function not shown to be pure is still run at every member, as
+    # the probe route runs it: a member it fails at falsifies the claim,
+    # and one it holds at supports it without proving it
+    obstacle = _brute_force._examination_obstacle(fn)
+    unread = ("the function writes or reads state outside its arguments"  # :draft
+              if obstacle is _brute_force._STATEFUL else obstacle if obstacle is not None
+              else None if facts.is_pure is True
+              else "the function is not shown to be pure")  # :draft
     evaluate, admits = deps["evaluate"], deps["admits"]
     out = []
     for m in members:

@@ -108,3 +108,13 @@ def emit(fn) -> str:
 def decline_category(key: str) -> str:
     """The category a key is declined in: the key itself."""
     return key
+
+
+#: the numbers `remember` was called with
+SEEN: list = []
+
+
+def remember(n: int) -> int:
+    """`n`, kept in `SEEN`."""
+    SEEN.append(n)
+    return n

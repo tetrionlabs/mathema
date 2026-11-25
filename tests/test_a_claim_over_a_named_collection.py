@@ -205,3 +205,12 @@ def test_a_collection_beside_a_finite_binding_is_enumerated_with_it():
     twin = _row(ex.clamp, f"for x in {_PATH}.SMALL, lo in {{-5, 2}}, clamp(x, lo, 9) == x")
     assert twin.verdict == "falsified"
     assert twin.counterexample == "x = 1 (member 0): lo = 2"
+
+
+def test_a_function_not_shown_pure_is_run_at_every_member_and_never_proven():
+    row = _row(ex.remember, f"for n in {_PATH}.SMALL, remember(n) <= 3")
+    assert row.verdict == "holds", (row.verdict, row.note)
+    assert "proven needs the function to be shown pure" in row.note
+    twin = _row(ex.remember, f"for n in {_PATH}.SMALL, remember(n) <= 1")
+    assert twin.verdict == "falsified"
+    assert twin.counterexample == "n = 3 (member 2)"

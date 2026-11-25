@@ -513,6 +513,86 @@ wider set. [Language domains](language.md) says what a language
 samples, what the record states about it, and which claims a parser
 or a renderer earns over one.
 
+### A named collection (draft)
+
+The spelling in this section is a draft, and may change before it is
+settled.
+
+`for NAME in pkg.mod.COLLECTION` ranges a name over the members of a
+module-level tuple, list, frozenset or dict, found by its dotted path
+as a `let` reference is. A dict's members are its values, each named
+by its key; to range over the keys, name a tuple of them. A frozenset
+lists its members in order of their names. The path stands alone in
+its binding, and a claim ranges over one collection.
+
+The claim is decided by judging every member, never a sample: proven
+when every member is proven, falsified at the first member that breaks
+it, named in the witness by its position and its qualified name (or
+its text, capped), and holds when every member supports it but one is
+short of a proof. A collection of more than 1000 members leaves the
+claim unknown, with the reason; it is never sampled. A claim over an
+empty collection is proven, and its row says the collection is empty.
+
+Where the name sits decides what a member is: a parameter of the
+function, or a name the claim passes to a call, makes each member one
+point of the claim; `f` makes each member the function under test; a
+name the claim calls (`g(0.5) >= 0`) binds each member to it as
+`let g = ...` would. With three stages in `stages.py`, and the same
+three with `clamp` in place of the last:
+
+<!-- example: collection file=stages.py -->
+```python
+def percent_to_fraction(percent: float) -> float:
+    return percent / 100
+
+
+def fraction_to_growth_factor(fraction: float) -> float:
+    return 1 + fraction
+
+
+def halve(value: float) -> float:
+    return value / 2
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    return min(max(x, lo), hi)
+
+
+def describe(fn) -> str:
+    notes = dict(fn.__annotations__)
+    result = notes.pop("return", "?")
+    return f"({', '.join(n.__name__ for n in notes.values())}) -> {result.__name__}"
+
+
+STAGES = (percent_to_fraction, fraction_to_growth_factor, halve)
+WITH_CLAMP = (percent_to_fraction, fraction_to_growth_factor, clamp)
+```
+
+<!-- example: collection run -->
+```python
+import mathema
+from stages import describe
+
+for name in ("STAGES", "WITH_CLAMP"):
+    text = f'for fn in stages.{name}, describe(fn) == "(float) -> float"'
+    rec = mathema.check(describe, claims=[mathema.claim(text, name="c")])
+    row = next(p for p in rec.probes if p.name == "c")
+    print(row.verdict, row.counterexample)
+```
+
+<!-- example: collection output -->
+```text
+proven None
+falsified fn = stages.clamp (member 2)
+```
+
+The row's record lists every member by position, name and hash, with a
+hash of the collection. The claim's text and its fingerprint name only
+the path, so adding, removing, reordering or changing a member leaves
+the claim the same claim and makes its record stale: the next `mathema
+verify` checks it again and says what moved, as in `the collection
+stages.STAGES moved: stages.halve changed`.
+
 ## Calculus
 
 | Spelling | Meaning |
