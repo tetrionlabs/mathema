@@ -13,6 +13,10 @@ value  what it changed
 0      the fingerprint before the reasoning version existed
 1      canonical statement text: each string literal respelled from
        its value, and a negated relation in its parentheses
+2      the raise reading: a `raises` claim is proven only where the
+       path to the raise, the building of the exception, the wrappers
+       around the function and the arguments of the claim's call are
+       each read as unable to do anything else
 =====  ==========================================================
 
 A release raises the number once. Each fix in that release that could

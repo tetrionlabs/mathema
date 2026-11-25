@@ -3652,6 +3652,22 @@ def _point_of(text: "str | None") -> dict:
     return out
 
 
+def _stated_point(text: "str | None") -> dict:  # :draft
+    """Intent:
+        `{name: number}` for the `name = number` and `name = p/q` pairs a
+        witness text states before any colon, each as a float.
+    """
+    out: dict = {}
+    for name, top, bottom in re.findall(
+            r"\b([A-Za-z_]\w*) = (-?[0-9.]+(?:e[-+]?\d+)?)(?:/([0-9]+))?(?![\w./])",
+            (text or "").split(":")[0]):
+        try:
+            out[name] = float(top) / float(bottom) if bottom else float(top)
+        except (ValueError, ZeroDivisionError):
+            continue
+    return out
+
+
 def _refused_by_own_guard(fn, witness) -> bool:
     """Whether f, called at a witness point (`{name: value}`), raises
     from one of its own guards."""
@@ -5921,7 +5937,7 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
             from . import analyze as _analyze
             facts = _analyze(fn)
         if stated:
-            derived = _policy.guard_policies(facts)
+            derived = _policy.guard_policies(facts, fn)
             clash = _policy.contradicting_policies(
                 [_policy.policy_text(_policy.parse_policy(
                     (f"{c.assuming}, " if c.assuming else "") + f"{c.lhs} {c.rhs}".strip()))
@@ -5952,7 +5968,7 @@ def _check_built(fn, built, values, stated, gates, scalar_empty, fn_mats,
                                    "mathema.surface": cj.source}))
         if gates:
             facts = facts if facts is not None else _effective_facts(fn, None)
-            guards = _policy.guard_policies(facts)
+            guards = _policy.guard_policies(facts, fn)
             stated_rows = [p for p in out if (p.meta or {}).get("mathema.policy")]
             for cj in gates:
                 row = _policy.safety_gate(cj, fn, facts, domain or {}, stated_rows,
@@ -6313,7 +6329,17 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             # a claim to quietly record under a different spelling; a
             # pin is written in the call
             cj = pins_into_calls(cj, fn)
-            probe.statement = canonical_claim_text(cj)
+            try:
+                probe.statement = canonical_claim_text(cj)
+            except ValueError as error:
+                if "integer string conversion" not in str(error):
+                    raise
+                # Python refuses to write out an integer past its digit
+                # limit (`2 ** 100000`): the statement stays as written
+                said = ("the claim holds an integer of more digits than Python "
+                        "writes out, so the statement is kept as written")  # :draft
+                if said not in (probe.note or ""):
+                    probe.note = f"{probe.note or ''}; {said}".lstrip("; ")
         if cj.domain:
             probe.domain = {p2: domain_bound_to_json(b)
                             for p2, b in cj.domain.items()}
@@ -8650,6 +8676,10 @@ class _ClaimContext:
     companion_witness: "dict | None" = None
     # the caller's explicit trials, which bound the companion's points too
     companion_budget: "int | None" = None
+    # the point derive names when it falsifies the claim on the function
+    # a wrapper that only catches wraps, `{name: number}`: the probe runs
+    # the wrapper there first
+    wrapped_witness: "dict | None" = None  # :draft
     # each bound parameter's missing-value resolution, `{param:
     # domain.MissingDefaults}`: the members the hole class stands for
     # and the spellings of absence, the values a listed sentinel is
@@ -11910,6 +11940,129 @@ def _text_set_members(bound) -> "list | None":
     return sorted(set(values))
 
 
+def _kinds_the_claim_passes(cj, cj_domain: dict, inner) -> "dict | None":  # :draft
+    """Intent:
+        `{parameter: kind}` for the plain function `inner`: what each
+        parameter holds over every call `f(...)` the claim's two sides
+        write, each variable of the claim a number of its bound. None
+        unless each call fills every parameter by position with an
+        expression read as a finite number that cannot fail to evaluate
+        (`finite_number`), and the function takes nothing else.
+    """
+    import ast
+    from ._raise_reading import _union, finite_number, kind_of_bound
+    code = inner.__code__
+    if code.co_kwonlyargcount or code.co_flags & 0x0C:
+        return None
+    params = code.co_varnames[:code.co_argcount]
+    of_claim = {name: kind_of_bound(bound) for name, bound in (cj_domain or {}).items()}
+    found: dict = {}
+    for side in (cj.lhs, cj.rhs):
+        try:
+            tree = ast.parse(side, mode="eval")
+        except (SyntaxError, ValueError):
+            return None
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "f"):
+                continue
+            if node.keywords or len(node.args) != len(params):
+                return None
+            for param, argument in zip(params, node.args):
+                kind = finite_number(argument, of_claim, None)
+                if kind is None:
+                    return None
+                found[param] = _union(found[param], kind) if param in found else kind
+    return found if len(found) == len(params) and params else None
+
+
+def _lists_a_missing_value(bound) -> bool:  # :draft
+    """Intent:
+        Whether a claim's binding lists a missing value as one of its own
+        points: a sentinel (`None`, `nan`, `absent`, `missing` in any
+        spelling) or a float nan in a finite set, a sentinel in a set
+        piece of a domain, or absence a domain admits (`{1.0}|absent`).
+    """
+    from .domain import Domain, is_sentinel
+    if isinstance(bound, frozenset):
+        return any(v is None or is_sentinel(v) or (type(v) is float and v != v)
+                   for v in bound)
+    if isinstance(bound, Domain):
+        return bool(bound.absent) or any(
+            isinstance(piece, frozenset) and _lists_a_missing_value(piece)
+            for piece in bound.pieces)
+    return False
+
+
+def _through_a_wrapper_that_only_catches(ctx: "_ClaimContext", fn) -> "Probe | None":  # :draft
+    """Intent:
+        The proven row for a comparison of values claimed on a wrapper
+        that returns the wrapped function's own value wherever that
+        function returns (`only_catches`), or None. Two things are shown
+        of the wrapped function over the claim's whole domain: derive
+        proves the claim itself on it, as its own claim through every
+        gate of the derive stage; and no step of its body can raise in
+        Python's float and integer arithmetic at the values the claim
+        passes (`step_that_may_raise`). With both, the wrapper returns
+        the function's values and the claim holds on it.
+
+    Notes:
+        derive's proof of a value claim reasons over real numbers and
+        says nothing where a call raises (a float power or `math.exp`
+        past the largest float), which is where the wrapper returns an
+        `except` clause's value: so the second part is read from the
+        body, never from a derive proof. Not attempted for a claim with a
+        premise, a tolerance, bound functions, a family of its own, a
+        negation, or one that assumes the function is defined or sets its
+        own guards aside: those are proofs over part of the domain.
+
+        Where derive falsifies the claim on the wrapped function, the
+        point it names is kept on `ctx.wrapped_witness` for the probe to
+        run the wrapper at; nothing is concluded from it here.
+
+        Not attempted where the claim's domain lists a missing value
+        (`_lists_a_missing_value`): derive's proof on the wrapped function
+        accepts a raise there, which is where the wrapper returns an
+        `except` clause's value instead, so the listed point is judged by
+        running it on the wrapper.
+    """
+    from ._raise_reading import step_that_may_raise
+    from .symbolic._base import only_catches
+    cj = ctx.cj
+    if cj.relation not in ("==", "!=", "<=", ">=", "<", ">") or cj.route not in ("derive", "best") \
+            or ctx.family is not None or ctx.extra or ctx.assumption is not None \
+            or ctx.assume_defined or ctx.exclude_own_guards or cj.tolerance is not None \
+            or cj.negated or getattr(cj, "funcs", None):
+        return None
+    inner = only_catches(fn)
+    if inner is None or not any(re.search(r"\bf\(", side) for side in (cj.lhs, cj.rhs)):
+        return None
+    if any(_lists_a_missing_value(bound) for bound in (ctx.cj_domain or {}).values()):
+        return None
+    try:
+        (row,) = check_conjectures(inner, [_dc_replace(cj, route="derive")])
+    except Exception:
+        return None
+    if row.verdict == "falsified":
+        ctx.wrapped_witness = _stated_point(row.counterexample)
+        return None
+    if row.verdict != "proven" or not str(row.route or "").startswith("derive"):
+        return None
+    kinds = _kinds_the_claim_passes(cj, ctx.cj_domain, inner)
+    if kinds is None or step_that_may_raise(inner, kinds) is not None:
+        return None
+    name = getattr(fn.__code__, "co_qualname", fn.__code__.co_name)
+    return Probe(
+        cj.name, ctx.statement, "proven", route="derive", note=ctx.note,
+        # :draft
+        sketch=(f"the wrapper `{name}` returns what `{inner.__name__}` returns "
+                f"wherever it returns; derive proves of `{inner.__name__}` the same "
+                f"claim ({row.sketch or row.route}), and no step of its body can raise "
+                f"in float arithmetic over the claim's domain, so it returns on the "
+                f"whole domain"),
+        meta={"mathema.derive_route": "derive"})
+
+
 def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        extensive: bool) -> "Probe | None":
     """Intent:
@@ -11927,6 +12080,19 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
     cj, statement, note = ctx.cj, ctx.statement, ctx.note
     exact_law = False
     cj_domain, family = ctx.cj_domain, ctx.family
+    from .symbolic._base import call_keywords
+    from .symbolic._prove import suspended_call_refusal
+    with call_keywords(cj.lhs if cj.relation == "raises" else None):
+        suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        through = _through_a_wrapper_that_only_catches(ctx, fn)  # :draft
+        if through is not None:
+            return through
+        ctx.derive_undecided = Probe(
+            cj.name, statement, "unknown", route="derive",
+            note=f"{note}; {suspended}".lstrip("; "),
+            meta={"mathema.derive_status": "unsupported"})
+        return None
     # A registered family's own "derive" route is tried before
     # the ordinary derive_ineligible check below; it doesn't
     # go through try_prove()'s lhs/rhs machinery at all (a
@@ -12344,7 +12510,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
         # unliftable from try_prove_raises itself, same as any
         # other undecidable derive claim.
         proof = try_prove_raises(fn, facts, cj.lhs, cj.rhs or None,
-                                 domain=cj_domain)
+                                 domain=cj_domain,
+                                 bound_names=frozenset(bound_funcs or ()),
+                                 missing=ctx.missing)
     else:
         exact_law = True
         with _lengths_scope(cj, family, facts):
@@ -13777,6 +13945,15 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         budget = cj.trials
     critical_hints, truncated_hints = setup.critical_hints, setup.truncated_hints
     extra_cycles, probe_route = setup.extra_cycles, setup.route
+    if ctx.wrapped_witness:  # :draft
+        # the point derive names on the function a catching wrapper
+        # wraps is among the first draws of its parameter
+        from .probing import _SpecialCycle as _Cycle
+        critical_hints, extra_cycles = dict(critical_hints), dict(extra_cycles)
+        for _p, _v in ctx.wrapped_witness.items():
+            if _p in facts.params:
+                critical_hints[_p] = [_v, *critical_hints.get(_p, [])]
+                extra_cycles[_p] = _Cycle(rng, values=critical_hints[_p])
     # whether a draw evaluated this pass sat on an analytically
     # discovered critical point (`SamplingSetup.earned_route`)
     drew_critical = False

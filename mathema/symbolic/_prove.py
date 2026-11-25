@@ -3329,6 +3329,9 @@ def try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
     false wherever the code raises. `~=` is decided as `abs(lhs - rhs)
     <= ε` (see `_try_prove_within_epsilon`), or, under a tolerance kind,
     as the bound the kind states (`_try_prove_within_kind`)."""
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        return ProofResult("unliftable", sketch=suspended)
     from .._tolerance import ToleranceKind, bare
     if isinstance(tolerance, ToleranceKind):
         if relation != "~=":
@@ -4744,54 +4747,103 @@ def _try_prove(fn, facts, lhs_src: str, rhs_src: str, relation: str,
         return ProofResult("undecided", sketch=f"{type(e).__name__} during proof: {e}")
 
 
-def _raised_name_is_not_the_claimed_class(fn, name: str) -> "str | None":
+def suspended_call_refusal(fn) -> "str | None":
     """Intent:
-        Why the name a function raises under is not shown to be the
-        exception class a claim means by that name, or None when it is:
-        in a Python function the name must not be a local or enclosed
-        variable, what the function's globals (then the builtins) bind
-        it to must be the very class the claim's name resolves to, and
-        building an instance must run no constructor written outside
-        the builtins. A callable with no Python namespace is not
-        checked.
+        Why derive reads nothing of `fn`: it is a wrapper whose call is
+        not read (`wrapper_refusal`), or calling it returns a generator
+        or coroutine object in place of running its body
+        (`call_suspends`). None when the call runs the body derive
+        reads.
     """
-    import builtins
-    code = getattr(fn, "__code__", None)
-    namespace = getattr(fn, "__globals__", None)
-    if code is None or namespace is None:
+    from ._base import call_suspends, innermost, wrapper_refusal
+    wrapped = wrapper_refusal(fn)
+    if wrapped is not None:
+        return wrapped
+    kind = call_suspends(innermost(fn))
+    if kind is None:
         return None
-    if name in code.co_varnames or name in code.co_cellvars or name in code.co_freevars:
-        return (f"`{name}` is a variable of the function or of an enclosing one, not "
-                f"shown to be the exception class the claim names")
-    missing = object()
-    bound = namespace.get(name, getattr(builtins, name, missing))
-    from ..conjecture import _resolve_exception_type
-    try:
-        claimed = _resolve_exception_type(name, fn)
-    except Exception:
-        claimed = None
-    if bound is missing or claimed is None or bound is not claimed:
-        return (f"`{name}` where the function is defined is not the exception class the "
-                f"claim names")
-    if type(claimed) is not type or any(
-            klass.__module__ != "builtins" and ("__init__" in vars(klass)
-                                                or "__new__" in vars(klass))
-            for klass in claimed.__mro__):
-        return (f"building a `{name}` runs a constructor written outside the builtins, "
-                f"which may itself raise")
-    return None
+    # :draft
+    return (f"calling the function returns {kind} object, which runs none of the "
+            f"body until it is iterated or awaited, so the body is not what the "
+            f"call does")
+
+
+def _unread_parameters(fn, facts, domain: "dict | None" = None,
+                       structures_admit: bool = False,
+                       missing: "dict | None" = None) -> frozenset:  # :draft
+    """Intent:
+        The parameters no value passed for changes what the call does: the
+        function's body never names them, or names one only as the target
+        of a single `del` statement of its own top level, which runs at
+        most once and reads nothing; and nothing between the call and the
+        body reads them (`parameters_no_wrapper_reads`). A body that names
+        `locals`, `vars`, `eval` or `exec`, which can read its parameters
+        without naming them, has none. With `domain`, a parameter a domain
+        guard judges and lets through at every member of its finite set
+        counts too: no value of that set changes what the call does, a
+        missing value it lists realised by the parameter's resolution in
+        `missing`.
+    """
+    from ._base import parameters_no_wrapper_reads
+    tree = getattr(facts, "tree", None)
+    if tree is None or not hasattr(tree, "body"):
+        return frozenset()
+    names = [n for stmt in tree.body for n in ast.walk(stmt) if isinstance(n, ast.Name)]
+    named = {n.id for n in names}
+    if named & {"locals", "vars", "eval", "exec"}:
+        return frozenset()
+    deleted = [target for stmt in tree.body if isinstance(stmt, ast.Delete)
+               for target in stmt.targets if isinstance(target, ast.Name)]
+    only_deleted = {t.id for t in deleted
+                    if sum(1 for n in names if n.id == t.id) == 1}
+    unnamed = frozenset(p for p in facts.params if p not in named or p in only_deleted)
+    return unnamed and parameters_no_wrapper_reads(fn, unnamed, domain, structures_admit,
+                                                   missing)
+
+
+def _listed_missing(domain: dict) -> list:
+    """Intent:
+        `x = nan` for each missing value a parameter's finite set lists
+        (a sentinel member, or the absence the set admits), in parameter
+        order; empty when no finite set lists one. A missing value a
+        type clause admits beside an interval (`[-5, -1] : float|nan`)
+        is the type's, governed by the missing-value policies, and is
+        not listed.
+    """
+    from ..domain import ABSENT, Domain, _as_domain, _is_enumerated, _set_sentinels
+    out = []
+    for param, bound in domain.items():
+        try:
+            dom = _as_domain(bound)
+        except Exception:
+            continue
+        if not _is_enumerated(dom):
+            continue
+        found = [str(s) for s in _set_sentinels(dom)]
+        if isinstance(dom, Domain) and dom.absent and ABSENT not in _set_sentinels(dom):
+            found.append(str(ABSENT))
+        out += [f"{param} = {s}" for s in found]
+    return out
 
 
 def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
-                     domain: dict | None = None, max_callee_depth: int = 3) -> ProofResult:
+                     domain: dict | None = None, max_callee_depth: int = 3,
+                     bound_names: frozenset = frozenset(),
+                     missing: "dict | None" = None) -> ProofResult:
     """A raises(...) claim on the derive route, only ever reachable via
     domain-conditioned branch pruning: a raises claim with no declared
     domain specific enough to determine which branch runs stays
     unliftable, the same as any other derive claim would with an
-    unresolvable branch. `call_src` must be a bare `f(...)` call (no
-    multi-function claims here, same restriction check_conjectures()
-    already applies before this is ever called). `max_callee_depth` is
+    unresolvable branch. `call_src` must be a bare `f(...)` call; the
+    reading binds the domain to the function's own parameters, so a proof
+    stands only when the call passes each parameter the value the domain
+    gives it (`_call_departs_from_domain`). `bound_names` are the names
+    the claim binds besides its domain's (a function letter), none of
+    which reads as a constant of the claim language. `missing` maps a
+    parameter to the resolution of the missing values its set lists, the
+    values the claim's points give it. `max_callee_depth` is
     forwarded to lift_conditioned(), see lift()'s own docstring."""
+    from ._base import call_keywords, hashes_its_arguments, parameters_no_wrapper_reads
     try:
         tree = ast.parse(call_src, mode="eval")
     except SyntaxError as e:
@@ -4799,6 +4851,855 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if not (isinstance(tree.body, ast.Call) and isinstance(tree.body.func, ast.Name)
             and tree.body.func.id == "f"):
         return ProofResult("unliftable", sketch="raises(...) needs a bare f(...) call")
+    from ._conditioned import call_constants
+    params = _call_parameters(fn, facts.params)
+    reading = _CallReading(
+        params=params, domain=domain or {},
+        taken=frozenset(facts.params) | frozenset(domain or {}) | frozenset(bound_names))
+    with call_keywords(call_src), call_constants(_scalar_constants(tree.body, reading)):
+        proof = _raises_read(fn, facts, exc_name, domain, max_callee_depth, missing)
+        if proof.status != "proven":
+            return proof
+        refused = _structure_guard_refusal(fn, tree.body, reading)  # :draft
+        if refused is not None:
+            return ProofResult("unliftable", sketch=refused)
+        untouched = parameters_no_wrapper_reads(fn, params, structures_admit=True)
+        reading = replace(
+            reading, untouched=untouched,
+            unread=_unread_parameters(fn, facts, structures_admit=True) & untouched,
+            hashed=hashes_its_arguments(fn))
+    if _call_departs_from_domain(tree.body, reading):  # :draft
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"derive reads raises(...) at f({', '.join(params)}) over the "
+            f"claim's domain, and the call written is {call_src}"))
+    unread = _unread_argument(tree.body, reading)
+    if unread is not None and unread[1] is not None:
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"the argument `{unread[0]}` is not read: {unread[1]} is a form derive "
+            f"does not read in a call's argument"))
+    if unread is not None:
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"the call's argument `{unread[0]}` is evaluated before the function runs, "
+            f"and is not read as unable to raise"))
+    return proof
+
+
+def _structure_guard_refusal(fn, call: ast.Call, reading: "_CallReading") -> "str | None":  # :draft
+    """Intent:
+        Why an `enforce_structure` guard around the function is not read
+        to let the call through, None when there is no such guard or each
+        lets every value through. For each parameter a guard declares a
+        structure on, the value the call passes is judged as the guard
+        judges it, by the property's own check: a constant in that place
+        (`_constant_value`) at its value; the parameter's own variable at
+        every member of the finite set the domain binds it to, or, for an
+        interval, only when the properties are `is_finite` and `is_real`
+        and the interval has no infinite closed end, since every real
+        number of it then has both. Anything else is not read: a parameter
+        the call does not fill or the domain does not bind, another
+        property over an interval, a listed missing value.
+    """
+    import math
+    from .. import matrices
+    from ..domain import Interval, _as_domain, is_sentinel
+    from ._base import structure_guards
+    guards = structure_guards(fn)
+    if not guards:
+        return None
+    pairs = dict(zip(reading.params, _positional_arguments(call)))
+    pairs.update({k.arg: k.value for k in call.keywords if k.arg is not None})
+
+    def passes(prop: str, value) -> bool:
+        entry = matrices.PROPERTIES.get(prop)
+        if entry is None:
+            return False
+        found = entry.check(value)
+        return not (found is False or (found is None and entry.level == "finite"
+                                       and not matrices.is_numeric(value)))
+
+    def admitted(param: str, props) -> bool:
+        argument = pairs.get(param)
+        if argument is None:
+            return False
+        value = _constant_value(argument, reading.taken)
+        if value is not _UNREAD:
+            return all(passes(prop, value) for prop in props)
+        if not (isinstance(argument, ast.Name) and argument.id == param
+                and param in reading.domain):
+            return False
+        dom = _as_domain(reading.domain[param])
+        if dom.dims or dom.base_type not in ("R", "Z", "N") or not dom.pieces:
+            return False
+        for piece in dom.pieces:
+            if isinstance(piece, frozenset):
+                if any(is_sentinel(v) or not all(passes(prop, v) for prop in props)
+                       for v in piece):
+                    return False
+            elif isinstance(piece, Interval) or (isinstance(piece, tuple) and len(piece) == 2):
+                closed = (getattr(piece, "closed_lo", True), getattr(piece, "closed_hi", True))
+                if not set(props) <= {"is_finite", "is_real"} or any(
+                        not _is_number(end) or end != end
+                        or (math.isinf(end) and shut) for end, shut in zip(piece, closed)):
+                    return False
+            else:
+                return False
+        return True
+
+    try:
+        for declared in guards:
+            if declared is None:
+                return "an enforce_structure guard around the function is not read"
+            for param, props in declared.items():
+                if not admitted(param, props):
+                    return (f"the enforce_structure guard judges `{param}` "
+                            f"({', '.join(sorted(props))}) before the function runs, and is "
+                            f"not read to let through every value the call passes for it")
+    except Exception as error:
+        return f"an enforce_structure guard around the function is not read ({type(error).__name__})"
+    return None
+
+
+def _scalar_constants(call: ast.Call, reading: "_CallReading") -> dict:  # :draft
+    """Intent:
+        `{parameter: value}` for each parameter the domain does not bind
+        whose place in the call holds a constant (`_constant_value`) that
+        is an `int`, a `float`, a `bool`, a `str`, a tuple, a list or None: the value the
+        function's body runs with there. Empty for a call that fills a
+        parameter twice or one the function does not have.
+    """
+    pairs = [(reading.params[i] if i < len(reading.params) else None, a)
+             for i, a in enumerate(_positional_arguments(call))]
+    pairs += [(k.arg if k.arg in reading.params else None, k.value) for k in call.keywords]
+    names = [param for param, _ in pairs]
+    if None in names or len(set(names)) != len(names):
+        return {}
+    out = {}
+    for param, argument in pairs:
+        value = _constant_value(argument, reading.taken)
+        if param not in reading.domain and value is not _UNREAD \
+                and (value is None or type(value) in (int, float, bool, str, tuple, list)):
+            out[param] = value
+    return out
+
+
+def _call_parameters(fn, params: list) -> list:  # :draft
+    """Intent:
+        The parameters a call of `fn` fills, in order: `params` without
+        its first when `fn` is a method bound to an instance of a plain
+        Python function whose first parameter that is, since the call
+        `f(a, b)` runs the function at `(instance, a, b)`; `params`
+        itself for anything else.
+    """
+    import types
+    held = getattr(fn, "__func__", None)
+    if type(fn) is types.MethodType and type(held) is types.FunctionType \
+            and "__wrapped__" not in vars(held) and params \
+            and held.__code__.co_argcount >= 1 \
+            and held.__code__.co_varnames[0] == params[0]:
+        return list(params[1:])
+    return list(params)
+
+
+@dataclass(frozen=True)
+class _CallReading:
+    """Intent:
+        What reading the arguments of a claim's call needs to know of the
+        function and the claim: `params`, the parameters the call fills in
+        order; `domain`, the sets the claim binds; `taken`, every name
+        that stands for a variable or a bound function in the claim, so is
+        not a constant of the claim language; `untouched`, the parameters
+        no wrapper on the way reads (`parameters_no_wrapper_reads`);
+        `unread`, the ones among them the body never reads either
+        (`_unread_parameters`); and `hashed`, whether a wrapper on the way
+        hashes each argument (`hashes_its_arguments`).
+    """
+    params: list
+    domain: dict
+    taken: frozenset = frozenset()
+    untouched: frozenset = frozenset()
+    unread: frozenset = frozenset()
+    hashed: bool = False
+
+
+_UNREAD = object()
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _constant_value(node: ast.AST, taken: frozenset = frozenset()):  # :draft
+    """Intent:
+        The value an expression of the claim language evaluates to when it
+        names no variable and no step of evaluating it can raise; `_UNREAD`
+        for anything else. Read:
+
+        - a literal;
+        - a constant of the claim language (`pi`, `e`, `inf`, `nan`), unless
+          the claim binds that name (`taken`), in which case it is a
+          variable;
+        - `+a` and `-a` of a truth value, an integer;
+        - over integers and floats: `+a`, `-a`, `a + b`, `a - b`, `a * b`,
+          and `a / b`, `a // b`, `a % b` with `b` not zero, each computed
+          here, so an overflow is seen and leaves it unread;
+        - a comparison of integers and floats with `<`, `<=`, `>`, `>=`,
+          `==`, `!=`, and an identity or membership test as
+          `_constant_test` reads it;
+        - a call of the claim language that gives a value (`_constant_call`):
+          `abs(a)`, `sqrt(a)`, `max(a, b)`, `len`, `sum`, `sorted`, `str`;
+        - a power of numbers, computed here; an integer power is read only
+          while its result stays within `_POWER_BITS` bits;
+        - `not a`; `a and b`, `a or b` and `b if a else c`, the operands
+          Python evaluates each read this way and no other (`1 or 1 / 0` is
+          1, `0 or 1 / 0` is unread);
+        - a tuple, a list or a string subscripted by an integer or a truth
+          value, where the index is in range;
+        - a dict display of plain keys subscripted by a key it holds
+          (`_dict_display`);
+        - a string, a tuple or a list times an integer (`_constant_repeat`);
+        - a tuple or a list of expressions each read this way.
+
+        Anything else is not read (`_unread_form` names the form).
+    """
+    from .._math_vocab import MATH_CONSTANTS
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id in taken or node.id not in MATH_CONSTANTS:
+            return _UNREAD
+        return MATH_CONSTANTS[node.id]
+    if isinstance(node, (ast.Tuple, ast.List)):
+        items = [_constant_value(item, taken) for item in node.elts]
+        if any(item is _UNREAD for item in items):
+            return _UNREAD
+        return tuple(items) if isinstance(node, ast.Tuple) else items
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _constant_value(node.operand, taken)
+        if not (_is_number(value) or type(value) is bool):  # :draft
+            return _UNREAD
+        return -value if isinstance(node.op, ast.USub) else +value
+    if isinstance(node, ast.Compare):
+        values = [_constant_value(side, taken) for side in [node.left, *node.comparators]]
+        if any(value is _UNREAD for value in values):
+            return _UNREAD
+        results = [_constant_test(op, a, b)
+                   for op, a, b in zip(node.ops, values, values[1:])]
+        if any(result is _UNREAD for result in results):
+            return _UNREAD
+        return all(results)
+    if isinstance(node, ast.Call):
+        return _constant_call(node, taken)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = _constant_value(node.operand, taken)
+        return _UNREAD if value is _UNREAD else not value
+    if isinstance(node, ast.BoolOp):
+        # operands in order, as Python runs them: the first that settles
+        # the result ends it, and none after it is evaluated  :draft
+        stops = (lambda v: not v) if isinstance(node.op, ast.And) else bool
+        value = _UNREAD
+        for operand in node.values:
+            value = _constant_value(operand, taken)
+            if value is _UNREAD or stops(value):
+                break
+        return value
+    if isinstance(node, ast.IfExp):
+        # the test, then the one branch it selects  :draft
+        test = _constant_value(node.test, taken)
+        if test is _UNREAD:
+            return _UNREAD
+        return _constant_value(node.body if test else node.orelse, taken)
+    if isinstance(node, ast.Subscript):
+        index = _constant_value(node.slice, taken)
+        if isinstance(node.value, ast.Dict):  # :draft
+            pairs = _dict_display(node.value, taken)
+            if pairs is _UNREAD or not _is_plain_key(index) or index not in pairs:
+                return _UNREAD
+            return pairs[index]
+        held = _constant_value(node.value, taken)
+        if type(held) not in (tuple, list, str) or type(index) not in (int, bool) \
+                or not -len(held) <= index < len(held):
+            return _UNREAD
+        return held[index]
+    if not isinstance(node, ast.BinOp):
+        return _UNREAD
+    a, b = _constant_value(node.left, taken), _constant_value(node.right, taken)
+    if isinstance(node.op, ast.Mult):  # :draft
+        repeated = _constant_repeat(a, b)
+        if repeated is not _UNREAD:
+            return repeated
+    if not (_is_number(a) and _is_number(b)):
+        return _UNREAD
+    if isinstance(node.op, ast.Pow):
+        return _constant_power(a, b)
+    try:
+        if isinstance(node.op, ast.Add):
+            return a + b
+        if isinstance(node.op, ast.Sub):
+            return a - b
+        if isinstance(node.op, ast.Mult):
+            return a * b
+        if b == 0:
+            return _UNREAD
+        if isinstance(node.op, ast.Div):
+            return a / b
+        if isinstance(node.op, ast.FloorDiv):
+            return a // b
+        if isinstance(node.op, ast.Mod):
+            return a % b
+    except (OverflowError, ZeroDivisionError):
+        return _UNREAD
+    return _UNREAD
+
+
+_ORDER_TESTS = {ast.Lt: lambda a, b: a < b, ast.LtE: lambda a, b: a <= b,
+                ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
+                ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b}
+
+#: the values Python holds one object of, so `is` on them is decided
+_SINGLETONS = (None, True, False)
+
+
+def _constant_test(op: ast.cmpop, a, b):  # :draft
+    """Intent:
+        `a <op> b` for two constants (`_constant_value`), `_UNREAD` where
+        it is not read: an ordering or equality of integers and floats;
+        `is` and `is not` where one side is None, True or False, the
+        objects Python holds one of, so identity is equality of object;
+        `in` and `not in` of any constant in a tuple or a list, which
+        compares with the builtin `==` and cannot raise, and of a string
+        in a string. A nan on either side of a membership test is not
+        read, since the test then turns on object identity.
+    """
+    if type(op) in _ORDER_TESTS:
+        return _ORDER_TESTS[type(op)](a, b) if _is_number(a) and _is_number(b) else _UNREAD
+    if isinstance(op, (ast.Is, ast.IsNot)):
+        if not any(side is single for side in (a, b) for single in _SINGLETONS):
+            return _UNREAD
+        return (a is b) if isinstance(op, ast.Is) else (a is not b)
+    if isinstance(op, (ast.In, ast.NotIn)):
+        if type(b) is str and type(a) is str:
+            found = a in b
+        elif type(b) in (tuple, list) and not _holds_nan(a) and not _holds_nan(b):
+            found = a in b
+        else:
+            return _UNREAD
+        return found if isinstance(op, ast.In) else not found
+    return _UNREAD
+
+
+def _holds_nan(value) -> bool:
+    """Intent:
+        Whether a constant is a float nan or a tuple or a list holding one.
+    """
+    if type(value) in (tuple, list):
+        return any(_holds_nan(item) for item in value)
+    return type(value) is float and value != value
+
+
+def _is_plain_key(value) -> bool:  # :draft
+    """Intent:
+        Whether a constant is an `int`, a `float` that is a number, a
+        `bool` or a `str`: a key whose hash and equality are the builtin
+        ones.
+    """
+    return type(value) in (int, bool, str) or (type(value) is float and value == value)
+
+
+def _dict_display(node: ast.Dict, taken: frozenset):  # :draft
+    """Intent:
+        The dict a display `{k: v, ...}` builds, where every key is a
+        plain constant (`_is_plain_key`) and every value a constant
+        (`_constant_value`), so building it cannot raise; `_UNREAD` for a
+        display that unpacks a mapping or holds anything else. Keys that
+        are equal share an entry and the last value stays, as Python
+        builds it.
+    """
+    out: dict = {}
+    for key_node, value_node in zip(node.keys, node.values):
+        if key_node is None:
+            return _UNREAD
+        key, value = _constant_value(key_node, taken), _constant_value(value_node, taken)
+        if value is _UNREAD or not _is_plain_key(key):
+            return _UNREAD
+        out[key] = value
+    return out
+
+
+#: the most items a string, tuple or list repeated as a constant may have
+_REPEAT_ITEMS = 4096
+
+
+def _constant_repeat(a, b):  # :draft
+    """Intent:
+        `a * b` where one side is a string, a tuple or a list and the
+        other an `int` or a `bool`: the sequence repeated, empty for a
+        count of zero or less. Read only while the count is at most
+        `_REPEAT_ITEMS` in magnitude and the sequence's length times that
+        magnitude is at most `_REPEAT_ITEMS`; `_UNREAD` for anything else
+        (`'a' * 1.5` raises TypeError, and a count past the index size,
+        `'a' * -2 ** 64`, raises OverflowError).
+    """
+    if type(a) in (int, bool) and type(b) in (str, tuple, list):
+        a, b = b, a
+    if not _is_repetition(a, b) or abs(int(b)) > _REPEAT_ITEMS \
+            or len(a) * abs(int(b)) > _REPEAT_ITEMS:
+        return _UNREAD
+    return a * b
+
+
+def _is_repetition(a, b) -> bool:  # :draft
+    """Intent:
+        Whether `a * b` repeats a sequence: `a` a string, a tuple or a
+        list and `b` an `int` or a `bool`.
+    """
+    return type(a) in (str, tuple, list) and type(b) in (int, bool)
+
+
+#: the most bits an integer power read as a constant may have
+_POWER_BITS = 4096
+
+
+def _constant_power(a, b):  # :draft
+    """Intent:
+        `a ** b` for integers and floats, `_UNREAD` where Python raises
+        (`0 ** -1`, `2.0 ** 10000`) or gives a complex number (`(-8) **
+        0.5`). An integer to a non-negative integer power cannot raise; it
+        is computed only while `b` times the bits of `a` stays within
+        `_POWER_BITS`, and is unread above that.
+    """
+    if type(a) is int and type(b) is int and b >= 0 \
+            and b * max(1, a.bit_length()) > _POWER_BITS:
+        return _UNREAD
+    try:
+        result = a ** b
+    except (OverflowError, ZeroDivisionError):
+        return _UNREAD
+    return result if _is_number(result) else _UNREAD
+
+
+#: the functions of the claim language that take one number and give one
+_ONE_NUMBER_FUNCTIONS = ("abs", "Abs", "sqrt", "exp", "log", "log10", "log2",
+                         "sin", "cos", "tan", "floor", "ceil")
+
+
+def _constant_call(node: ast.Call, taken: frozenset):  # :draft
+    """Intent:
+        The value of a call of the claim language over constants
+        (`_constant_value`), run through the claim language's own table:
+        `abs`, `sqrt`, `exp`, the logarithms, `sin`, `cos`, `tan`, `floor`
+        or `ceil` of one integer or float, `min` or `max` of two or more,
+        kept when the result is an integer or a float; `len` of a tuple, a
+        list or a string, which the claim language spells `dim(v, 0)` and
+        runs through its own `dim`; `sum` and `sorted` of a tuple or a list of
+        integers and floats; `str` of a number, a string, None or a truth
+        value, where the table gives that name Python's own builtin. A
+        call that raises here (`exp(1000)`, `log(0)`, `sqrt(-1)`, `str` of
+        an integer too long to print) is unread, and so is a name the
+        claim binds and any other call.
+    """
+    from ..conjecture import _SAFE_FUNCS
+    if not isinstance(node.func, ast.Name) or node.keywords or node.func.id in taken:
+        return _UNREAD
+    name = node.func.id
+    called = _SAFE_FUNCS.get(name)
+    values = [_constant_value(argument, taken) for argument in node.args]
+    if not values or any(value is _UNREAD for value in values):
+        return _UNREAD
+    numbers = all(_is_number(value) for value in values)
+    first = values[0]
+    try:
+        if numbers and name in _ONE_NUMBER_FUNCTIONS and len(values) == 1:
+            result = called(first)
+        elif numbers and name in ("min", "max", "Min", "Max") and len(values) >= 2:
+            result = called(*values)
+        elif name == "dim" and len(values) == 2 and type(first) in (tuple, list, str) \
+                and type(values[1]) is int and values[1] == 0:
+            # `len(v)` in a claim is read as `dim(v, 0)`
+            result = called(first, 0)
+        elif len(values) != 1:
+            return _UNREAD
+        elif called is len and type(first) in (tuple, list, str):
+            return len(first)
+        elif (called is sum or called is sorted) and type(first) in (tuple, list) \
+                and all(_is_number(item) for item in first):
+            return called(first)
+        elif called is str and (first is None or type(first) in (int, float, str, bool)):
+            return str(first)
+        else:
+            return _UNREAD
+    except Exception:
+        return _UNREAD
+    return result if _is_number(result) else _UNREAD
+
+
+#: what each form of expression the constant reading has no rule for is called
+_FORM_WORDS = (
+    (ast.Dict, "a dict display"), (ast.Set, "a set display"),
+    (ast.ListComp, "a list comprehension"), (ast.SetComp, "a set comprehension"),
+    (ast.DictComp, "a dict comprehension"), (ast.GeneratorExp, "a generator expression"),
+    (ast.Lambda, "a lambda"), (ast.JoinedStr, "an f-string"),
+    (ast.Attribute, "an attribute"), (ast.Starred, "a starred expression"),
+    (ast.Slice, "a slice"), (ast.NamedExpr, "an assignment expression"),
+    (ast.Await, "an await"), (ast.Yield, "a yield"), (ast.YieldFrom, "a yield"),
+)
+
+
+def _unread_form(node: ast.AST, taken: frozenset = frozenset()) -> "str | None":  # :draft
+    """Intent:
+        Words for the form of expression that leaves `node` unread as a
+        constant (`_constant_value`), where the reading has no rule for
+        that form at all: "a dict display", "a call of `factorial`", "the
+        operator `@`", "a subscript of a list by a slice". None when every
+        form in the expression has a rule and one of them is not shown
+        unable to raise at these values (`1 / 0`, `0 ** -1`, `[1][2]`).
+        The innermost such form, in the order Python evaluates, is named.
+    """
+    if isinstance(node, ast.Lambda):
+        # nothing of a lambda's body runs where it is written
+        return "a lambda"
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Dict) \
+            and _dict_display(node.value, taken) is not _UNREAD \
+            and _constant_value(node.slice, taken) is not _UNREAD:
+        # a dict display that is read, and a key it does not hold
+        return None
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.expr_context, ast.operator, ast.unaryop, ast.boolop,
+                              ast.cmpop, ast.keyword)):
+            continue
+        if isinstance(node, ast.Call) and child is node.func:
+            continue
+        if _constant_value(child, taken) is _UNREAD:
+            return _unread_form(child, taken)
+    for kind, words in _FORM_WORDS:
+        if isinstance(node, kind):
+            return words
+    if isinstance(node, ast.Call):
+        from ..conjecture import _SAFE_FUNCS
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        if node.keywords:
+            return "a call with a keyword"
+        if name not in _ONE_NUMBER_FUNCTIONS \
+                and name not in ("min", "max", "Min", "Max", "dim") \
+                and not any(_SAFE_FUNCS.get(name) is known for known in (len, sum, sorted, str)):
+            return f"a call of `{name}`" if name else "a call"
+        values = [_constant_value(argument, taken) for argument in node.args]
+        if any(_SAFE_FUNCS.get(name) is known for known in (sum, sorted, str)) and (
+                len(values) != 1 or (_SAFE_FUNCS.get(name) is not str and not (
+                    type(values[0]) in (tuple, list)
+                    and all(_is_number(item) for item in values[0])))
+                or (_SAFE_FUNCS.get(name) is str and type(values[0]) in (tuple, list))):
+            # `sum` and `sorted` are read over numbers alone, `str` of
+            # a scalar alone
+            return (f"a call of `{name}` on a tuple or a list" if _SAFE_FUNCS.get(name) is str
+                    else f"a call of `{name}` on anything but numbers")
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+        a, b = _constant_value(node.left, taken), _constant_value(node.right, taken)
+        if isinstance(node.op, ast.Mult) and (_is_repetition(a, b) or _is_repetition(b, a)):
+            # :draft
+            return (f"a repetition of a string, a tuple or a list past {_REPEAT_ITEMS} "
+                    f"items or by a count past {_REPEAT_ITEMS}")
+        if not (_is_number(a) and _is_number(b)):
+            return (f"the operator `{_ARITHMETIC_TEXT[type(node.op)]}` on a value that is "
+                    f"not an integer or a float")
+        if isinstance(node.op, ast.Pow):
+            if type(a) is int and type(b) is int and b >= 0:
+                return f"an integer power of more than {_POWER_BITS} bits"
+            try:
+                if isinstance(a ** b, complex):
+                    return "a power with a complex result"
+            except (OverflowError, ZeroDivisionError):
+                return None
+        return None
+    if isinstance(node, ast.Compare) and all(
+            isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq))
+            for op in node.ops) and not all(
+            _is_number(_constant_value(side, taken)) for side in [node.left, *node.comparators]):
+        return "a comparison of values that are not integers or floats"
+    if isinstance(node, ast.Name):
+        return f"the name `{node.id}`"
+    if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.MatMult, ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)):
+        return f"the operator `{_OPERATOR_TEXT[type(node.op)]}`"
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+        return "the operator `~`"
+    if isinstance(node, ast.Compare) and not all(
+            isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq))
+            for op in node.ops):
+        return "a membership or identity test"
+    return None
+
+
+_ARITHMETIC_TEXT = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/",
+                    ast.FloorDiv: "//", ast.Mod: "%", ast.Pow: "**"}
+
+_OPERATOR_TEXT = {ast.MatMult: "@", ast.BitAnd: "&", ast.BitOr: "|", ast.BitXor: "^",
+                  ast.LShift: "<<", ast.RShift: ">>"}
+
+
+def _positional_arguments(call: ast.Call) -> list:  # :draft
+    """Intent:
+        The positional arguments of a call as Python passes them, a
+        starred tuple or list display (`*[1, 2]`) replaced by its elements
+        in order. Any other starred argument stays as it is written.
+    """
+    out: list = []
+    for argument in call.args:
+        if isinstance(argument, ast.Starred) and isinstance(argument.value, (ast.Tuple, ast.List)) \
+                and not any(isinstance(item, ast.Starred) for item in argument.value.elts):
+            out += argument.value.elts
+        else:
+            out.append(argument)
+    return out
+
+
+def _folded_number(node: ast.AST, taken: frozenset = frozenset()) -> "int | float | None":  # :draft
+    """Intent:
+        The integer or float a constant expression of the claim language
+        evaluates to (`_constant_value`), None when it is not read or its
+        value is not a number.
+    """
+    value = _constant_value(node, taken)
+    return value if _is_number(value) else None
+
+
+def _unread_argument(call: ast.Call,
+                     reading: "_CallReading | None" = None) -> "tuple[str, str | None] | None":  # :draft
+    """Intent:
+        `(source, form)` for the first argument of the call whose
+        evaluation is not read as unable to raise, None when every one is
+        read: a bare name (a variable the claim binds), a constant
+        expression of the claim language (`_constant_value`), or
+        arithmetic on the domain's variables that cannot fail over the
+        domain (`_total_over_the_domain`). `form` names
+        the form of expression the reading has no rule for
+        (`_unread_form`), and is None when the forms are all read and this
+        one may raise. A mapping unpacked into the call (`**k`) is not
+        read.
+    """
+    taken = reading.taken if reading is not None else frozenset()
+    for keyword in call.keywords:
+        if keyword.arg is None:
+            return f"**{ast.unparse(keyword.value)}", "an unpacked mapping"
+    for argument in [*_positional_arguments(call), *(k.value for k in call.keywords)]:
+        if (isinstance(argument, ast.Name) and argument.id in taken) \
+                or _constant_value(argument, taken) is not _UNREAD:
+            continue
+        if reading is not None and _names_a_variable(argument, reading):  # :draft
+            if _total_over_the_domain(argument, reading):
+                continue
+            return ast.unparse(argument), _unread_variable_form(argument, reading)
+        return ast.unparse(argument), _unread_form(argument, taken)
+    return None
+
+
+def _names_a_variable(node: ast.AST, reading: "_CallReading") -> bool:
+    """Intent:
+        Whether an expression names a variable the claim's domain binds.
+    """
+    return any(isinstance(n, ast.Name) and n.id in reading.domain for n in ast.walk(node))
+
+
+def _domain_kinds(reading: "_CallReading") -> dict:
+    """Intent:
+        What each variable the claim's domain binds holds, as a kind
+        (`kind_of_bound`).
+    """
+    from .._raise_reading import kind_of_bound
+    return {name: kind_of_bound(bound) for name, bound in reading.domain.items()}
+
+
+def _total_over_the_domain(node: ast.AST, reading: "_CallReading") -> bool:  # :draft
+    """Intent:
+        Whether an expression over the claim's variables is arithmetic
+        that cannot fail at any point of the domain and gives a finite
+        number there (`finite_number`): `x / 2`, `1 / (x * x + 1)`, and
+        `1 / x` only where the domain keeps `x` away from zero; `not x`,
+        `[x][0]` and `(x, 1)[0]` (`_total_with`).
+    """
+    return _total_with(node, _domain_kinds(reading), reading.taken)
+
+
+def _total_with(node: ast.AST, kinds: dict, taken: frozenset) -> bool:  # :draft
+    """Intent:
+        Whether an expression over variables of `kinds` evaluates without
+        raising: a finite number (`finite_number`); a constant
+        (`_constant_value`); `not a`, with `a` read this way and a number,
+        a constant or a display, none of which raises on its truth; a
+        tuple or list display of items read this way; and such a display
+        subscripted by an integer or truth value in range, every item
+        evaluated first.
+    """
+    from .._raise_reading import finite_number
+    if finite_number(node, kinds, None) is not None \
+            or _constant_value(node, taken) is not _UNREAD:
+        return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return _total_with(node.operand, kinds, taken)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return not any(isinstance(item, ast.Starred) for item in node.elts) \
+            and all(_total_with(item, kinds, taken) for item in node.elts)
+    if isinstance(node, ast.Subscript) and isinstance(node.value, (ast.Tuple, ast.List)):
+        index = _constant_value(node.slice, taken)
+        return type(index) in (int, bool) and -len(node.value.elts) <= index < len(node.value.elts) \
+            and _total_with(node.value, kinds, taken)
+    return False
+
+
+def _unread_variable_form(node: ast.AST, reading: "_CallReading") -> str:  # :draft
+    """Intent:
+        Words for the form that leaves an expression over the claim's
+        variables unread as arithmetic that cannot fail
+        (`_total_over_the_domain`): the innermost part not read, in the
+        order Python evaluates, whose own parts are all read.
+    """
+    kinds = _domain_kinds(reading)
+
+    def read(part: ast.AST) -> bool:
+        return _total_with(part, kinds, reading.taken)
+
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.expr) and not read(child) \
+                and not (isinstance(node, ast.Call) and child is node.func):
+            return _unread_variable_form(child, reading)
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        return f"a call of `{name}` on a variable" if name else "a call on a variable"
+    if isinstance(node, ast.IfExp):
+        return "a conditional on a variable"
+    if isinstance(node, ast.BoolOp):
+        return "`and` or `or` on a variable"
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return "`not` on a variable"
+    if isinstance(node, ast.Compare):
+        return "a comparison on a variable"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return "a power of a variable by anything but a small literal integer"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.FloorDiv, ast.Mod)):
+        return "a floor division or remainder by a divisor that is not a literal"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return "a division by a divisor not shown to stay away from zero"
+    if isinstance(node, ast.BinOp):
+        return "arithmetic on a variable not shown to stay within the largest float"
+    return "an expression of a variable"
+
+
+def _is_literal_arithmetic(node: ast.AST) -> bool:
+    """Intent:
+        Whether an expression is built of literals alone, with no name and
+        no call, and no tuple or list: a literal, or arithmetic over them.
+    """
+    return not any(isinstance(n, (ast.Name, ast.Call, ast.Tuple, ast.List, ast.Compare))
+                   for n in ast.walk(node))
+
+
+def _hashes(value) -> bool:
+    """Intent:
+        Whether a constant read from a claim's call (`_constant_value`: a
+        literal, a number, a tuple or a list of them) hashes; a list, or a
+        tuple holding one, does not.
+    """
+    if isinstance(value, list):
+        return False
+    if isinstance(value, tuple):
+        return all(_hashes(item) for item in value)
+    return True
+
+
+def _call_departs_from_domain(call: ast.Call, reading: _CallReading) -> bool:
+    """Intent:
+        Whether the call passes, in some parameter's place, a value other
+        than the one the reading of the function stands for. Each argument
+        is paired with the parameter it fills, by position or by keyword;
+        an argument that fills no parameter of the function, or one
+        already filled, departs. An argument that is its own parameter's
+        name departs from nothing, and neither does the bare name of
+        another variable the domain binds in the place of a parameter
+        neither the body nor any wrapper reads (`f(x, x)` where nothing
+        reads the second), nor an expression of the domain's variables
+        there (`f(x, x / 2)`), which `_unread_argument` judges. Any other
+        argument that names a variable departs (`f(-x)`, `f(x + 10)`,
+        `f(y, x)`, `f(x=y, y=x)`). A starred tuple or list display fills
+        the places its elements would.
+
+        A constant (`_constant_value`) departs from nothing in the place
+        of a parameter neither the body nor any wrapper on the way reads,
+        whatever the domain binds that parameter to. In the place of a
+        parameter the domain binds and something reads, it departs unless
+        it is the number of the one point the domain binds (`for x in
+        [-5, -1]`, `f(1)`, `f(1 + 1)`, `f("a")` depart). In the place of a
+        parameter the domain does not bind, a literal or arithmetic over
+        literals departs from nothing, and so does any other constant
+        (`pi`, `max(1, 2)`, `(1, 2)`, `1 < 2`) where no wrapper on the way
+        reads that parameter: the path to the raise is read with the
+        parameter holding that value (`_scalar_constants`). A constant
+        that does not hash departs where a wrapper on the way hashes its
+        arguments.
+    """
+    params, domain, taken = reading.params, reading.domain, reading.taken
+    pairs = [(params[index] if index < len(params) else None, argument)
+             for index, argument in enumerate(_positional_arguments(call))]
+    pairs += [(k.arg if k.arg in params else None, k.value) for k in call.keywords]
+    filled = [param for param, _ in pairs]
+    if None in filled or len(set(filled)) != len(filled):
+        return True
+    for param, argument in pairs:
+        if isinstance(argument, ast.Name) and argument.id == param:
+            continue
+        if isinstance(argument, ast.Name) and argument.id in domain \
+                and param in reading.unread:
+            continue
+        value = _constant_value(argument, taken)
+        if value is _UNREAD:
+            if param in reading.unread and _names_a_variable(argument, reading) \
+                    and not any(isinstance(n, ast.Name) and n.id in taken
+                                and n.id not in reading.domain for n in ast.walk(argument)):
+                # an expression of the domain's variables where nothing
+                # reads the parameter: whether it can fail to evaluate
+                # is `_unread_argument`'s to say  :draft
+                continue
+            if any(isinstance(n, ast.Name) and n.id in taken for n in ast.walk(argument)):
+                return True
+            continue
+        if reading.hashed and not _hashes(value):
+            return True
+        if param in reading.unread:
+            continue
+        if param in domain:
+            point = domain[param]
+            if not (_is_number(value) and isinstance(point, tuple) and len(point) == 2
+                    and point[0] == point[1] == value):
+                return True
+        elif not _is_literal_arithmetic(argument) and not (
+                param in reading.untouched
+                and (value is None or type(value) in (int, float, bool, str, tuple, list))):
+            return True
+    return False
+
+
+def _raises_read(fn, facts, exc_name: str | None, domain: dict | None,
+                 max_callee_depth: int, missing: "dict | None" = None) -> ProofResult:
+    """Intent:
+        The derive reading of a `raises(...)` claim for the function's
+        own parameters bound to `domain`, as `try_prove_raises` returns
+        it once the call is known to be `f(...)`.
+    """
+    suspended = suspended_call_refusal(fn)
+    if suspended is not None:
+        return ProofResult("unliftable", sketch=suspended)
+
+    unread = _unread_parameters(fn, facts, domain, missing=missing)
+    listed = _listed_missing({p: b for p, b in (domain or {}).items()
+                              if p not in unread})  # :draft
+    if listed:
+        return ProofResult("unliftable", sketch=(
+            # :draft
+            f"the domain lists the missing value{'s' if len(listed) > 1 else ''} "
+            f"{', '.join(listed)}, and derive reads only the real points of a domain"))
 
     if facts.tree is not None and not any(isinstance(n, ast.Raise) for n in ast.walk(facts.tree)):
         return ProofResult("unliftable", sketch="no explicit raise statement "
@@ -4821,19 +5722,38 @@ def try_prove_raises(fn, facts, call_src: str, exc_name: str | None,
     if conditioned.kind == "value":
         return ProofResult("disproven", sketch="the function returns a value "
                            "under this domain rather than raising")
+    cls = getattr(conditioned, "exc_class", None)
+    why = getattr(conditioned, "exc_unread", None)
     if exc_name is None:
-        return ProofResult("proven", sketch=f"raises {conditioned.exc_type or '(unknown type)'} "
-                           "under this domain")
-    if conditioned.exc_type is None:
-        why = getattr(conditioned, "exc_unread", None)
+        if cls is not None and issubclass(cls, (Exception, SystemExit)):
+            return ProofResult("proven", sketch=f"raises {cls.__name__} under this domain")  # :draft
+        if cls is None and getattr(conditioned, "exc_halts", False):
+            # :draft
+            return ProofResult("proven", sketch=f"raises under this domain: the path ends "
+                               f"in an exception whichever is raised first ({why})")
+        if cls is not None:
+            # :draft
+            return ProofResult("undecided", sketch=f"raises {cls.__name__} under this "
+                               f"domain, which is not an ordinary exception")
+        # :draft
+        return ProofResult("undecided", sketch=f"reaches a raise under this domain, but "
+                           f"the path to it is not shown to finish: {why}")
+    if cls is None:
+        # :draft
         return ProofResult("undecided", sketch="raises under this domain, but the "
                            "exception type couldn't be determined"
                            + (f": {why}" if why else ""))
-    if conditioned.exc_type == exc_name:
-        other = _raised_name_is_not_the_claimed_class(fn, exc_name)
-        if other is not None:
-            return ProofResult("undecided", sketch=f"raises under this domain, but {other}")
-        return ProofResult("proven", sketch=f"raises {conditioned.exc_type} "
-                           "under this domain")
-    return ProofResult("disproven", sketch=f"raises {conditioned.exc_type}, "
+    from ..conjecture import _resolve_exception_type
+    try:
+        claimed = _resolve_exception_type(exc_name, fn)
+    except Exception:
+        claimed = None
+    if claimed is None:
+        # :draft
+        return ProofResult("undecided", sketch=f"raises {cls.__name__} under this domain, "
+                           f"but `{exc_name}` does not resolve to an exception class")
+    if issubclass(cls, claimed):
+        return ProofResult("proven", sketch=f"raises {cls.__name__} under this domain")  # :draft
+    # :draft
+    return ProofResult("disproven", sketch=f"raises {cls.__name__}, "
                        f"not the claimed {exc_name}")
