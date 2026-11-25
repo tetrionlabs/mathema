@@ -161,7 +161,8 @@ def _fields(value) -> "dict | None":
         except Exception:
             return None
     fields = getattr(value, "__dataclass_fields__", None)
-    if fields:
+    if fields and not isinstance(value, type):
+        # a dataclass itself, as a value, is a class and holds no fields
         return {k: getattr(value, k) for k in fields}
     return None
 

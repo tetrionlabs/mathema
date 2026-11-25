@@ -77,7 +77,8 @@ def _integer_bound(bound) -> bool:
 
 def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
                      cap=None, reach=None, sequences=False,
-                     exact=False, holes=None, exact_premises=False):
+                     exact=False, holes=None, exact_premises=False,
+                     listed=frozenset()):
     """Intent:
         Build the injected dependencies the corroboration engine needs
         for THIS claim: `evaluate(point)` decides the original claim's
@@ -89,7 +90,10 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
         agrees, or a `corroboration.Undecided` reason where the claim's
         own side has no value, exact or float; `admits(point)` is
         in-domain-and-assumption membership; `sample(name, rng)` draws
-        a value respecting the parameter's declared bound; `exact`
+        a value respecting the parameter's declared bound (a coordinate
+        in `listed` takes the values the claim lists for it, a named
+        collection's members, so a hole or absence inside one is part of
+        the listed value, judged like any other); `exact`
         drops the default allowance, so a claim with no declared
         tolerance is compared with none (`~=` within ε, which is what
         it states); `corners` are the domain's
@@ -309,7 +313,8 @@ def _point_evaluator(cj, fn, facts, cj_domain, bound_funcs, assum=(),
 
     def _admitted(point) -> bool:
         # a hole or absence the claim does not list as its own point
-        return any(inputs_missing([v]) and not _lists_sentinel(cj_domain.get(p))
+        return any(inputs_missing([v]) and p not in listed
+                   and not _lists_sentinel(cj_domain.get(p))
                    for p, v in point.items())
 
     def _f_returned_none() -> bool:

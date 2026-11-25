@@ -1,0 +1,1707 @@
+{
+ "base": "2f74cb3f3b64b1242afb61d7032935b495afb44b",
+ "claims": [
+  {
+   "index": 0,
+   "function": "square",
+   "claim": "for x in [-10, 10], square(x) >= 0",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [-10.0, 10.0] : float|absent|missing, square(x) >= 0",
+   "fingerprint": "42b02ae7b49e"
+  },
+  {
+   "index": 1,
+   "function": "square",
+   "claim": "for x in [-10, 10], f(-x) == f(x)",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [-10.0, 10.0] : float|absent|missing, f(-x) = f(x)",
+   "fingerprint": "9187ed45c30c"
+  },
+  {
+   "index": 2,
+   "function": "square",
+   "claim": "for x in [0, 3], f(x) <= 8",
+   "verdict": "falsified",
+   "route": "probe:semi_analytical",
+   "statement": "for x in [0.0, 3.0] : float|absent|missing, f(x) <= 8",
+   "fingerprint": "3394b9d977fa"
+  },
+  {
+   "index": 3,
+   "function": "cube",
+   "claim": "for x in [-5, 5], f(-x) == -f(x)",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [-5.0, 5.0] : float|absent|missing, f(-x) = -f(x)",
+   "fingerprint": "d8ad754fe934"
+  },
+  {
+   "index": 4,
+   "function": "cube",
+   "claim": "for x in [0, 2], 0 <= f(x) <= 8",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [0.0, 2.0] : float|absent|missing, 0 <= f(x) <= 8",
+   "fingerprint": "36f6821295de"
+  },
+  {
+   "index": 5,
+   "function": "absolute",
+   "claim": "for x in [-100, 100], f(x) >= 0",
+   "verdict": "proven",
+   "route": "derive:extensive",
+   "statement": "for x in [-100.0, 100.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "782eed5bf5ad"
+  },
+  {
+   "index": 6,
+   "function": "absolute",
+   "claim": "for x in [-3, 3], f(x) == x",
+   "verdict": "falsified",
+   "route": "probe:semi_analytical",
+   "statement": "for x in [-3.0, 3.0] : float|absent|missing, f(x) = x",
+   "fingerprint": "2e2d116e9b3c"
+  },
+  {
+   "index": 7,
+   "function": "mean",
+   "claim": "for a in [0, 1], b in [0, 1], f(a, b) <= max(a, b)",
+   "verdict": "proven",
+   "route": "derive:extensive",
+   "statement": "for a in [0.0, 1.0] : float|absent|missing, b in [0.0, 1.0] : float|absent|missing, f(a, b) <= max(a, b)",
+   "fingerprint": "5bcc94bc20ce"
+  },
+  {
+   "index": 8,
+   "function": "mean",
+   "claim": "for a in [0, 1], b in [0, 1], f(a, b) == f(b, a)",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for a in [0.0, 1.0] : float|absent|missing, b in [0.0, 1.0] : float|absent|missing, f(a, b) = f(b, a)",
+   "fingerprint": "9f10c7b22bcf"
+  },
+  {
+   "index": 9,
+   "function": "clip",
+   "claim": "for x in [-10, 10], lo in [0, 1], hi in [2, 3], lo <= f(x, lo, hi) <= hi",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [-10.0, 10.0] : float|absent|missing, lo in [0.0, 1.0] : float|absent|missing, hi in [2.0, 3.0] : float|absent|missing, lo <= f(x, lo, hi) <= hi",
+   "fingerprint": "4ada0fc76806"
+  },
+  {
+   "index": 10,
+   "function": "clip",
+   "claim": "for x in [-10, 10], f(x, 0, 1) <= 1",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [-10.0, 10.0] : float|absent|missing, f(x, 0, 1) <= 1",
+   "fingerprint": "04947d88253c"
+  },
+  {
+   "index": 11,
+   "function": "count_up",
+   "claim": "for n in [0, 20] subset Z, f(n) >= n",
+   "verdict": "proven",
+   "route": "derive:brute_force",
+   "statement": "for n in [0, 20] : int, f(n) >= n",
+   "fingerprint": "ab138b964d32"
+  },
+  {
+   "index": 12,
+   "function": "count_up",
+   "claim": "for n in [0, 5] subset Z, f(n) == n * (n + 1) / 2",
+   "verdict": "proven",
+   "route": "derive:brute_force",
+   "statement": "for n in [0, 5] : int, f(n) = n*(n + 1)/2",
+   "fingerprint": "e7f3831e4b0c"
+  },
+  {
+   "index": 13,
+   "function": "count_up",
+   "claim": "for n in [1, 5] subset Z, f(n) <= 10",
+   "verdict": "falsified",
+   "route": "derive:brute_force",
+   "statement": "for n in [1, 5] : int, f(n) <= 10",
+   "fingerprint": "8076ffeea439"
+  },
+  {
+   "index": 14,
+   "function": "parity",
+   "claim": "for n in {0, 2, 4, 6}, f(n) == 0",
+   "verdict": "proven",
+   "route": "derive:brute_force",
+   "statement": "for n in {0, 2, 4, 6}, f(n) = 0",
+   "fingerprint": "8a61bd565ddc"
+  },
+  {
+   "index": 15,
+   "function": "parity",
+   "claim": "for n in {1, 2, 3}, f(n) == 1",
+   "verdict": "falsified",
+   "route": "derive:brute_force",
+   "statement": "for n in {1, 2, 3}, f(n) = 1",
+   "fingerprint": "c169fd27464a"
+  },
+  {
+   "index": 16,
+   "function": "reciprocal",
+   "claim": "raises(f(0), ValueError)",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "raises(f(0), ValueError)",
+   "fingerprint": "fb39c1d38228"
+  },
+  {
+   "index": 17,
+   "function": "reciprocal",
+   "claim": "for x in [1, 10], f(x) <= 1",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [1.0, 10.0] : float|absent|missing, f(x) <= 1",
+   "fingerprint": "5cd0ce4daa15"
+  },
+  {
+   "index": 18,
+   "function": "reciprocal",
+   "claim": "for x in [1, 10], f(x) > 0",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [1.0, 10.0] : float|absent|missing, f(x) > 0",
+   "fingerprint": "37c26c391499"
+  },
+  {
+   "index": 19,
+   "function": "root",
+   "claim": "for x in [0, 100], f(x) >= 0",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [0.0, 100.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "a3abec7adc2a"
+  },
+  {
+   "index": 20,
+   "function": "root",
+   "claim": "for x in [0, 100], f(x) ~= x ** 0.5",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [0.0, 100.0] : float|absent|missing, f(x) ~= x^0.5",
+   "fingerprint": "5a5a0f69f08b"
+  },
+  {
+   "index": 21,
+   "function": "root",
+   "claim": "for x in [0, 1], f(x) in [0, 1]",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, 0 <= f(x) <= 1",
+   "fingerprint": "dd9a8f42d797"
+  },
+  {
+   "index": 22,
+   "function": "shout",
+   "claim": "for word in {\"a\", \"bc\"}, f(word) != \"\"",
+   "verdict": "proven",
+   "route": "derive:brute_force",
+   "statement": "for word in {\"a\", \"bc\"}, f(word) != \"\"",
+   "fingerprint": "187afdf9b2ae"
+  },
+  {
+   "index": 23,
+   "function": "shout",
+   "claim": "for word in {\"a\", \"bc\"}, f(word) == word",
+   "verdict": "falsified",
+   "route": "derive:brute_force",
+   "statement": "for word in {\"a\", \"bc\"}, f(word) = word",
+   "fingerprint": "74f9d51f0ed0"
+  },
+  {
+   "index": 24,
+   "function": "grade",
+   "claim": "for score in [50, 100] subset Z, f(score) == \"pass\"",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for score in [50, 100] : int, f(score) = \"pass\"",
+   "fingerprint": "472dada8519c"
+  },
+  {
+   "index": 25,
+   "function": "grade",
+   "claim": "for score in {0, 49, 50}, f(score) == \"pass\"",
+   "verdict": "falsified",
+   "route": "probe:semi_analytical",
+   "statement": "for score in {0, 49, 50}, f(score) = \"pass\"",
+   "fingerprint": "9859bbf64795"
+  },
+  {
+   "index": 26,
+   "function": "shifted",
+   "claim": "let c be 2.0, for x in [0, 1], f(x, c) >= 2",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "let c be 2, for x in [0.0, 1.0] : float|absent|missing, f(x, c) >= 2",
+   "fingerprint": "717db7cba18f"
+  },
+  {
+   "index": 27,
+   "function": "shifted",
+   "claim": "assuming c > 0, for x in [0, 1], c in [-1, 1], f(x, c) > x",
+   "verdict": "proven",
+   "route": "derive:extensive",
+   "statement": "assuming c > 0, for x in [0.0, 1.0] : float|absent|missing, c in [-1.0, 1.0] : float|absent|missing, f(x, c) > x",
+   "fingerprint": "969958f19c93"
+  },
+  {
+   "index": 28,
+   "function": "square",
+   "claim": "let g = tests._base_against_head_claims.cube, for x in [0, 1], f(x) >= g(x)",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "let g = tests._base_against_head_claims.cube, for x in [0.0, 1.0] : float|absent|missing, f(x) >= g(x)",
+   "fingerprint": "a9856bda5bb3"
+  },
+  {
+   "index": 29,
+   "function": "mean",
+   "claim": "for a in [0, 1], f(a, a) == a",
+   "verdict": "proven",
+   "route": "derive",
+   "statement": "for a in [0.0, 1.0] : float|absent|missing, f(a, a) = a",
+   "fingerprint": "bc682ae3c428"
+  }
+ ],
+ "lexicon": [
+  {
+   "key": "abs_bars",
+   "statement": "|f(x)| <= 1",
+   "fingerprint": "96a36a8ddcfd"
+  },
+  {
+   "key": "abs_bars_compound",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, y in [0.0, 1.0] : float|absent|missing, abs(x + y - f(x, y)) <= \\epsilon",
+   "fingerprint": "a1768e9707c2"
+  },
+  {
+   "key": "absent_converts",
+   "statement": "absent(f, price) converts",
+   "fingerprint": "9fae5c5a97ba"
+  },
+  {
+   "key": "absent_drops",
+   "statement": "absent(f, fx_rate) drops",
+   "fingerprint": "c8f415791758"
+  },
+  {
+   "key": "absent_field_raises",
+   "statement": "absent(f, trade.memo) raises(TypeError)",
+   "fingerprint": "d6bfa82ea761"
+  },
+  {
+   "key": "absent_key_left_out",
+   "statement": "for order.side in {\"buy\", \"sell\", absent} \\ {null}, len(f(order)) >= 1",
+   "fingerprint": "7c5c232c74d5"
+  },
+  {
+   "key": "absent_none_spelling",
+   "statement": "absent(f, score) raises",
+   "fingerprint": "c4a0428e6525"
+  },
+  {
+   "key": "absent_propagates",
+   "statement": "absent(f, amount) propagates",
+   "fingerprint": "cb043455fb4c"
+  },
+  {
+   "key": "absent_raises",
+   "statement": "absent(f, score) raises(TypeError)",
+   "fingerprint": "9195e66652ab"
+  },
+  {
+   "key": "approx_taylor_sin_exact_fails",
+   "statement": "for x in [0.0, 0.01] : float|absent|missing, f(x) = sin(x)",
+   "fingerprint": "13b8e2696a92"
+  },
+  {
+   "key": "approx_too_wide",
+   "statement": "for x in [0.0, 0.5] : float|absent|missing, f(x) ~= sin(x)",
+   "fingerprint": "d30b2756695f"
+  },
+  {
+   "key": "assuming_inequality",
+   "statement": "assuming b^2 - 4*a*c >= 0.01, for a in [1.0, 10.0] : float|absent|missing, b in [-10.0, 10.0] : float|absent|missing, c in [-10.0, 10.0] : float|absent|missing, d(f(a, b, c), c) <= 0",
+   "fingerprint": "f5520fb47c06"
+  },
+  {
+   "key": "assuming_is_defined",
+   "statement": "assuming f is defined, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+   "fingerprint": "bbc50364e3bc"
+  },
+  {
+   "key": "assuming_is_defined_pinned",
+   "statement": "assuming f is defined => sqrt(c^2*w^2 + (k - m*w^2)^2) != 0, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+   "fingerprint": "37fa34fe65f5"
+  },
+  {
+   "key": "assuming_is_defined_postfix",
+   "statement": "assuming f is defined, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+   "fingerprint": "cd9a0a831bb7"
+  },
+  {
+   "key": "assuming_named_claim",
+   "statement": "assuming real_roots, for a in [1.0, 10.0] : float|absent|missing, b in [-10.0, 10.0] : float|absent|missing, c in [-10.0, 10.0] : float|absent|missing, d(f(a, b, c), c) <= 0",
+   "fingerprint": "47a104f94438"
+  },
+  {
+   "key": "assuming_nonzero",
+   "statement": "assuming k != 0, f(x, k) = x/k",
+   "fingerprint": "dc1309864d9e"
+  },
+  {
+   "key": "assuming_prerequisite_holds",
+   "statement": "assuming grows holds, for x in [0.0, 10.0] : float|absent|missing, f(x) = 2*x",
+   "fingerprint": "179820cc6144"
+  },
+  {
+   "key": "assuming_prerequisite_proven",
+   "statement": "assuming base_case is proven, for n in [2, 30] : int, f(n) = f(n - 2) + f(n - 1)",
+   "fingerprint": "851a98a99203"
+  },
+  {
+   "key": "assuming_qualified_prerequisite",
+   "statement": "assuming numpy.clip.clip_lower holds, for w in [-50.0, 50.0] : float|absent|missing, f(F0, k, m, -w, c) = f(F0, k, m, w, c)",
+   "fingerprint": "38daf50320ca"
+  },
+  {
+   "key": "assuming_spread_positive",
+   "statement": "assuming std(returns, ddof=1) > 0, for returns in ([-0.1, 0.1] | {missing})^n : float|absent, is_defined(f)",
+   "fingerprint": "1f5a790504d1"
+  },
+  {
+   "key": "auto_let_greek_param",
+   "statement": "for theta in [0.0, 1.0] : float|absent|missing, f(theta) >= 0",
+   "fingerprint": "c0695969d42d"
+  },
+  {
+   "key": "auto_let_long_func",
+   "statement": "let compute_square_root = numpy.sqrt, for x in [0.0, 100.0] : float|absent|missing, compute_square_root(x) >= 0",
+   "fingerprint": "7cf814ee3dff"
+  },
+  {
+   "key": "auto_let_long_param",
+   "statement": "for acceleration in [0.0, 100.0] : float|absent|missing, f(acceleration) >= 0",
+   "fingerprint": "0b42f32eeaaa"
+  },
+  {
+   "key": "bound_function_nested_in_f",
+   "statement": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], for a in [0.1, 0.9] : float|absent|missing, d(f(x, budget_line(x, I, px, py), a), x) @ {x=I*a/px} = 0",
+   "fingerprint": "8bc56bb76cb3"
+  },
+  {
+   "key": "ceil_div_lower_bound",
+   "statement": "for a in [1, 500] : int, b in [1, 30] : int, f(a, b) >= a/b",
+   "fingerprint": "d2ae72ce4e1f"
+  },
+  {
+   "key": "ceiling_above_argument",
+   "statement": "for x in [-20.0, 20.0] : float|absent|missing, ceil(x) >= x",
+   "fingerprint": "3a4e4c7d0ae5"
+  },
+  {
+   "key": "certificate_convex_lower",
+   "statement": "for alpha in [0.0, 1.0] : float|absent|missing, min(x) <= f(x, alpha)",
+   "fingerprint": "99db553201ad"
+  },
+  {
+   "key": "certificate_convex_upper",
+   "statement": "for alpha in [0.0, 1.0] : float|absent|missing, f(x, alpha) <= max(x)",
+   "fingerprint": "c05e83d47fb2"
+  },
+  {
+   "key": "certificate_quadratic",
+   "statement": "let |inf| be 1e+100, for s1 in [0.05, 0.5] : float|absent|missing, s2 in [0.05, 0.5] : float|absent|missing, rho in [-0.9, 0.9] : float|absent|missing, d(f(w, s1, s2, rho), w, w) >= 0",
+   "fingerprint": "0a2e6cbae4e1"
+  },
+  {
+   "key": "chained_comparison",
+   "statement": "for a in [0.1, 10.0] : float|absent|missing, b in [0.1, 10.0] : float|absent|missing, 2/(1/b + 1/a) <= f(a, b) <= a/2 + b/2",
+   "fingerprint": "4851d1023d3b"
+  },
+  {
+   "key": "containment_absent",
+   "statement": "for s in L[unicode], \"<\" not in f(s)",
+   "fingerprint": "025f0029e32c"
+  },
+  {
+   "key": "derivative_at_point",
+   "statement": "d(f(x), x) @ {x=1} = 2",
+   "fingerprint": "99f2a5237502"
+  },
+  {
+   "key": "derivative_at_word",
+   "statement": "d(f(x), x) @ {x=1} = 2",
+   "fingerprint": "3a9a4f896755"
+  },
+  {
+   "key": "derivative_call",
+   "statement": "d(f(x), x) >= 0",
+   "fingerprint": "998ee6449cd2"
+  },
+  {
+   "key": "derivative_partial_symbol",
+   "statement": "d(f(x, y), x) = y",
+   "fingerprint": "535932ea9715"
+  },
+  {
+   "key": "derivative_prime",
+   "statement": "d(f(x), x) >= 0",
+   "fingerprint": "38ec73c51c99"
+  },
+  {
+   "key": "derivative_second_mixed",
+   "statement": "d(f(x, y), x, y) = 0",
+   "fingerprint": "ef9a52a0eaec"
+  },
+  {
+   "key": "derivative_sign_by_probe",
+   "statement": "for x in [-10.0, 10.0] : float|absent|missing, d(f(x), x) >= 0",
+   "fingerprint": "ae00e4ee6e10"
+  },
+  {
+   "key": "derivative_sign_by_probe_trap",
+   "statement": "for payment in [0.0, 100.0] : float|absent|missing, d(f(payment), payment) >= 0",
+   "fingerprint": "b2edba77075b"
+  },
+  {
+   "key": "descent_converges",
+   "statement": "for alpha in [0.01, 1.9] : float|absent|missing, q in [0.5, 1.0] : float|absent|missing, |f(alpha, q)| < 1",
+   "fingerprint": "db75265e83fb"
+  },
+  {
+   "key": "deterministic_hidden_read",
+   "statement": "is_deterministic(f)",
+   "fingerprint": "3879914e3c99"
+  },
+  {
+   "key": "deterministic_nan_agrees",
+   "statement": "is_deterministic(f)",
+   "fingerprint": "736d71fa40c5"
+  },
+  {
+   "key": "deterministic_trap",
+   "statement": "is_deterministic(f)",
+   "fingerprint": "c2a4a44bc642"
+  },
+  {
+   "key": "dim_call_premise",
+   "statement": "assuming dim(returns) >= 2, for returns in ([-0.1, 0.1] | {missing})^n : float|absent, f(returns) >= 0",
+   "fingerprint": "10deb3f4196f"
+  },
+  {
+   "key": "dim_conformability",
+   "statement": "assuming dim(A, 1) == len(B), f(A, B) = f(A, B)",
+   "fingerprint": "0bcabfa38ecc"
+  },
+  {
+   "key": "dim_length_premise",
+   "statement": "assuming len(x) == len(y), f(x, y) = f(y, x)",
+   "fingerprint": "f1483911c6e6"
+  },
+  {
+   "key": "dim_marker_premise",
+   "statement": "assuming n >= 2, f(a) >= 0",
+   "fingerprint": "11dad45fb9b9"
+  },
+  {
+   "key": "dim_premise_against_fixed",
+   "statement": "assuming len(r) == 5, for r in ([0.0, 1.0] | {missing})^12 : float|absent, f(r) >= 0",
+   "fingerprint": "e50c6b9f5c62"
+  },
+  {
+   "key": "dim_premise_pins_length",
+   "statement": "assuming len(x) == 2, f(x) = x[0]^2 + x[1]^2",
+   "fingerprint": "94320653312f"
+  },
+  {
+   "key": "dim_premise_rectangular_matrix",
+   "statement": "assuming min(m, n) >= 3, for a in (R | {missing})^(m,n)|absent, f(a) = a[2][2]",
+   "fingerprint": "8e247cdec667"
+  },
+  {
+   "key": "dim_premise_square_matrix",
+   "statement": "assuming n >= 3, for a in (R | {missing})^(n,n)|absent, f(a) = a[2][2]",
+   "fingerprint": "0bde4841b474"
+  },
+  {
+   "key": "dim_premise_ties_two_lengths",
+   "statement": "assuming len(x) == len(y), f(x, y) = f(y, x)",
+   "fingerprint": "970422fdb2f6"
+  },
+  {
+   "key": "dim_premise_vector_bound",
+   "statement": "assuming n >= 5, for xs in (R | {missing})^n|absent, f(xs) = xs[4]",
+   "fingerprint": "7d17b2ec8d91"
+  },
+  {
+   "key": "domain_blackboard_reals",
+   "statement": "for x in R|absent|missing, f(x) = 2*x",
+   "fingerprint": "8bea63c59fe4"
+  },
+  {
+   "key": "domain_closed_interval",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "214e136e1320"
+  },
+  {
+   "key": "domain_complex",
+   "statement": "for z in C|absent|missing, f(z) = z",
+   "fingerprint": "20525c290956"
+  },
+  {
+   "key": "domain_discrete_strings",
+   "statement": "for scale in {\"info\", \"linear\"}, f(r, scale) >= 0",
+   "fingerprint": "7b7728597cb8"
+  },
+  {
+   "key": "domain_excluded_point",
+   "statement": "for x in [-1.0, 1.0] \\ {1} : float|absent|missing, f(x) >= 0",
+   "fingerprint": "ff54e7154afb"
+  },
+  {
+   "key": "domain_natural_numbers",
+   "statement": "for n in N|absent|missing, f(n) >= 0",
+   "fingerprint": "fe3308e6f840"
+  },
+  {
+   "key": "domain_open_interval",
+   "statement": "for x in (0.0, 1.0) : float|absent|missing, f(x) >= 0",
+   "fingerprint": "6d93f8253d88"
+  },
+  {
+   "key": "domain_subset_integer",
+   "statement": "for n in [0, 100] : int, f(n) >= 0",
+   "fingerprint": "6042f279f69d"
+  },
+  {
+   "key": "domain_subset_symbol",
+   "statement": "for n in [0, 100] : int, f(n) >= 0",
+   "fingerprint": "49a5a26fc059"
+  },
+  {
+   "key": "enforce_domain_guard",
+   "statement": "for alpha in [0.0, 1.0] : float|absent|missing, x in [1.0, 10.0] : float|absent|missing, f(x, alpha) <= x",
+   "fingerprint": "67587541f651"
+  },
+  {
+   "key": "enforce_domain_guard_unbound",
+   "statement": "for x in [1.0, 10.0] : float|absent|missing, f(x, alpha) <= x",
+   "fingerprint": "77e2e3216a3b"
+  },
+  {
+   "key": "equivalence_canonical",
+   "statement": "f =:= g",
+   "fingerprint": "f4c974992bee"
+  },
+  {
+   "key": "equivalence_with_let",
+   "statement": "let g = numpy.sum, f =:= g",
+   "fingerprint": "cbdd962d624c"
+  },
+  {
+   "key": "equivalence_word_alias",
+   "statement": "f =:= g",
+   "fingerprint": "f2ed9ce3f9a2"
+  },
+  {
+   "key": "euler_via_exp",
+   "statement": "for x in [1.0, 5.0] : float|absent|missing, f(x) = e",
+   "fingerprint": "e3461a64a0ed"
+  },
+  {
+   "key": "exact_offset_vs_approx",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) ~= x",
+   "fingerprint": "4e3804c617aa"
+  },
+  {
+   "key": "exact_offset_vs_approx_trap",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) = x",
+   "fingerprint": "74b3734abf85"
+  },
+  {
+   "key": "factorial_postfix",
+   "statement": "for n in [1, 5] : int, f(n) <= factorial(n)",
+   "fingerprint": "ca1d16f6666a"
+  },
+  {
+   "key": "finite_domain_discrete_set",
+   "statement": "for n in {6, 28, 496}, f(n) >= 4",
+   "fingerprint": "77bd6ed52a97"
+  },
+  {
+   "key": "finite_domain_pinned",
+   "statement": "for n in [30, 30] : int, f(n) = 8",
+   "fingerprint": "e2c4fc1b0c71"
+  },
+  {
+   "key": "finite_domain_small_range",
+   "statement": "for n in [2, 30] : int, f(n) >= 2",
+   "fingerprint": "eda7f89f1d41"
+  },
+  {
+   "key": "floor_below_argument",
+   "statement": "for x in [-20.0, 20.0] : float|absent|missing, floor(x) <= x",
+   "fingerprint": "c278d96fb6a0"
+  },
+  {
+   "key": "floor_brackets_unicode",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, floor(f(x)) >= 0",
+   "fingerprint": "542c594c00d5"
+  },
+  {
+   "key": "floor_div_evaluable",
+   "statement": "for n in [1, 100] : int, f(n) = floor(n/2)",
+   "fingerprint": "864b7400f35f"
+  },
+  {
+   "key": "floor_div_sugar",
+   "statement": "for n in [1, 100] : int, f(n) = floor(n/2)",
+   "fingerprint": "d7fb5a692c47"
+  },
+  {
+   "key": "forall_symbol",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "1f897bdeebc5"
+  },
+  {
+   "key": "greek_delta_lower",
+   "statement": "for s in [50.0, 150.0] : float|absent|missing, k in [50.0, 150.0] : float|absent|missing, r in [0.0, 0.1] : float|absent|missing, t in [0.1, 2.0] : float|absent|missing, sigma in [0.05, 0.8] : float|absent|missing, d(f(s, k, r, t, sigma), s) >= 0",
+   "fingerprint": "98e24c1cede1"
+  },
+  {
+   "key": "greek_delta_upper",
+   "statement": "for s in [50.0, 150.0] : float|absent|missing, k in [50.0, 150.0] : float|absent|missing, r in [0.0, 0.1] : float|absent|missing, t in [0.1, 2.0] : float|absent|missing, sigma in [0.05, 0.8] : float|absent|missing, d(f(s, k, r, t, sigma), s) <= 1",
+   "fingerprint": "0f62970fc385"
+  },
+  {
+   "key": "inferred_literal_domain",
+   "statement": "raises(f(50, 0), ValueError)",
+   "fingerprint": "07fd35e6545e"
+  },
+  {
+   "key": "infinity_symbol",
+   "statement": "for x in [0.0, inf) : float|absent|missing, f(x) >= 0",
+   "fingerprint": "94b922682edf"
+  },
+  {
+   "key": "integral_symbol",
+   "statement": "integrate(f(x), x, 0, 1) = 1",
+   "fingerprint": "3a4cd656738c"
+  },
+  {
+   "key": "integrate_definite",
+   "statement": "integrate(f(x), x, 0, 1) = 1",
+   "fingerprint": "f67a0159acae"
+  },
+  {
+   "key": "integrate_evaluation_bar",
+   "statement": "integrate(f(x), x, 0, 1) = 1",
+   "fingerprint": "b975b737475a"
+  },
+  {
+   "key": "is_absent_safe_field",
+   "statement": "is_absent_safe(f)",
+   "fingerprint": "6addb2e64d7b"
+  },
+  {
+   "key": "is_absent_safe_gate",
+   "statement": "is_absent_safe(f)",
+   "fingerprint": "56ccb5c7cf67"
+  },
+  {
+   "key": "is_absent_safe_gate_falsified",
+   "statement": "is_absent_safe(f)",
+   "fingerprint": "66989cfe2314"
+  },
+  {
+   "key": "is_empty_safe",
+   "statement": "is_empty_safe(xs)",
+   "fingerprint": "ad3de495b0ce"
+  },
+  {
+   "key": "is_empty_safe_hole",
+   "statement": "is_empty_safe(returns)",
+   "fingerprint": "63d7187d55c4"
+  },
+  {
+   "key": "is_empty_safe_identity",
+   "statement": "is_empty_safe(volumes)",
+   "fingerprint": "931c9ce158c1"
+  },
+  {
+   "key": "is_language_defined",
+   "statement": "is_language_defined(s)",
+   "fingerprint": "098d5dfdada5"
+  },
+  {
+   "key": "is_language_defined_postfix",
+   "statement": "is_language_defined(s)",
+   "fingerprint": "dc243782975c"
+  },
+  {
+   "key": "is_library_safe",
+   "statement": "is_library_safe(numpy)",
+   "fingerprint": "32698e39dbbf"
+  },
+  {
+   "key": "is_library_safe_scoped",
+   "statement": "for x in [0.0, 1000000.0] : float|absent|missing, is_library_safe(numpy)",
+   "fingerprint": "9d0845d47b7c"
+  },
+  {
+   "key": "is_missing_safe_gate",
+   "statement": "is_missing_safe(f)",
+   "fingerprint": "f463490b5e79"
+  },
+  {
+   "key": "is_missing_safe_gate_falsified",
+   "statement": "is_missing_safe(f)",
+   "fingerprint": "f0309bc17974"
+  },
+  {
+   "key": "is_overflow_safe",
+   "statement": "is_overflow_safe(x)",
+   "fingerprint": "c58b67920334"
+  },
+  {
+   "key": "is_pole_safe",
+   "statement": "is_pole_safe(x)",
+   "fingerprint": "856907506f0a"
+  },
+  {
+   "key": "is_representation_safe",
+   "statement": "is_representation_safe(x)",
+   "fingerprint": "88d1a175ed9e"
+  },
+  {
+   "key": "is_sorted_output",
+   "statement": "is_sorted_output(f(xs))",
+   "fingerprint": "899ac73598d2"
+  },
+  {
+   "key": "language_alphabet",
+   "statement": "for s in L[unicode], f(f(s)) = f(s)",
+   "fingerprint": "5b5a52bf3d77"
+  },
+  {
+   "key": "language_closure",
+   "statement": "for s in L[unicode], f(s) in L[unicode]",
+   "fingerprint": "f5bacc64efe8"
+  },
+  {
+   "key": "language_contraction",
+   "statement": "for s in L[unicode], len(f(s)) <= len(s)",
+   "fingerprint": "75ba7fc22260"
+  },
+  {
+   "key": "language_excluding_empty",
+   "statement": "for s in L[unicode] \\ {\"\"}, len(f(s)) >= 1",
+   "fingerprint": "eaccaa6e9460"
+  },
+  {
+   "key": "language_length_bound",
+   "statement": "for s in L[unicode, len <= 80], len(f(s)) <= 80",
+   "fingerprint": "546b119b821c"
+  },
+  {
+   "key": "language_membership_symbol",
+   "statement": "for s in L[unicode], len(f(s)) >= len(s)",
+   "fingerprint": "741e1ae1a1dc"
+  },
+  {
+   "key": "language_missing_excluded",
+   "statement": "for s in L[unicode] \\ {missing}, len(f(s)) <= len(s)",
+   "fingerprint": "7bb9dc9eb548"
+  },
+  {
+   "key": "language_section",
+   "statement": "let u = mathema.lexicon.unescape_angle, for s in L[unicode], u(f(s)) = s",
+   "fingerprint": "5800e2f2e37a"
+  },
+  {
+   "key": "latex_command_forall",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "8024cfd88cc5"
+  },
+  {
+   "key": "latex_equiv",
+   "statement": "let g = mathema.lexicon.double, f =:= g",
+   "fingerprint": "e3a6e8509206"
+  },
+  {
+   "key": "latex_geqslant",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "7f5e1e4e408c"
+  },
+  {
+   "key": "latex_left_right_bars",
+   "statement": "for x in [-1.0, 1.0] : float|absent|missing, |f(x)| <= 2",
+   "fingerprint": "a7c38f49ba3c"
+  },
+  {
+   "key": "latex_leqslant",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) <= 2",
+   "fingerprint": "aa79ff3ac02a"
+  },
+  {
+   "key": "latex_varepsilon",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon",
+   "fingerprint": "c339a953fe60"
+  },
+  {
+   "key": "latex_varphi",
+   "statement": "for φ in [0.0, 1.0] : float|absent|missing, f(\\phi) <= 1",
+   "fingerprint": "32b2a74de216"
+  },
+  {
+   "key": "let_alias",
+   "statement": "for m1 in [0.1, 1000.0] : float|absent|missing, x1 in [-100.0, 100.0] : float|absent|missing, x2 in [-100.0, 100.0] : float|absent|missing, f(m1, x1, m1, x2) = x1/2 + x2/2",
+   "fingerprint": "87f65b601467"
+  },
+  {
+   "key": "let_alias_for_under_test",
+   "statement": "for price in [0.0, 1000.0] : float|absent|missing, rate in [0.0, 1.0] : float|absent|missing, f(price, rate) <= price",
+   "fingerprint": "523c11432199"
+  },
+  {
+   "key": "let_free_var_closed",
+   "statement": "let c be [-1000000.0, 1000000.0], for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
+   "fingerprint": "3ad5324f4888"
+  },
+  {
+   "key": "let_free_var_typed",
+   "statement": "let c be [1, 100] : int, for x in [0.0, 10.0] : float|absent|missing, c + f(x) >= 0",
+   "fingerprint": "c26cda9fe81a"
+  },
+  {
+   "key": "let_function_bare_name",
+   "statement": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], d(budget_line(x, I, px, py), x) = -px/py",
+   "fingerprint": "29bded8a210d"
+  },
+  {
+   "key": "let_function_dotted",
+   "statement": "let g = math.sqrt, for x in (0.0, 100.0] : float|absent|missing, g(x) >= 0",
+   "fingerprint": "169964db0dbc"
+  },
+  {
+   "key": "let_function_keyword",
+   "statement": "let g = numpy.round, for x in [0.0, 1.0] : float|absent|missing, g(x, decimals=1) <= 1",
+   "fingerprint": "5750537cf1f4"
+  },
+  {
+   "key": "let_pseudo_infinity",
+   "statement": "let |inf| be 1e+12, for x in [0.0, inf] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "eb0374392491"
+  },
+  {
+   "key": "let_scale_seq_sharpe_premise",
+   "statement": "assuming std(returns, ddof=1) > 0, let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float|absent, f(s(returns, c)) ~= f(returns)",
+   "fingerprint": "8f5af56edd2a"
+  },
+  {
+   "key": "let_scale_seq_sharpe_trap",
+   "statement": "let s = mathema.f.scale_seq, let c be [0.1, 10.0], for returns in ([-0.1, 0.1] | {missing})^n : float|absent, f(s(returns, c)) ~= f(returns)",
+   "fingerprint": "b01e77f837e5"
+  },
+  {
+   "key": "let_shift_seq_mean_moves",
+   "statement": "let s = mathema.f.shift_seq, let c be [0.1, 1.0], for xs in ([-1.0, 1.0] | {missing})^n : float|absent, f(s(xs, c)) ~= f(xs)",
+   "fingerprint": "92f8fdaa3462"
+  },
+  {
+   "key": "let_shift_seq_range",
+   "statement": "let s = mathema.f.shift_seq, let c be [-5.0, 5.0], for a in ([-100.0, 100.0] | {missing})^n : float|absent, f(s(a, c)) = f(a)",
+   "fingerprint": "02bb7ed4879c"
+  },
+  {
+   "key": "limit_arrow",
+   "statement": "lim(f(x), x, 0) = 0",
+   "fingerprint": "ea042fe7e5fb"
+  },
+  {
+   "key": "limit_call",
+   "statement": "lim(f(x), x, inf) = 0",
+   "fingerprint": "d9dfc62cee6b"
+  },
+  {
+   "key": "matrix_axis_mean",
+   "statement": "for A in (R | {missing})^(m,n)|absent, mean(A, axis=1) ~= sum(A, axis=1)/n",
+   "fingerprint": "41854f4771ab"
+  },
+  {
+   "key": "matrix_axis_sum",
+   "statement": "for A in (R | {missing})^(n,n)|absent, sum(A, axis=0) ~= sum(A.T, axis=1)",
+   "fingerprint": "f216bde4d572"
+  },
+  {
+   "key": "matrix_cond_at_least_one",
+   "statement": "for A in (R | {missing})^(n,n)|absent, cond(A) >= 1",
+   "fingerprint": "40987647432c"
+  },
+  {
+   "key": "matrix_determinant_bars_compound",
+   "statement": "for A in (R | {missing})^(n,n)|absent, B in (R | {missing})^(n,n)|absent, det(A @ B) = det(A)*det(B)",
+   "fingerprint": "c37125042b23"
+  },
+  {
+   "key": "matrix_determinant_product",
+   "statement": "for A in (R | {missing})^(n,n)|absent, B in (R | {missing})^(n,n)|absent, det(A @ B) = det(A)*det(B)",
+   "fingerprint": "8ed8d6e01bb0"
+  },
+  {
+   "key": "matrix_determinant_sugar",
+   "statement": "for A in (R | {missing})^(n,n)|absent, det(A) >= 0",
+   "fingerprint": "fc41bd12520b"
+  },
+  {
+   "key": "matrix_diag_trace",
+   "statement": "for A in (R | {missing})^(n,n)|absent, sum(diag(A)) ~= trace(A)",
+   "fingerprint": "c585057f5ca4"
+  },
+  {
+   "key": "matrix_eigvals_trace",
+   "statement": "for A in (R | {missing})^(n,n)|absent, sum(eigvals(A)) ~= trace(A)",
+   "fingerprint": "8692e376374f"
+  },
+  {
+   "key": "matrix_eigvalsh_positive",
+   "statement": "assuming A is positive definite, for A in (R | {missing})^(n,n)|absent, min(eigvalsh(A)) > 0",
+   "fingerprint": "e9e96f8e021e"
+  },
+  {
+   "key": "matrix_elementwise_abs",
+   "statement": "for A in (R | {missing})^(n,n)|absent, trace(abs(A)) >= |trace(A)|",
+   "fingerprint": "bfefd1715771"
+  },
+  {
+   "key": "matrix_finite",
+   "statement": "is_finite(A)",
+   "fingerprint": "84a358d833a7"
+  },
+  {
+   "key": "matrix_frobenius_norm",
+   "statement": "for A in (R | {missing})^(n,n)|absent, norm(A) ~= sqrt(trace(A.T @ A))",
+   "fingerprint": "4ab97303ade1"
+  },
+  {
+   "key": "matrix_hadamard_trace",
+   "statement": "for A in (R | {missing})^(n,n)|absent, B in (R | {missing})^(n,n)|absent, trace(A * B) = trace(A.T @ B)",
+   "fingerprint": "db5974751ca0"
+  },
+  {
+   "key": "matrix_inverse_identity",
+   "statement": "assuming det(A) != 0, for A in (R | {missing})^(n,n)|absent, inv(A) @ A = I(n)",
+   "fingerprint": "4d663de260de"
+  },
+  {
+   "key": "matrix_kron_transpose",
+   "statement": "for A in (R | {missing})^(n,n)|absent, B in (R | {missing})^(n,n)|absent, kron(A, B).T = kron(A.T, B.T)",
+   "fingerprint": "f64d90084875"
+  },
+  {
+   "key": "matrix_norm_bars_frobenius",
+   "statement": "for A in (R | {missing})^(m,n)|absent, f(A) ~= norm(A)",
+   "fingerprint": "6eab8c321084"
+  },
+  {
+   "key": "matrix_norm_bars_gram_trace",
+   "statement": "for A in (R | {missing})^(m,n)|absent, norm(A)^2 ~= f(A)",
+   "fingerprint": "5f4178f47d89"
+  },
+  {
+   "key": "matrix_norm_bars_inf",
+   "statement": "for A in (R | {missing})^(m,n)|absent, f(A) ~= norm(A, inf)",
+   "fingerprint": "4e2192eff265"
+  },
+  {
+   "key": "matrix_norm_bars_one",
+   "statement": "for A in (R | {missing})^(m,n)|absent, f(A) ~= norm(A, 1)",
+   "fingerprint": "fb92e27d845c"
+  },
+  {
+   "key": "matrix_norm_bars_order_trap",
+   "statement": "for A in (R | {missing})^(m,n)|absent, f(A) ~= norm(A, inf)",
+   "fingerprint": "14f20d6c6aa3"
+  },
+  {
+   "key": "matrix_norm_bars_spectral",
+   "statement": "for A in (R | {missing})^(n,n)|absent, f(A) ~= norm(A, 2)",
+   "fingerprint": "cc2d144980e5"
+  },
+  {
+   "key": "matrix_norm_bars_spectral_below_frobenius",
+   "statement": "for A in (R | {missing})^(n,n)|absent, f(A) <= norm(A)",
+   "fingerprint": "773f1305cf29"
+  },
+  {
+   "key": "matrix_output_symmetric_postfix",
+   "statement": "for A in (R | {missing})^(n,n)|absent, is_symmetric(f(A))",
+   "fingerprint": "7ae497446acd"
+  },
+  {
+   "key": "matrix_pinv",
+   "statement": "for A in (R | {missing})^(m,n)|absent, A @ pinv(A) @ A ~= A",
+   "fingerprint": "74ed9886da6b"
+  },
+  {
+   "key": "matrix_positive_definite",
+   "statement": "is_positive_definite(A)",
+   "fingerprint": "99ac58d582e8"
+  },
+  {
+   "key": "matrix_power_word",
+   "statement": "for A in (R | {missing})^(n,n)|absent, matrix_power(A, 2) = A @ A",
+   "fingerprint": "b5091cfa9508"
+  },
+  {
+   "key": "matrix_qr_factors",
+   "statement": "let q = numpy.linalg.qr, for A in (R | {missing})^(n,n)|absent, q(A)[0] @ q(A)[1] ~= A",
+   "fingerprint": "b2faa41edeb4"
+  },
+  {
+   "key": "matrix_quadratic_form",
+   "statement": "assuming A is positive definite and x != 0, for A in (R | {missing})^(n,n)|absent, x in (R | {missing})^n|absent, x.T @ A @ x > 0",
+   "fingerprint": "789bb541b117"
+  },
+  {
+   "key": "matrix_rank_transpose",
+   "statement": "for A in (R | {missing})^(n,n)|absent, rank(A.T) = rank(A)",
+   "fingerprint": "2d7abcfb90ac"
+  },
+  {
+   "key": "matrix_row_and_column",
+   "statement": "for A in (R | {missing})^(n,n)|absent, A[0, :] = A.T[:, 0]",
+   "fingerprint": "b475d812f83d"
+  },
+  {
+   "key": "matrix_solve",
+   "statement": "assuming det(A) != 0, let b be R^n, for A in (R | {missing})^(n,n)|absent, A @ solve(A, b) ~= b",
+   "fingerprint": "034127f8a948"
+  },
+  {
+   "key": "matrix_spectral_norm",
+   "statement": "for A in (R | {missing})^(n,n)|absent, norm(A, 2) <= norm(A)",
+   "fingerprint": "5b810a19bcd6"
+  },
+  {
+   "key": "matrix_structure_and_relation_premise",
+   "statement": "assuming A is symmetric and det(A) != 0, for A in (R | {missing})^(n,n)|absent, inv(A) ~= inv(A).T",
+   "fingerprint": "8c1811699e25"
+  },
+  {
+   "key": "matrix_symmetric",
+   "statement": "is_symmetric(A)",
+   "fingerprint": "3e91da2a935c"
+  },
+  {
+   "key": "matrix_symmetric_output",
+   "statement": "is_symmetric(f(A))",
+   "fingerprint": "b58d9c9c9b57"
+  },
+  {
+   "key": "matrix_symmetric_postfix",
+   "statement": "is_symmetric(A)",
+   "fingerprint": "44226b67dc4d"
+  },
+  {
+   "key": "matrix_trace_additive",
+   "statement": "for A in (R | {missing})^(n,n)|absent, B in (R | {missing})^(n,n)|absent, trace(A + B) = trace(A) + trace(B)",
+   "fingerprint": "8754f7dcfa6a"
+  },
+  {
+   "key": "matrix_transpose_product",
+   "statement": "for A in (R | {missing})^(n,n)|absent, B in (R | {missing})^(n,n)|absent, (A @ B).T = B.T @ A.T",
+   "fingerprint": "cb26f2dbd5cb"
+  },
+  {
+   "key": "matrix_transpose_sugar",
+   "statement": "let A be R^(n,n), A.T = A",
+   "fingerprint": "b543b9d06f4a"
+  },
+  {
+   "key": "membership_interval_reduces_to_chain",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, 0 <= f(x) <= 1",
+   "fingerprint": "c36ac4801a54"
+  },
+  {
+   "key": "missing_class_row_contradicted",
+   "statement": "missing(f, positions) propagates",
+   "fingerprint": "5c6135649e89"
+  },
+  {
+   "key": "missing_converts",
+   "statement": "missing(f, price) converts",
+   "fingerprint": "ecb65d41794c"
+  },
+  {
+   "key": "missing_drops",
+   "statement": "missing(f, rate) drops",
+   "fingerprint": "7e08f0ca2ab5"
+  },
+  {
+   "key": "missing_introduces",
+   "statement": "assuming count(weights) >= 1, missing(f, weights) introduces",
+   "fingerprint": "9e5f9c05c97c"
+  },
+  {
+   "key": "missing_introduces_by_shape",
+   "statement": "assuming count(prices) >= 1, missing(f, prices) introduces",
+   "fingerprint": "21f33b5c23ce"
+  },
+  {
+   "key": "missing_member_defined",
+   "statement": "assuming count(xs) >= 1, missing(f, xs, null) drops",
+   "fingerprint": "0668c90e530c"
+  },
+  {
+   "key": "missing_member_nan",
+   "statement": "missing(f, positions, nan) propagates",
+   "fingerprint": "b69e60f97935"
+  },
+  {
+   "key": "missing_member_null",
+   "statement": "missing(f, positions, null) raises(TypeError)",
+   "fingerprint": "6685f0e7a25d"
+  },
+  {
+   "key": "missing_predicate_sugar",
+   "statement": "missing(f, variance) propagates",
+   "fingerprint": "acec438262b3"
+  },
+  {
+   "key": "missing_premise_all_na_raises",
+   "statement": "assuming count(xs) == 0, missing(f, xs, NA) raises(TypeError)",
+   "fingerprint": "bacc09fe14c7"
+  },
+  {
+   "key": "missing_premise_no_values",
+   "statement": "assuming count(xs) == 0, missing(f, xs, nan) propagates",
+   "fingerprint": "b2551948044d"
+  },
+  {
+   "key": "missing_premise_values_remain",
+   "statement": "assuming count(xs) >= 1, missing(f, xs) drops",
+   "fingerprint": "4aabf5f89ba5"
+  },
+  {
+   "key": "missing_propagates",
+   "statement": "missing(f, variance) propagates",
+   "fingerprint": "878402deb110"
+  },
+  {
+   "key": "missing_raises",
+   "statement": "missing(f, ratio) raises(ValueError)",
+   "fingerprint": "f64484c4760f"
+  },
+  {
+   "key": "missing_trap_comparison",
+   "statement": "missing(f, score) drops",
+   "fingerprint": "7795abab7c4a"
+  },
+  {
+   "key": "missing_trap_silent_drop",
+   "statement": "missing(f, rate) propagates",
+   "fingerprint": "f5c948b550fb"
+  },
+  {
+   "key": "mixed_ascii_for_unicode_relation",
+   "statement": "for x in (0.0, 100.0] : float|absent|missing, f(x) >= 0",
+   "fingerprint": "277230180bd5"
+  },
+  {
+   "key": "mixed_backslash_greek_and_unicode_relation",
+   "statement": "f(\\alpha) <= 1",
+   "fingerprint": "8de68509d6c7"
+  },
+  {
+   "key": "mixed_membership_and_relation",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, f(x) <= 1",
+   "fingerprint": "7ccd0f26b3df"
+  },
+  {
+   "key": "multiply_dot",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, 2*f(x) = 4*x",
+   "fingerprint": "557bbbb84620"
+  },
+  {
+   "key": "named_under_test",
+   "statement": "for price in [0.0, 1000.0] : float|absent|missing, rate in [0.0, 1.0] : float|absent|missing, discounted_price(price, rate) <= price",
+   "fingerprint": "f4b73acd2c3e"
+  },
+  {
+   "key": "negated_predicate",
+   "statement": "not is_pole_safe(x)",
+   "fingerprint": "cc4b3315f52a"
+  },
+  {
+   "key": "norm_bars_chain",
+   "statement": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, norm(x, inf) <= f(x) <= norm(x, 1)",
+   "fingerprint": "96fa63fd0043"
+  },
+  {
+   "key": "norm_bars_direction",
+   "statement": "assuming norm(x) > 0, for x in (R | {missing})^n|absent, f(x) ~= x/norm(x)",
+   "fingerprint": "79d589f01948"
+  },
+  {
+   "key": "norm_bars_distance",
+   "statement": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(x, y) ~= norm(x - y)",
+   "fingerprint": "a65f2f313aea"
+  },
+  {
+   "key": "norm_bars_distance_symmetric",
+   "statement": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(y, x) = norm(x - y)",
+   "fingerprint": "c6861cb395e0"
+  },
+  {
+   "key": "norm_bars_euclidean",
+   "statement": "for x in (R | {missing})^n|absent, f(x) ~= norm(x)",
+   "fingerprint": "eac0d4941348"
+  },
+  {
+   "key": "norm_bars_homogeneous",
+   "statement": "let c be [-2.0, 2.0], for x in (R | {missing})^n|absent, f(c*x) ~= norm(x)*|c|",
+   "fingerprint": "2f8e84505211"
+  },
+  {
+   "key": "norm_bars_homogeneous_sign_trap",
+   "statement": "let c be [-2.0, 2.0], for x in (R | {missing})^n|absent, f(c*x) ~= c*norm(x)",
+   "fingerprint": "7a2c9c100c74"
+  },
+  {
+   "key": "norm_bars_inf",
+   "statement": "for x in (R | {missing})^n|absent, f(x) ~= norm(x, inf)",
+   "fingerprint": "6204f35f6dfc"
+  },
+  {
+   "key": "norm_bars_integer_order",
+   "statement": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x, 3) ~= norm(x, 3)",
+   "fingerprint": "fa6658aefa94"
+  },
+  {
+   "key": "norm_bars_nearest_distance",
+   "statement": "for points in ([-1000000.0, 1000000.0] | {missing})^(m,n) : float|absent, q in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(points, q) <= norm(points[0, :] - q)",
+   "fingerprint": "ae4ec1e92509"
+  },
+  {
+   "key": "norm_bars_nearest_distance_trap",
+   "statement": "for points in (R | {missing})^(m,n)|absent, q in (R | {missing})^n|absent, f(points, q) >= norm(points[0, :] - q)",
+   "fingerprint": "4aa0389c4204"
+  },
+  {
+   "key": "norm_bars_one",
+   "statement": "for x in (R | {missing})^n|absent, f(x) ~= norm(x, 1)",
+   "fingerprint": "97591294daae"
+  },
+  {
+   "key": "norm_bars_order_trap",
+   "statement": "for x in ([-1.0, 1.0] | {missing})^n : float|absent, f(x) ~= norm(x, 2)",
+   "fingerprint": "fbcda7d486dc"
+  },
+  {
+   "key": "norm_bars_portfolio_weights",
+   "statement": "for scores in ([0.1, 10.0] | {missing})^n : float|absent, norm(f(scores), 1) ~= 1",
+   "fingerprint": "5f978155e8c3"
+  },
+  {
+   "key": "norm_bars_rmse",
+   "statement": "for pred in (R | {missing})^n|absent, actual in (R | {missing})^n|absent, f(pred, actual) ~= norm(-actual + pred)/sqrt(len(pred))",
+   "fingerprint": "d689e65e34bb"
+  },
+  {
+   "key": "norm_bars_series_tracking_error",
+   "statement": "for port in (R | {missing})^n|absent, bench in (R | {missing})^n|absent, f(port, bench) ~= norm(-bench + port)",
+   "fingerprint": "febac5f169af"
+  },
+  {
+   "key": "norm_bars_squared",
+   "statement": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x) ~= norm(x)^2",
+   "fingerprint": "85848054f62c"
+  },
+  {
+   "key": "norm_bars_squared_trap",
+   "statement": "for x in ([-1.0, 1.0] | {missing})^n : float|absent, f(x) ~= norm(x)^2",
+   "fingerprint": "fc49419ea460"
+  },
+  {
+   "key": "norm_bars_stopping_criterion",
+   "statement": "for x_new in (R | {missing})^n|absent, x_old in (R | {missing})^n|absent, tol in [0.01, 1.0] : float|absent|missing, f(x_new, x_old, tol) = (norm(x_new - x_old) <= tol)",
+   "fingerprint": "9bcfc6f51dfb"
+  },
+  {
+   "key": "norm_bars_triangle",
+   "statement": "for x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, y in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(x, y) <= norm(x) + norm(y)",
+   "fingerprint": "c3cf6dd9b551"
+  },
+  {
+   "key": "norm_bars_two",
+   "statement": "for x in (R | {missing})^n|absent, f(x) ~= norm(x, 2)",
+   "fingerprint": "3dbe5856c30e"
+  },
+  {
+   "key": "norm_bars_unit_vector",
+   "statement": "assuming norm(x) > 0, for x in (R | {missing})^n|absent, norm(f(x)) ~= 1",
+   "fingerprint": "f65cc7ef1db8"
+  },
+  {
+   "key": "odd_function",
+   "statement": "f(-x) = -f(x)",
+   "fingerprint": "8803bbaff8cc"
+  },
+  {
+   "key": "outcome_reference",
+   "statement": "f(x) > 0 => self.stays_positive",
+   "fingerprint": "9e1b817d55c5"
+  },
+  {
+   "key": "output_never_none",
+   "statement": "output_never_none(f(x))",
+   "fingerprint": "a71b6dda2372"
+  },
+  {
+   "key": "parity_identity",
+   "statement": "for s in [50.0, 150.0] : float|absent|missing, k in [50.0, 150.0] : float|absent|missing, r in [0.0, 0.1] : float|absent|missing, t in [0.1, 2.0] : float|absent|missing, sigma in [0.05, 0.8] : float|absent|missing, f(s, k, r, t, sigma) = -k*exp(-r*t) + s",
+   "fingerprint": "d4a1c4519e47"
+  },
+  {
+   "key": "power_caret",
+   "statement": "f(x)^2 >= 0",
+   "fingerprint": "f66459b35618"
+  },
+  {
+   "key": "power_superscript",
+   "statement": "f(x)^2 >= 0",
+   "fingerprint": "50cc0c297b31"
+  },
+  {
+   "key": "power_superscript_negative",
+   "statement": "for x in [1.0, 2.0] : float|absent|missing, f(x) >= 1/x",
+   "fingerprint": "cc8876817c45"
+  },
+  {
+   "key": "premise_relates_two_params",
+   "statement": "assuming hi >= lo, f(xs, lo, hi) >= 0",
+   "fingerprint": "5bb19c42040d"
+  },
+  {
+   "key": "principal_value",
+   "statement": "P.V.(integrate(1/(-c + x), x, -1, 1)) = f(c)",
+   "fingerprint": "c817941acd29"
+  },
+  {
+   "key": "prod_call",
+   "statement": "let n be [1, 20] : int, Prod(f(i), i, 1, n) >= 0",
+   "fingerprint": "68ca418a7e85"
+  },
+  {
+   "key": "raises_typed",
+   "statement": "raises(f(x), ValueError)",
+   "fingerprint": "affbdf64fac1"
+  },
+  {
+   "key": "raises_typed_region",
+   "statement": "for x in [-10.0, -1.0] : float|absent|missing, raises(f(x), ValueError)",
+   "fingerprint": "f9f0af07c92b"
+  },
+  {
+   "key": "real_domain_is_not_finite",
+   "statement": "for n in [2.0, 30.0] : float|absent|missing, f(n) >= 2",
+   "fingerprint": "35c4efc5a4fd"
+  },
+  {
+   "key": "recurrence_identity",
+   "statement": "for n in [2, 30] : int, f(n) = f(n - 2) + f(n - 1)",
+   "fingerprint": "3986f65868d7"
+  },
+  {
+   "key": "relation_approx",
+   "statement": "f(x) ~= x",
+   "fingerprint": "06c5ec5f4d7c"
+  },
+  {
+   "key": "relation_approx_unicode",
+   "statement": "f(x) ~= 2*x",
+   "fingerprint": "4983aaef2164"
+  },
+  {
+   "key": "relation_boolean_rhs",
+   "statement": "f(mi, chance) = (mi <= chance)",
+   "fingerprint": "c3b71f1bde9a"
+  },
+  {
+   "key": "relation_eq",
+   "statement": "f(x) = x",
+   "fingerprint": "f02089711ef9"
+  },
+  {
+   "key": "relation_indexing",
+   "statement": "f(x, 1.0) = x[-1]",
+   "fingerprint": "eb6be10b7307"
+  },
+  {
+   "key": "relation_le_unicode",
+   "statement": "f(x) <= 1",
+   "fingerprint": "00a98b60535f"
+  },
+  {
+   "key": "remainder_below_modulus",
+   "statement": "for n in [0, 1000] : int, Mod(n, 24) <= 23",
+   "fingerprint": "18b1b3a01c1a"
+  },
+  {
+   "key": "reproducible_passed_generator",
+   "statement": "is_reproducible(f)",
+   "fingerprint": "52c5fcda3b12"
+  },
+  {
+   "key": "retired_family_spelling",
+   "statement": "is_number_set_safe(x)",
+   "fingerprint": "588d0930cb70"
+  },
+  {
+   "key": "safety_predicate_function_wide",
+   "statement": "is_missing_safe(f)",
+   "fingerprint": "5f3f5de2673d"
+  },
+  {
+   "key": "second_derivative_sign_by_probe",
+   "statement": "for rate in [0.0, 0.2] : float|absent|missing, d(f(rate), rate, rate) >= 0",
+   "fingerprint": "ae4235fb287b"
+  },
+  {
+   "key": "second_function_by_name",
+   "statement": "let I be [10.0, 1000.0], let px be [0.5, 20.0], let py be [0.5, 20.0], d(budget_line(x, I, px, py), x) = -px/py",
+   "fingerprint": "293cf432bdde"
+  },
+  {
+   "key": "sigmoid_bounded_above",
+   "statement": "for x in [-30.0, 30.0] : float|absent|missing, f(x) < 1",
+   "fingerprint": "2c89e4f2d764"
+  },
+  {
+   "key": "sigmoid_bounded_below",
+   "statement": "for x in [-30.0, 30.0] : float|absent|missing, f(x) > 0",
+   "fingerprint": "d99cd3a8742a"
+  },
+  {
+   "key": "sigmoid_density_integrates",
+   "statement": "integrate(d(f(x), x), x, -inf, inf) = 1",
+   "fingerprint": "200558f7b6a6"
+  },
+  {
+   "key": "sigmoid_derivative",
+   "statement": "for x in [-700.0, 700.0] : float|absent|missing, d(f(x), x) = (1 - f(x))*f(x)",
+   "fingerprint": "1748090a404d"
+  },
+  {
+   "key": "sigmoid_limit_lower",
+   "statement": "lim(f(x), x, -inf) = 0",
+   "fingerprint": "2cc19d1beba0"
+  },
+  {
+   "key": "sigmoid_limit_upper",
+   "statement": "lim(f(x), x, inf) = 1",
+   "fingerprint": "ce725edfb2a9"
+  },
+  {
+   "key": "sigmoid_symmetry",
+   "statement": "for x in [-700.0, 700.0] : float|absent|missing, f(-x) = 1 - f(x)",
+   "fingerprint": "16984784e6ca"
+  },
+  {
+   "key": "space_excluded_by_construction",
+   "statement": "for A in (R | {missing})^(30,15)|absent, excluded_outside_domain(A)",
+   "fingerprint": "9266f705df3d"
+  },
+  {
+   "key": "space_excluded_fixed",
+   "statement": "for A in (R | {missing})^(30,15)|absent, excluded_outside_domain(A)",
+   "fingerprint": "22b9907472ee"
+  },
+  {
+   "key": "space_matrix",
+   "statement": "for A in (R | {missing})^(m,n)|absent, f(A) = f(A)",
+   "fingerprint": "e297423787ad"
+  },
+  {
+   "key": "space_matrix_fixed",
+   "statement": "for A in ([-1.0, 1.0] | {missing})^(3,3) : float|absent, f(A) >= 0",
+   "fingerprint": "d68c1551b22a"
+  },
+  {
+   "key": "space_matrix_mixed",
+   "statement": "for A in (R | {missing})^(n,3)|absent, f(A) in R**(3,3)",
+   "fingerprint": "4bf6f045855c"
+  },
+  {
+   "key": "space_output_named",
+   "statement": "for A in (R | {missing})^(n,15)|absent, x in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, f(A, x) in R**15",
+   "fingerprint": "14a209c4c74e"
+  },
+  {
+   "key": "space_output_wrong_shape",
+   "statement": "for A in (R | {missing})^(n,3)|absent, f(A) in R**(n,3)",
+   "fingerprint": "c9c2e1fb3c4b"
+  },
+  {
+   "key": "space_shared_dim",
+   "statement": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, f(x, y) = f(y, x)",
+   "fingerprint": "d35bb9425eac"
+  },
+  {
+   "key": "space_vector_bounded",
+   "statement": "for xs in ([0.0, 1.0] | {missing})^n : float|absent, f(xs) <= 1",
+   "fingerprint": "92c1808204df"
+  },
+  {
+   "key": "space_vector_fixed",
+   "statement": "for c in ([0.0, 1.0] | {missing})^3 : float|absent, 0 <= f(c) <= 1",
+   "fingerprint": "d5da4d68316f"
+  },
+  {
+   "key": "space_vector_fixed_sketch",
+   "statement": "for r in ([-0.1, 0.1] | {missing})^12 : float|absent, f(r) >= -1.20000000000000",
+   "fingerprint": "d857e99d6105"
+  },
+  {
+   "key": "space_vector_fixed_trap",
+   "statement": "for r in ([-0.1, 0.1] | {missing})^12 : float|absent, f(r) <= 0.100000000000000",
+   "fingerprint": "175e9f16da42"
+  },
+  {
+   "key": "space_vector_real",
+   "statement": "for v in (R | {missing})^n|absent, f(v) >= 0",
+   "fingerprint": "d71ad24ff6ff"
+  },
+  {
+   "key": "sqrt_bare_radical",
+   "statement": "for x in [1.0, 4.0] : float|absent|missing, f(x) >= sqrt(x)",
+   "fingerprint": "28e186f3c926"
+  },
+  {
+   "key": "sqrt_symbol",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, sqrt(f(x)) >= 0",
+   "fingerprint": "e358fdbc413c"
+  },
+  {
+   "key": "state_safe_env_write",
+   "statement": "is_state_safe(f)",
+   "fingerprint": "85aee7d433b2"
+  },
+  {
+   "key": "state_safe_global_rng",
+   "statement": "is_state_safe(f)",
+   "fingerprint": "1e063d1b101f"
+  },
+  {
+   "key": "state_safe_logging",
+   "statement": "is_state_safe(f)",
+   "fingerprint": "4176d6e30db7"
+  },
+  {
+   "key": "state_safe_logging_config_trap",
+   "statement": "is_state_safe(f)",
+   "fingerprint": "642d4968429f"
+  },
+  {
+   "key": "state_safe_passed_generator",
+   "statement": "is_state_safe(f)",
+   "fingerprint": "b79130a6617e"
+  },
+  {
+   "key": "stress_gauge_invariance",
+   "statement": "let c be [-1000000.0, 1000000.0], for dh in [-1000000.0, 1000000.0] : float|absent|missing, t in [0.0, 1000.0] : float|absent|missing, ds in [-1000000.0, 1000000.0] : float|absent|missing, d(f(c + dh, t, ds), t) = d(f(dh, t, ds), t)",
+   "fingerprint": "1b63a3c3b5d3"
+  },
+  {
+   "key": "stress_mixed_let_and_types",
+   "statement": "let g = math.sqrt, let c be [1, 100] : int, for x in (0.0, 100.0] : float|absent|missing, c + g(x) >= 0",
+   "fingerprint": "7a5d1e0a8375"
+  },
+  {
+   "key": "sum_subscript",
+   "statement": "let n be [1, 20] : int, Sum(f(i), i, 1, n) = n*(n + 1)",
+   "fingerprint": "8342109f7b09"
+  },
+  {
+   "key": "table_column_attribute",
+   "statement": "for df in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df.returns",
+   "fingerprint": "452e8851dca2"
+  },
+  {
+   "key": "table_column_item",
+   "statement": "for df in ([-1000000.0, 1000000.0] | {missing})^n : float|absent, c in [-2.0, 2.0] : float|absent|missing, f(df, c) = c*df[\"returns\"]",
+   "fingerprint": "d0a2471f1687"
+  },
+  {
+   "key": "table_columns_dot",
+   "statement": "for df in ([0.0, 1.0] | {missing})^n : float|absent, f(df) ~= dot(df.w, df.r)",
+   "fingerprint": "154d47122371"
+  },
+  {
+   "key": "tolerance_eps_ascii",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= eps",
+   "fingerprint": "d9d575f5d66e"
+  },
+  {
+   "key": "tolerance_epsilon",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon",
+   "fingerprint": "8648263b350a"
+  },
+  {
+   "key": "tolerance_epsilon_latex",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= \\epsilon",
+   "fingerprint": "53669b599f40"
+  },
+  {
+   "key": "tolerance_epsilon_word",
+   "statement": "for x in [0.0, 1.0] : float|absent|missing, abs(x - f(x)) <= epsilon",
+   "fingerprint": "d8fef4a95c43"
+  },
+  {
+   "key": "two_function_equality",
+   "statement": "f(x) = g(x)",
+   "fingerprint": "9abd3ad94f1b"
+  },
+  {
+   "key": "vector_between_least_and_greatest",
+   "statement": "for xs in (R | {missing})^n|absent, min(xs) <= f(xs) <= max(xs)",
+   "fingerprint": "0b93a6644a5e"
+  },
+  {
+   "key": "vector_dot",
+   "statement": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, dot(x, y) = dot(y, x)",
+   "fingerprint": "15f5c133510d"
+  },
+  {
+   "key": "vector_drawdown_bounds",
+   "statement": "for prices in ([1.0, 100.0] | {missing})^n : float|absent, -1 <= f(prices) <= 0",
+   "fingerprint": "b002564b4a1f"
+  },
+  {
+   "key": "vector_outer",
+   "statement": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, outer(x, y).T = outer(y, x)",
+   "fingerprint": "7874a0d0e804"
+  },
+  {
+   "key": "vector_running_maximum",
+   "statement": "for a in (R | {missing})^n|absent, f(a) = cummax(a)",
+   "fingerprint": "dcddad3ae11e"
+  },
+  {
+   "key": "vector_triangle_inequality",
+   "statement": "for x in (R | {missing})^n|absent, y in (R | {missing})^n|absent, norm(x + y) <= norm(x) + norm(y)",
+   "fingerprint": "03dbf4ed04d2"
+  }
+ ]
+}
