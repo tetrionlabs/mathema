@@ -479,6 +479,39 @@ class UnknownLanguage(InvalidDomain):
             + hint + (f" ({detail})" if detail else ""))
 
 
+class LibraryNotInstalled(UnknownLanguage):  # :draft
+    """Raised when `L[<name>]` cannot resolve because a library its
+    language or adaptor needs is not installed. `reason` names the
+    library and, when the failing import says which, the extra that
+    installs it."""
+
+    def __init__(self, name: str, library: str, extra: "str | None" = None):
+        self.name = name
+        self.vocabulary = ()
+        self.library = library
+        self.extra = extra
+        self.reason = (f"L[{name}] needs {library}, which is not installed"  # :draft
+                       + (f"; install mathema-language[{extra}]" if extra else ""))  # :draft
+        InvalidDomain.__init__(self, self.reason)
+
+
+def _missing_library(exc: BaseException) -> "tuple[str, str | None] | None":  # :draft
+    """`(library, extra)` when a load failure says a library is not
+    installed through a `missing_library` attribute (and optionally an
+    `extra` one), else `None`."""
+    library = getattr(exc, "missing_library", None)
+    if not isinstance(library, str) or not library:
+        return None
+    extra = getattr(exc, "extra", None)
+    return library, extra if isinstance(extra, str) and extra else None
+
+
+#: languages and adaptors whose load failed for a library not installed,
+#: by entry-point name: `(library, extra)`
+_UNLOADED_LANGUAGES: dict = {}
+_UNLOADED_ADAPTORS: dict = {}
+
+
 REFINEMENT_GROUP = "mathema.language_refinements"
 
 #: refinements registered in this process, by key
@@ -1037,6 +1070,9 @@ def _load_language(name: str):
     try:
         language = ep.load()
     except Exception as e:
+        missing = _missing_library(e)
+        if missing is not None:
+            _UNLOADED_LANGUAGES[name] = missing
         warnings.warn(f"mathema: language {ep.value!r} registered under "
                       f"{name!r} failed to load ({e!r}), skipping it",
                       stacklevel=2)
@@ -1053,10 +1089,14 @@ def _load_language(name: str):
 @functools.lru_cache(maxsize=1)
 def _loaded_adaptors() -> tuple:
     out = []
+    _UNLOADED_ADAPTORS.clear()
     for ep in _discovered_adaptors():
         try:
             out.append((ep.name, ep.load()))
         except Exception as e:
+            missing = _missing_library(e)
+            if missing is not None:
+                _UNLOADED_ADAPTORS[ep.name] = missing
             warnings.warn(f"mathema: language adaptor {ep.value!r} registered "
                           f"under {ep.name!r} failed to load ({e!r}), "
                           f"skipping it", stacklevel=2)
@@ -1184,6 +1224,8 @@ def resolve(ref) -> tuple:
     loaded = _load_language(name)
     if loaded is not None:
         return loaded, f"entry point {_discovered_languages()[name].value}"
+    if name in _discovered_languages() and name in _UNLOADED_LANGUAGES:
+        raise LibraryNotInstalled(name, *_UNLOADED_LANGUAGES[name])
     detail = ""
     if "." in name:
         from ._claim_reach import walk_refusal
@@ -1200,12 +1242,18 @@ def resolve(ref) -> tuple:
                 try:
                     adapted = adapt(obj)
                 except Exception as e:
+                    missing = _missing_library(e)
+                    if missing is not None:
+                        _UNLOADED_ADAPTORS.setdefault(adaptor_name, missing)
                     warnings.warn(f"mathema: language adaptor {adaptor_name!r} "
                                   f"failed on L[{name}] ({e!r}), skipping it",
                                   stacklevel=2)
                     continue
                 if adapted is not None and not language_problems(adapted):
                     return adapted, f"adaptor {adaptor_name}"
+            if _UNLOADED_ADAPTORS:
+                raise LibraryNotInstalled(
+                    name, *_UNLOADED_ADAPTORS[sorted(_UNLOADED_ADAPTORS)[0]])
             detail = ("the object imports but no adaptor accepts it"
                       if _loaded_adaptors() else
                       "the object imports but no language adaptor is installed")
