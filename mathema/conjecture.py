@@ -6243,7 +6243,7 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
 
     out: list[Probe] = []
 
-    def _stamped(probe, cj, canonical=True, written=None):
+    def _stamped(probe, cj, canonical=True, written=None, restate=None):
         # one statement, every surface: the row, the display, and the
         # store all carry the canonical ascii text, which re-parses to
         # this claim (sections, quantifier, premise and all). The
@@ -6300,6 +6300,19 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
         if reading and probe.name == cj.name \
                 and reading not in (probe.note or ""):
             probe.note = f"{probe.note or ''}; {reading}".lstrip("; ")
+        # a computation row prints the domain its claim prints
+        left_out = (probe.meta or {}).get("mathema.listed_left_out") or restate
+        if left_out and cj.domain and (restate or not probe.name.startswith(f"{cj.name}[")):
+            if canonical and not restate:
+                # the row prints the domain without the values left out;
+                # the claim as written is kept beside it, so the record
+                # still reads as the claim its author wrote
+                probe.meta = {**(probe.meta or {}),  # :draft
+                              "mathema.statement_as_written":
+                                  canonical_claim_text(pins_into_calls(cj, fn))}
+            cj = _dc_replace(cj, domain={
+                p2: _without_listed(b, left_out[p2]) if p2 in left_out else b
+                for p2, b in cj.domain.items()})
         if canonical:
             # the renderer is total over everything claim() accepts, so
             # a failure here is a renderer bug worth a loud crash, never
@@ -6977,9 +6990,10 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
                             meta={**(ctx.companion.meta or {}),
                                   "mathema.probe_gap": "input-synthesis"})
                     if ctx.companion is not None:
-                        _emit_companion(out, _stamped(ctx.companion, cj_record,
-                                                      written=cj.domain or {}),
-                                        derived.name)
+                        _emit_companion(out, _stamped(
+                            ctx.companion, cj_record, written=cj.domain or {},
+                            restate=(derived.meta or {}).get("mathema.listed_left_out")),
+                            derived.name)
                     if float_companions:
                         out.extend(_stamped(line, cj, canonical=False) for line in lines)
                     continue
@@ -7006,6 +7020,11 @@ def _check_conjectures(fn, conjectures: list[Conjecture],
             try:
                 raw = _adjudicate_probe(ctx, fn, facts, kinds, _sampling)
                 probed = _arbitrate_empirical_fallback(raw, ctx)
+                if probed.verdict == "holds":
+                    probed = _probe_with_listed_sentinels(
+                        probed, _listed_sentinels_fail(
+                            ctx, fn, facts, ctx.cj_domain, _bound_callables(ctx.cj),
+                            ctx.assumption or [], ctx.statement, ctx.note))
             except ReceiverRefused as refused:
                 probed = Probe(cj.name, ctx.statement, "skipped", route="probe",
                                note=f"{ctx.note}; no evaluable inputs: "
@@ -9356,28 +9375,39 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
         After a proof over the reals, the claim's own listed sentinels
         executed: every sentinel an enumerated binding lists
         (`{0.25, None}`, `{missing}`) belongs to the claim's point set,
-        so the function is called at each, against in-domain points of
-        the other parameters (their domain corners), and a raise or a
-        failing relation there falsifies the claim itself. Returns a
+        so the function is called at each, against the other
+        parameters' values (`_listed_value_points`). A point where the
+        relation fails falsifies the claim; a point where the function
+        raises or gives no value is not judged here, the listed value is
+        judged by its policy row. Returns a
         falsified `Probe` naming the first failing point, listed
-        sentinels in the order absence, the class, then members; a
-        `Probe` carrying only `meta["mathema.missing"]["tried"]` when
-        every one holds; None when the claim lists none or its points
-        cannot be evaluated here.
+        sentinels in the order absence, the class, then members; else a
+        `Probe` carrying `meta["mathema.missing"]["tried"]`: `holds`
+        on the route `derive:listed_value_sampled`, `n` the distinct
+        listed-value points run, with a note saying what was run, when a
+        listed value held at the domain's corners and drawn points of
+        the other parameters rather than at every combination of them;
+        `proven` otherwise, and when the claim cannot be evaluated at a
+        point, its note then saying the listed value is judged by its
+        policy row. None when the claim lists none.
     """
-    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, _is_enumerated,
-                         _member_sort_key, _set_sentinels, realise_sentinel)
+    from .domain import (ABSENT, NO_ANNOTATION, _as_domain, named_missing,
+                         realise_sentinel)
+
+    from . import _brute_force
+    from .domain import _sentinel_word
     from .gates import _fmt_point, _point_evaluator
+    from .probing import _N_BASE
     from .runtime_types import calling
     listed: dict = {}
     for p, bound in (cj_domain or {}).items():
         dom = _as_domain(bound)
-        if not p.isidentifier() or dom.base_type == "L" or not _is_enumerated(dom):
-            continue
-        sentinels = sorted(set(_set_sentinels(dom)), key=_member_sort_key)
-        if not sentinels:
+        if not p.isidentifier() or dom.base_type == "L" or dom.dims:
             continue
         policy = ctx.missing.get(p, NO_ANNOTATION)
+        sentinels = list(named_missing(dom, policy))
+        if not sentinels:
+            continue
         listed[p] = [(s, v) for s in sentinels
                      for v in realise_sentinel(s, policy.members, policy.absence)]
     if not listed:
@@ -9386,28 +9416,133 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                             facts, cj_domain,
                             bound_funcs, assumption)
     if deps is None:
-        return None
+        return _listed_values_not_run(ctx, fn, facts, cj_domain, listed, statement)
     names = list(deps["names"])
-    bases = [c for c in deps["corners"][:8] if deps["admits"](c)] or deps["corners"][:1]
     tried: dict = {}
     failures: list = []
+    sampled: list = []
+    notes: list = []
+    mismatched: list = []
+    left_out: dict = {}
+    lowered = False
+    distinct = 0
     for p, values in listed.items():
         if p not in names:
             continue
+        others = [n for n in names if n != p]
+        axes = _listed_value_axes(others, cj_domain, listed)
+        of_others = f" of {', '.join(others)}" if others else ""  # :draft
         for sentinel, value in values:
             tried.setdefault(p, []).append(repr(value))
-            for base in bases:
-                point = {**base, p: value}
-                if deps["evaluate"](point) is False:
+            points, combinations, over, corners = _listed_value_points(
+                deps, names, p, value, others, axes)
+            swept = combinations is None and axes is not None
+            started = _listed_value_clock()
+            run = held = 0
+            stopped = failed = False
+            classified: list = []
+            for point in points:
+                if swept and _listed_value_clock() - started \
+                        > _brute_force._SWEEP_SECONDS:
+                    stopped = True
+                    break
+                run += 1
+                outcome = deps["evaluate"](point)
+                # :draft
+                if outcome is False:
                     rank = (0 if sentinel == ABSENT else 1 if sentinel.member is None
                             else 2)
                     failures.append((rank, point))
+                    failed = True
                     break
+                if outcome is True:
+                    held += 1
+                elif len(classified) < _N_BASE:
+                    classified.append(point)
+            if failed:
+                continue
+            distinct += run
+            shown = _fmt_point({p: value}, [p])
+            ran = _corners_and_draws(run, corners)
+            if stopped:
+                sampled.append(
+                    # :draft
+                    f"the sweep's time budget stopped the listed value {shown} "
+                    f"after {run} of its {len(points)} points{of_others}, which "
+                    f"held at {held}, which is evidence, not a proof")
+            elif classified and (held == 0 or (judged := _listed_value_judged(
+                    fn, facts, p, sentinel, shown, classified)).wrong is not None
+                    or judged.left_out):
+                # a point with no value is judged wherever it falls, also
+                # where the value held at other points of the others
+                outcome = judged if held else _listed_value_judged(
+                    fn, facts, p, sentinel, shown, classified)
+                if outcome.wrong is not None:
+                    mismatched.append((outcome.wrong, outcome.text))
+                    continue
+                if outcome.left_out:
+                    left_out.setdefault(p, []).append(_sentinel_word(
+                        sentinel, ascii_mode=True))
+                    lowered = lowered or outcome.lowers
+                    if outcome.row is None:
+                        notes.append(
+                            # :draft
+                            f"the listed value {shown} was run at {ran}{of_others}; "
+                            f"{outcome.text}" if not swept else outcome.text)
+                    else:
+                        notes.append(
+                            # :draft
+                            (f"the listed value {shown} was run at {ran}{of_others} "
+                             f"and {outcome.text}" if not swept else
+                             f"the listed value {shown} {outcome.text.replace(' at each', '')}")
+                            # :draft
+                            + f", which no guard or stated row covers, so {shown} "
+                              f"is left out of the domain and judged by the policy "
+                              f"row {outcome.row}")
+                elif not swept:
+                    notes.append(
+                        # :draft
+                        f"the listed value {shown} was run at {ran}"
+                        f"{of_others} and {outcome.text}")
+            elif swept:
+                continue
+            elif combinations is not None:
+                sampled.append(
+                    # :draft
+                    f"the {combinations} combinations{of_others} are over the "
+                    f"sweep's {over} budget, so the listed value {shown} was "
+                    f"run at {ran} of them and held at {held}, which is "
+                    f"evidence, not a proof")
+            else:
+                sampled.append(
+                    # :draft
+                    f"the listed value {shown} was run at {ran}{of_others} "
+                    f"and held at {held}, which is evidence, not a proof")
     from .probing import executed_missing, with_executed
     meta = with_executed({"mathema.missing": {"tried": tried}},
                          executed_missing(deps)) or {}
+    if left_out:
+        meta["mathema.listed_left_out"] = left_out
+    if not failures and mismatched:
+        point, text = mismatched[0]
+        witness = _fmt_point(point, names)
+        return Probe(ctx.cj.name, statement, "falsified", route="derive",
+                     counterexample=witness, note=note,
+                     # :draft
+                     sketch=(f"the real members are proven, and at the claim's "
+                             f"own listed point {witness} {text}"),
+                     meta={**meta, "mathema.corroboration": "reproduced",
+                           "mathema.witness_executed": True})
     if not failures:
-        return Probe(ctx.cj.name, statement, "proven", meta=meta)
+        if sampled:
+            return Probe(ctx.cj.name, statement, "holds", meta=meta,
+                         n=distinct,
+                         route="derive:listed_value_sampled",  # :draft
+                         # :draft
+                         note="the real points were derived; "
+                              + "; ".join(sampled + notes))
+        return Probe(ctx.cj.name, statement, "holds" if lowered else "proven",
+                     meta=meta, note="; ".join(notes) or None)
     point = sorted(failures, key=lambda f: f[0])[0][1]
     witness = _fmt_point(point, names)
     from ._brute_force import _raised_at
@@ -9420,6 +9555,519 @@ def _listed_sentinels_fail(ctx, fn, facts, cj_domain: dict, bound_funcs,
                          + (f": the function raised {raised}" if raised else "")),
                  meta={**meta, "mathema.corroboration": "reproduced",
                        "mathema.witness_executed": True})
+
+
+def _restates_missing_defaults(dom, defaults) -> bool:  # :draft
+    """Intent:
+        `domain.restates_missing_defaults`.
+    """
+    from .domain import restates_missing_defaults
+    return restates_missing_defaults(dom, defaults)
+
+
+def _listed_value_clock() -> float:
+    """Intent:
+        The seconds clock a listed value's sweep reads for its time
+        budget (`time.perf_counter`).
+    """
+    import time
+    return time.perf_counter()
+
+
+def _listed_value_axes(others: list, cj_domain: dict, listed: dict) -> "list | None":
+    """Intent:
+        Each of the `others` parameters' values, one list per parameter
+        (`[]` when there are none), when each is bound to a finite set:
+        its members, then the sentinels it lists (`listed`, as
+        `_listed_sentinels_fail` builds it). None when some parameter is
+        not finite.
+    """
+    from .domain import _member_sort_key
+    axes = []
+    for n in others:
+        members = _finite_members((cj_domain or {}).get(n))
+        if members is None and n not in listed:
+            return None
+        axes.append(sorted(members or (), key=_member_sort_key)
+                    + [v for _s, v in listed.get(n, ())])
+    return axes
+
+
+def _listed_value_points(deps, names: list, p: str, value, others: list,
+                         axes) -> tuple:
+    """Intent:
+        `(points, combinations, over, corners)`: the points a listed value `value` of
+        `p` is run at, each one the domain and the claim's assumptions
+        admit, its coordinates in `names` order. Every combination of
+        `axes` when the other parameters are all finite and the
+        combinations fit the brute-force point budget and, by a timed
+        estimate of a few points, `_brute_force._SWEEP_SECONDS`;
+        `combinations` is then None. Otherwise the domain's corners
+        followed by `probing._N_BASE` draws of the other parameters from
+        `deps["sample"]` with the sampler's fixed seed; `combinations`
+        is the number of combinations of finite `axes` that were over
+        the budget, else None, and `over` names the budget, `point` or
+        `time`. Points are distinct; `corners` is how many of the first
+        points are the domain's corners.
+    """
+    import itertools
+    import math
+    import random
+
+    from . import _brute_force
+    from ._sampling import _RNG_SEED
+    from .probing import _N_BASE
+
+    def ordered(point: dict) -> dict:
+        return {n: point[n] for n in names if n in point}
+    combinations = None
+    over = "point"
+    if axes is not None:
+        combinations = math.prod(len(a) for a in axes)
+        if combinations <= _brute_force.BRUTE_FORCE_POINT_BUDGET:
+            over = "time"
+            grid = [ordered({**dict(zip(others, combo)), p: value})
+                    for combo in itertools.product(*axes)]
+            points = [c for c in grid if deps["admits"](c)]
+            trial = points[::max(1, len(points) // 5)][:5]
+            started = _listed_value_clock()
+            for pt in trial:
+                try:
+                    deps["evaluate"](pt)
+                except Exception:
+                    pass
+            per_point = (_listed_value_clock() - started) / max(1, len(trial))
+            if per_point * len(points) <= _brute_force._SWEEP_SECONDS:
+                return points, None, None, 0
+    rng = random.Random(_RNG_SEED)
+    seen: set = set()
+
+    def distinct(candidates: list) -> list:
+        kept = []
+        for c in candidates:
+            key = tuple(repr(v) for v in c.values())
+            if key not in seen and deps["admits"](c):
+                seen.add(key)
+                kept.append(c)
+        return kept
+    corners = distinct([ordered({**c, p: value}) for c in deps["corners"][:8]])
+    drawn = distinct([ordered({**{n: deps["sample"](n, rng) for n in others},
+                               p: value})
+                      for _ in range(_N_BASE)])
+    return (corners + drawn, combinations,
+            over if combinations is not None else None, len(corners))
+
+
+def _corners_and_draws(run: int, corners: int) -> str:
+    """Intent:
+        How many of the first `run` points of a listed value's plan
+        were the domain's corners (the plan's first `corners` points)
+        and how many were drawn: `4 corners and 130 drawn points`.
+    """
+    at_corners = min(run, corners)
+    drawn = run - at_corners
+    parts = []
+    if at_corners:
+        parts.append(f"{at_corners} corner" + ("s" if at_corners != 1 else ""))  # :draft
+    if drawn or not parts:
+        parts.append(f"{drawn} drawn point" + ("s" if drawn != 1 else ""))  # :draft
+    return " and ".join(parts)
+
+
+def _stated_policies(conjectures) -> tuple:
+    """Intent:
+        The policy each policy claim among `conjectures` states.
+    """
+    from .policy import parse_policy
+    found = []
+    for c in conjectures:
+        if getattr(c, "relation", None) != "policy":
+            continue
+        stated = parse_policy(f"{c.lhs} {c.rhs}".strip())
+        if stated is not None:
+            found.append(stated)
+    return tuple(found)
+
+
+def _stated_raise(p: str, what: str, member, raised: str):
+    """Intent:
+        The stated policy row that says f raises `raised` (or any
+        exception, when the row names none) for the `what` kind of `p`
+        (`absent`, `missing`, with `member`), or None. A row with a
+        premise covers only part of the inputs and is not read here. The
+        rows are those of the claims being checked
+        (`_empty_input.STATED`).
+    """
+    from ._empty_input import STATED
+    for stated in _stated_policies(STATED.get()):
+        if stated.kind == what and stated.parameter in (None, p) \
+                and stated.member in (None, member) \
+                and stated.behaviour == "raises" and not stated.premise \
+                and stated.exception in (None, raised):
+            return stated
+    return None
+
+
+def _judging_row(p: str, what: str, member) -> str:
+    """Intent:
+        The name of the policy row that judges the `what` kind of `p`
+        (`absent`, `missing`, with `member`): the stated policy claim
+        about it, when the claims being checked hold one with no
+        premise, else the default row `what[p]`.
+    """
+    from ._empty_input import STATED
+    from .policy import parse_policy
+    for c in STATED.get() or ():
+        if getattr(c, "relation", None) != "policy":
+            continue
+        stated = parse_policy(f"{c.lhs} {c.rhs}".strip())
+        if stated is not None and stated.kind == what \
+                and stated.parameter in (None, p) and stated.member in (None, member) \
+                and not stated.premise:
+            return c.name
+    return f"{what}[{p}]"
+
+
+class _ListedOutcome:
+    """What the function did at a named missing value no run decided:
+    `text` says it; `wrong` is the point where the result breaks the
+    return annotation, else None; `left_out` whether the value leaves
+    the printed domain; `lowers` whether that lowers a proof to holds;
+    `row` the policy row that judges a raise nothing covers, else None."""
+
+    def __init__(self, text, wrong=None, left_out=False, lowers=False, row=None):
+        self.text, self.wrong = text, wrong
+        self.left_out, self.lowers, self.row = left_out, lowers, row
+
+
+def _listed_value_judged(fn, facts, p: str, sentinel, shown: str,
+                         points: list) -> "_ListedOutcome":
+    """Intent:
+        Judge a named missing value at `points`, the points where the
+        relation was not decided, by what the function did there. A
+        None or nan result is judged against the return annotation: one
+        that does not admit it gives the first such point as `wrong`;
+        one it admits, or no annotation, leaves the value out of the
+        printed domain. A raise leaves the value out of the printed
+        domain: behind the function's own raising guard, or one a stated
+        policy row says f raises, the note names the guard or the row;
+        a raise nothing covers names the policy row (`row`) that judges
+        it. A call that returned an ordinary value is said and left as
+        it is. Each outcome at more than one kind of point is said with
+        its count.
+    """
+    import inspect
+    from collections import Counter
+
+    from ._brute_force import _raised_at
+    from ._missing_words import declared_optional_return
+    from .policy import _guard_for, guard_policies
+    from .runtime_types import calling
+    call_fn = calling(fn, facts, ())
+    counts: Counter = Counter()
+    first: dict = {}
+    for point in points:
+        raised = _raised_at(call_fn, facts, point)
+        if raised:
+            kind = f"raised {raised}"
+        else:
+            try:
+                value = _call_by_name(fn, point)
+            except Exception:
+                value = 0.0
+            kind = ("returned None" if value is None else
+                    "returned nan" if isinstance(value, float) and value != value
+                    else "gave no value")
+        counts[kind] += 1
+        first.setdefault(kind, point)
+    what = "absent" if sentinel.kind == "absent" else "missing"
+    try:
+        annotation = inspect.signature(fn).return_annotation
+    except (TypeError, ValueError):
+        annotation = inspect.Signature.empty
+    declared = None
+    if annotation is not inspect.Signature.empty:
+        from ._annotation_text import annotation_text
+        declared = annotation_text(annotation)
+
+    def admitted(result: str) -> bool:
+        if declared is None:
+            return True
+        if result == "None":
+            return declared_optional_return(fn) is not None
+        return "float" in declared or declared in ("Any", "object")
+    for kind in sorted(counts):
+        if kind.startswith("returned ") and not admitted(kind.split(" ", 1)[1]):
+            # :draft
+            return _ListedOutcome(f"f returned {kind.split(' ', 1)[1]}, which its "
+                                  f"return type {declared} does not admit",
+                                  wrong=first[kind])
+    if "gave no value" in counts:
+        if len(counts) == 1:
+            return _ListedOutcome("gave no value at each")  # :draft
+        return _ListedOutcome(", ".join(  # :draft
+            f"{k.replace('returned ', 'gave ')} at {n}"
+            for k, n in sorted(counts.items())))
+    parts: list = []
+    row = None
+    many = len(counts) > 1
+    results = [f"{k.split(' ', 1)[1]}" + (f" at {counts[k]}" if many else "")
+               for k in sorted(counts) if k.startswith("returned ")]
+    if results:
+        parts.append(
+            # :draft
+            f"f returned {' and '.join(results)} there, and its return is not "
+            f"annotated" if declared is None else
+            # :draft
+            f"f returned {' and '.join(results)} there, which its return type "
+            f"{declared} admits")
+    for kind in sorted(counts):
+        if kind.startswith("returned "):
+            continue
+        raised = kind.split(" ", 1)[1]
+        guard = _guard_for(guard_policies(facts), fn, p, what, sentinel.member)
+        if guard is not None and guard[0] == "raises":
+            # :draft
+            parts.append(f"{shown} raises {raised}, from the guard on "
+                         f"line {guard[2]} ({what}[{p}])")
+            continue
+        stated = _stated_raise(p, what, sentinel.member, raised)
+        if stated is not None:
+            from .policy import policy_text
+            # :draft
+            parts.append(f"{shown} raises {raised}, as the stated row "
+                         f"{policy_text(stated)} says")
+            continue
+        row = _judging_row(p, what, sentinel.member)
+        parts.append(f"raised {raised}")  # :draft
+    if row is not None:
+        raised_counts = [f"raised {k.split(' ', 1)[1]} at {counts[k]}"
+                         for k in sorted(counts) if k.startswith("raised ")]
+        text = (", ".join(parts[:1 if results else 0] + raised_counts) if many  # :draft
+                else f"{parts[0]} at each")  # :draft
+        return _ListedOutcome(text, left_out=True, row=row)
+    returned = [part for part in parts if part.startswith("f returned ")]
+    raised_parts = [part for part in parts if not part.startswith("f returned ")]
+    text = "; ".join(
+        ([f"{shown} is left out of the domain: " + returned[0]]  # :draft
+         if returned else []) + raised_parts)
+    return _ListedOutcome(text, left_out=True)
+
+
+def _listed_values_not_run(ctx, fn, facts, cj_domain: dict, listed: dict,
+                           statement: str) -> "Probe":
+    """Intent:
+        The outcome at the named missing values of a claim that cannot
+        be evaluated at a point (a derivative, a raises claim): the
+        function is called once at each, the other parameters at a
+        point of their domains. A raises claim is falsified at a value
+        where the call returns, or raises another exception than the one
+        claimed; a raise of the claimed one keeps the value in the
+        domain, the proof lowered to holds when other parameters were
+        fixed at one point. Otherwise a None or nan result its return
+        type does not admit falsifies at that value; where the function
+        returns an ordinary number, on a branch derive did not read, the
+        value leaves the printed domain and the proof over the real
+        points is lowered to holds; else the proof stands, and the value
+        is judged by its policy row and leaves the printed domain.
+    """
+    import math
+
+    from ._missing_words import value_shown
+    from .domain import _sentinel_word
+    from .gates import _fmt_point
+    raises = ctx.cj.relation == "raises"
+    expected = _resolve_exception_type(ctx.cj.rhs, fn) if raises and ctx.cj.rhs else None
+    left_out: dict = {}
+    notes: list = []
+    lowered = False
+    for p, values in listed.items():
+        if p not in facts.params:
+            continue
+        base = {q: _listed_value_inside((cj_domain or {}).get(q))
+                for q in facts.params if q != p}
+        for sentinel, value in values:
+            shown = _fmt_point({p: value}, [p])
+            point = {**base, p: value}
+            raised = None
+            try:
+                result = _call_by_name(fn, point)
+            except Exception as exc:
+                raised, result = exc, None
+            witness = _fmt_point(point, list(facts.params))
+            if raises:
+                if raised is not None and (expected is None or isinstance(raised, expected)):
+                    lowered = lowered or bool(base)
+                    continue
+                # :draft
+                said = (f"at {witness} f returned {value_shown(result)} instead of "
+                        f"raising {ctx.cj.rhs}" if raised is None else
+                        # :draft
+                        f"at {witness} f raised {type(raised).__name__} instead of "
+                        f"{ctx.cj.rhs}")
+                return Probe(ctx.cj.name, statement, "falsified", route="derive",
+                             counterexample=witness, note=said, sketch=said,
+                             meta={"mathema.corroboration": "reproduced",
+                                   "mathema.witness_executed": True})
+            if raised is None and (result is None or (
+                    isinstance(result, float) and result != result)):
+                outcome = _listed_value_judged(fn, facts, p, sentinel, shown, [point])
+                if outcome.wrong is not None:
+                    said = f"at {witness} {outcome.text}"
+                    return Probe(ctx.cj.name, statement, "falsified", route="derive",
+                                 counterexample=witness, note=said, sketch=said,
+                                 meta={"mathema.corroboration": "reproduced",
+                                       "mathema.witness_executed": True})
+            ordinary = (raised is None and isinstance(result, (int, float))
+                        and not isinstance(result, bool) and math.isfinite(result))
+            left_out.setdefault(p, []).append(_sentinel_word(sentinel, ascii_mode=True))
+            if ordinary:
+                lowered = True
+                notes.append(
+                    # :draft
+                    f"f returns a value at {shown}, on a branch derive did not "
+                    f"read, so {shown} is left out of the domain and the claim "
+                    f"holds over the rest")
+            else:
+                what = "absent" if sentinel.kind == "absent" else "missing"
+                # :draft
+                notes.append(f"the listed value {shown} is judged by its policy row "
+                             f"{_judging_row(p, what, sentinel.member)}")
+    if raises and lowered and not left_out:
+        notes.append(
+            # :draft
+            "the listed values raised as claimed at one point of the other "
+            "parameters, which is evidence, not a proof")
+    return Probe(ctx.cj.name, statement, "holds" if lowered else "proven",
+                 meta={"mathema.listed_left_out": left_out} if left_out else {},
+                 # :draft
+                 note="the relation was derived over the real points; "
+                      + "; ".join(notes) if notes else
+                 "the relation was derived over the real points")
+
+
+def link_claim_groups(probes: list) -> None:
+    """Intent:
+        Give each mathematics row that left a named missing value out of
+        its printed domain (`meta["mathema.listed_left_out"]`) the
+        policy rows that judge that value, under
+        `meta["mathema.claim_group"]`: one entry per row, its name, its
+        verdict and the value, so a policy row's verdict reaches the
+        claim it was written in.
+    """
+    policy_rows = [p for p in probes if (p.meta or {}).get("mathema.policy")]
+    for row in probes:
+        left_out = (row.meta or {}).get("mathema.listed_left_out") or {}
+        group = []
+        for param, words in left_out.items():
+            for word in words:
+                kind = "absent" if word == "absent" else "missing"
+                shown = "None" if word == "absent" else word
+                for other in policy_rows:
+                    pol = other.meta["mathema.policy"]
+                    if pol.get("kind") == kind and pol.get("parameter") in (None, param):
+                        group.append({"row": other.name, "verdict": other.verdict,
+                                      "value": f"{param} = {shown}"})
+        if group:
+            row.meta = {**row.meta, "mathema.claim_group": group}  # :draft
+
+
+def _listed_value_inside(bound):
+    """Intent:
+        One ordinary value inside a domain bound: a finite set's least
+        member, an interval's midpoint, else 0.5.
+    """
+    members = _finite_members(bound)
+    if members:
+        from .domain import _member_sort_key
+        return sorted(members, key=_member_sort_key)[0]
+    interval = _guard_interval(bound) if bound is not None else None
+    if interval is not None:
+        return (interval[0] + interval[1]) / 2
+    return 0.5
+
+
+def _without_listed(bound, words: list):
+    """Intent:
+        `bound` with the named missing values `words` (`absent`, `nan`,
+        `missing`) left out: a finite set's members removed, a domain's
+        sentinel pieces removed and its absence cleared. Nothing is
+        excluded in their place, so the domain names what remains and
+        no more: `[0, 1] | {None}` without None is the plain `[0, 1]`,
+        whose text reads back as a claim naming nothing.
+    """
+    from dataclasses import replace
+
+    from .domain import Domain, _Sentinel, _sentinel_word
+
+    def named(v) -> bool:
+        if v is None:
+            return "absent" in words
+        if isinstance(v, float) and v != v:
+            return "nan" in words
+        return isinstance(v, _Sentinel) and _sentinel_word(v, ascii_mode=True) in words
+    if isinstance(bound, frozenset):
+        return frozenset(v for v in bound if not named(v))
+    if not isinstance(bound, Domain):
+        return bound
+    pieces = []
+    for piece in bound.pieces:
+        if isinstance(piece, frozenset):
+            piece = frozenset(v for v in piece if not named(v))
+            if not piece:
+                continue
+        pieces.append(piece)
+    out = replace(bound, pieces=tuple(pieces))
+    if "absent" in words:
+        out = replace(out, absent=False)
+    return out
+
+
+def _probe_with_listed_sentinels(probed: "Probe", listed: "Probe | None") -> "Probe":
+    """Intent:
+        A probe's holds with its named missing values judged
+        (`_listed_sentinels_fail`) as a proof's are: falsified, on the
+        probe route, at a listed point that fails or whose result its
+        return type does not admit; else the holds carrying the
+        outcome's meta (the values left out of the printed domain among
+        it) and its note. The verdict is never raised above holds.
+    """
+    if listed is None:
+        return probed
+    if listed.verdict == "falsified":
+        said = (listed.sketch or "").replace("the real members are proven, and ", "")
+        return Probe(probed.name, probed.statement, "falsified", route="probe",
+                     counterexample=listed.counterexample,
+                     note=f"{probed.note or ''}; {said}".lstrip("; "),
+                     meta={**(probed.meta or {}), **(listed.meta or {})})
+    probed.meta = {**(probed.meta or {}), **(listed.meta or {})}
+    note = (listed.note or "").replace("the real points were derived; ", "") \
+        .replace("the relation was derived over the real points; ", "")
+    if note:
+        probed.note = f"{probed.note or ''}; {note}"
+    return probed
+
+
+def _with_listed_sentinels(proven: "Probe", listed: "Probe | None") -> "Probe":
+    """Intent:
+        A proof over the reals with its listed sentinels' outcome
+        (`_listed_sentinels_fail`) applied: the falsified row when a
+        listed point fails; else the proof carrying the outcome's meta
+        and note, lowered to the outcome's `holds`, its route and its
+        `n` when the listed values were run at a sample of points.
+    """
+    if listed is None:
+        return proven
+    if listed.verdict == "falsified":
+        return listed
+    proven.meta = {**(proven.meta or {}), **(listed.meta or {})}
+    if listed.verdict == "holds":
+        proven.verdict = "holds"
+        if listed.route:
+            proven.route, proven.n = listed.route, listed.n
+    if listed.note:
+        proven.note = f"{proven.note or ''}; {listed.note}"  # :draft
+    return proven
 
 
 def _container_holes(p: str, record, resolution: dict) -> tuple:
@@ -9801,6 +10449,21 @@ def _lists_sentinel(bound) -> bool:
         return _is_enumerated(dom) and bool(_set_sentinels(dom))
     except Exception:
         return False
+
+
+def _names_missing(bound, value, defaults=None) -> bool:
+    """Whether a written binding names the missing value `value` in any
+    spelling (`domain.names_missing_value`): `None` through a listed
+    `None`, `| {None}` or `: float|absent`; a hole through a listed
+    `nan`, `| {nan}` or `: float|nan`. A value only the annotation
+    admits is not named, nor is one a type clause admits by restating
+    the default of `defaults` (the parameter's `MissingDefaults`).
+    """
+    from .domain import names_missing_value
+    from .probing import inputs_missing
+    if bound is None or not inputs_missing([value]):
+        return False
+    return names_missing_value(bound, value, defaults)
 
 
 def _missing_laps(rng, kinds: dict, cj_domain: dict, resolution: dict,
@@ -12146,10 +12809,9 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
             listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain,
                                             _bound_callables(cj), assumption or [],
                                             statement, note)
-            if listed is not None:
-                if listed.verdict == "falsified":
-                    return listed
-                proven.meta = {**(proven.meta or {}), **listed.meta}
+            proven = _with_listed_sentinels(proven, listed)
+            if proven.verdict == "falsified":
+                return proven
             _spawn_float_companion(ctx, proven, fn, facts,
                                    _bound_callables(cj), assumption or [])
             return proven
@@ -12475,13 +13137,13 @@ def _adjudicate_derive(ctx: "_ClaimContext", fn, facts,
                        sketch=proof.sketch, note=note,
                        condition=proof.quantifier, route=route,
                        meta=meta)
-        if not route.startswith("derive:brute_force"):
-            listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain, bound_funcs,
-                                            assumption or [], statement, note)
-            if listed is not None:
-                if listed.verdict == "falsified":
-                    return listed
-                proven.meta = {**(proven.meta or {}), **listed.meta}
+        # a sweep of a finite set ran each named missing value too; what
+        # the function gave back there is judged as on every route
+        listed = _listed_sentinels_fail(ctx, fn, facts, cj_domain, bound_funcs,
+                                        assumption or [], statement, note)
+        proven = _with_listed_sentinels(proven, listed)
+        if proven.verdict == "falsified":
+            return proven
         # a derive proof is exact arithmetic; the computation is the
         # float companion's claim. A proof by executing every point of a
         # finite set already is the computation, and spawns none
@@ -15452,6 +16114,21 @@ def _probe_stage_in_slots(ctx: "_ClaimContext", fn, facts, kinds: dict,
         return Probe(cj.name, statement, "unknown", route="probe",
                      note=f"{note}; {inconclusive_words}".lstrip("; "),
                      meta=dict(missing_meta))
+    if checked == 0 and executed_record.classified and executed_record.first \
+            and cj.relation == "raises":
+        from ._missing_words import value_shown
+        answered = [((p2, member), (value, output))
+                    for (p2, member), (value, output, raised, _b)
+                    in executed_record.first.items() if not raised]
+        if answered:
+            (p2, _member), (value, output) = answered[0]
+            return Probe(cj.name, statement, "falsified", route="probe",
+                         counterexample=f"{p2} = {value_shown(value)}",
+                         # :draft
+                         note=(f"{note}; at {p2} = {value_shown(value)} f returned "
+                               f"{value_shown(output)} instead of raising "
+                               f"{cj.rhs}").lstrip("; "),
+                         meta={**missing_meta, "mathema.witness_executed": True})
     if checked == 0 and executed_record.classified and executed_record.first:
         # every point executed was a missing input the code raised at or
         # answered with a missing value: nothing left to compare
@@ -15520,8 +16197,10 @@ EVIDENCE_LADDER = (
     ("probe:semi_analytical", "probe:algorithmic", "probe:minimal_example",
      "probe:counterfactual"),
     # a compendium definition row (`axiom`) is trusted testimony, as
-    # strong as a plain holds and never stronger
-    ("probe", "probe:lifted_numeric", "axiom"),
+    # strong as a plain holds and never stronger; a proof over the real
+    # points whose listed missing value was run at sampled points of the
+    # other parameters is a sampled holds  # :draft
+    ("probe", "probe:lifted_numeric", "axiom", "derive:listed_value_sampled"),
     ("documented",),
     ("declared",),
 )

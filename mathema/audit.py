@@ -439,17 +439,26 @@ def describe_detail(key: str, fn, root: str = ".", depth: int = 3,
     except Exception:
         matrix_names = frozenset()
     claims = []
+    from .verify import _group_falsified
     for c in merged_entry.get("claims") or []:
         statement = c.get("statement") or c.get("law")
         if not statement:
             continue
+        v = verified_by_name.get(c.get("name"))
+        row_meta = ((v or {}).get("meta") or {}) if isinstance((v or {}).get("meta"), dict) else {}
+        if row_meta.get("mathema.statement_as_written") and v.get("statement"):
+            # the verdict is over the domain the row prints, a named
+            # missing value left out to its policy row
+            statement = v["statement"]
         try:
             latex = to_latex(statement, matrix_names=matrix_names)
         except Exception as e:
             latex = f"(not available: {e})"
-        v = verified_by_name.get(c.get("name"))
+        verdict = v.get("verdict") if v else None
+        if verdict and _group_falsified(row_meta):
+            verdict = "falsified"
         claims.append({"name": c.get("name"), "statement": statement, "latex": latex,
-                       "verdict": v.get("verdict") if v else None})
+                       "verdict": verdict})
 
     careful = _careful_lines(fn, facts, root, merged_entry, claims)
 

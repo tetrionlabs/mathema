@@ -132,11 +132,19 @@ def as_recorded(row: dict) -> dict:
         type's missing-value default, rendered beside a constant that
         has no hole. That row reads as the constant alone (`let rho be
         [0.01, 0.99]`), its statement the canonical text this release
-        writes. Every other row reads as written.
+        writes. A row whose printed domain leaves a named missing value
+        out reads as the claim as written, kept beside it
+        (`meta["mathema.statement_as_written"]`). Every other row reads
+        as written.
     """
     from dataclasses import replace
 
     from .spec import _declared_conjecture, canonical_claim_text
+    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    as_written = meta.get("mathema.statement_as_written")  # :draft
+    if as_written:
+        return {k: v for k, v in {**row, "statement": as_written}.items()
+                if k != "domain"}
     if not row.get("statement") or not _written_by_an_earlier_release(row):
         return row
     try:
@@ -224,8 +232,10 @@ def _legacy_renderings() -> dict:
         `{move name: context manager}` for each earlier rendering of
         stored claim text this release can reproduce.
     """
-    from ._scan import legacy_not_parentheses, legacy_quoting
+    from ._scan import (legacy_named_filled, legacy_not_parentheses,
+                        legacy_quoting)
     return {"literal-quoting": legacy_quoting,
+            "named-missing-value": legacy_named_filled,
             "not-parentheses": legacy_not_parentheses}
 
 
@@ -269,27 +279,40 @@ def _renders_as(cj, statement: str, names: tuple) -> "tuple | None":
     return None
 
 
-def _legacy_move(c: dict, row: dict, fn=None) -> "tuple | None":
+def _legacy_move(c: dict, row: dict, fn=None,
+                 names: "tuple | None" = None) -> "tuple | None":
     """Intent:
         The earlier renderings, by move name, under which releases up to
-        0.6.6.1 wrote a verified row's statement for the authored claim
+        0.6.6.2 wrote a verified row's statement for the authored claim
         `c`, or None when the row's statement is the canonical text
         written now or no earlier rendering (alone or together) gives
         it. A row a move names records `c`, whether or not its old text
-        reads back as `c`. The caller applies this only to a row of a
-        record written under an earlier reasoning version.
+        reads back as `c`. `names` limits the renderings tried (all of
+        them when None). The caller applies every rendering to a row of
+        a record written under an earlier reasoning version, and the
+        named missing value's alone to any other row: builds that wrote
+        the reasoning version in force stored a named value that way
+        too.
     """
     from ._annotation_text import complex_parameters
     from .grammar import complex_in_view
     from .spec import _declared_conjecture
     statement = row.get("statement") or ""
+    if ((row.get("meta") or {}) if isinstance(row.get("meta"), dict) else {}).get(
+            "mathema.statement_as_written"):
+        # a row that keeps the claim as written beside a restated domain
+        # was written by this release's reading
+        return None
+    # an earlier rendering differs from today's only at a string
+    # literal, a `not`, or a domain's missing values (written after `|`)
     if not statement or ("'" not in statement and '"' not in statement
-                         and "not" not in statement):
+                         and "not" not in statement and "|" not in statement):
         return None
     try:
         with complex_in_view(complex_parameters(fn) if fn is not None else ()):
             cj = _completed(_declared_conjecture(c), fn)
-            moved = _renders_as(cj, statement, tuple(sorted(_legacy_renderings())))
+            moved = _renders_as(cj, statement, tuple(sorted(
+                _legacy_renderings() if names is None else names)))
     except Exception:
         return None
     return moved or None
@@ -399,7 +422,9 @@ def claim_conflicts(fn, file_entry: dict,
           no supersession. A move of literal quoting or negation
           parentheses is
           recognised only in a record written under an earlier reasoning
-          version (`spec.written_under_earlier_rules`).
+          version (`spec.written_under_earlier_rules`); the move of a
+          named missing value is recognised by the stored text alone,
+          whatever reasoning version wrote it.
         - kind "ambiguous-text": the verified row's stored text is
           what an earlier release wrote for the authored claim under
           its literal quoting, and is also, read in this release, the
@@ -454,7 +479,8 @@ def claim_conflicts(fn, file_entry: dict,
                 # nothing, so there is no verdict for the record to
                 # keep: the authored claim is adjudicated as written
                 continue
-            moved = _legacy_move(c, v, fn) if earlier else None
+            moved = (_legacy_move(c, v, fn) if earlier
+                     else _legacy_move(c, v, fn, names=("named-missing-value",)))
             if moved and not _checked_differently(c, v):
                 # the row records this claim in the text an earlier
                 # rendering wrote for it: adjudicated as written, the
@@ -560,11 +586,12 @@ def apply_verified_wins(claims: list, conflicts: list,
             # contained; the structured fields ride beside it, so
             # nothing here re-parses a rendered condition
             from .spec import authored_route
-            rebuilt = {"name": name, "statement": as_recorded(row).get("statement"),
+            recorded = as_recorded(row)
+            rebuilt = {"name": name, "statement": recorded.get("statement"),
                        "route": authored_route(row)}
             for field_name in ("domain", "grammar", "tolerance"):
-                if row.get(field_name) is not None:
-                    rebuilt[field_name] = row[field_name]
+                if recorded.get(field_name) is not None:
+                    rebuilt[field_name] = recorded[field_name]
             rebuilt["meta"] = {"mathema.pending_supersession":
                                _display_claim(c)}
             kept.append(rebuilt)

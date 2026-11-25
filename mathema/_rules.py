@@ -13,6 +13,13 @@ value  what it changed
 0      the fingerprint before the reasoning version existed
 1      canonical statement text: each string literal respelled from
        its value, and a negated relation in its parentheses
+2      the named missing value reading: a None or nan the claim
+       names, in any spelling, is judged at that point; where the
+       function returns None or nan there its return annotation
+       judges it, and a listed value is run at every value of the
+       other parameters
+2      the canonical text reading: a missing value named beside an
+       interval or a named type stays in the canonical text
 =====  ==========================================================
 
 A release raises the number once. Each fix in that release that could
@@ -20,6 +27,7 @@ change a verdict adds its own entry under the release's value.
 """
 from __future__ import annotations
 
+# :draft the wording of the two value-2 rows of the table above
 REASONING_VERSION = 2
 RULES = REASONING_VERSION  # :draft alias, kept for one release: the old name of REASONING_VERSION
 

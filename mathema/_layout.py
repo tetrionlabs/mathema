@@ -323,6 +323,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
               and ((p.meta or {}).get("mathema.policy") or {}).get("source") != "stated"]
     out: dict = {}
     used: set = set()
+    by_name = {p.name: p for p in probes}
     for main in probes:
         meta = main.meta or {}
         if meta.get("mathema.companion_of") or meta.get("mathema.policy") \
@@ -335,7 +336,12 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
             if _is_return_row(r)
             or _admits(main, (r.meta["mathema.policy"].get("parameter") or ""),
                        r.meta["mathema.policy"].get("kind") or "")]
-        if not under and not rows:
+        # the rows of the claim's group that are falsified and printed
+        # elsewhere (a stated policy row is a claim of its own)
+        group = [by_name[e["row"]] for e in meta.get("mathema.claim_group") or ()
+                 if isinstance(e, dict) and e.get("verdict") == "falsified"
+                 and e.get("row") in by_name and by_name[e["row"]] not in rows]
+        if not under and not rows and not group:
             continue
         lines = []
         falsified = []
@@ -436,6 +442,7 @@ def blocks(probes: list, params: list, kinds: dict, key: str,
                 falsified.append(r.counterexample)
                 lines += [" " * 28 + part for part in _fixes(r, key, word, path).splitlines()]
             used.add(id(r))
+        falsified += [r.counterexample for r in group]
         if falsified and (falsified[0] or "").startswith("f("):
             # a witness written as calls is named by its first call
             head = f"falsified at {_first_call(falsified[0])}"
