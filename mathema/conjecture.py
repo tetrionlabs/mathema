@@ -8837,6 +8837,11 @@ def _needs_language(cj, statement: str, note: str, error) -> "Probe":
     """The row for a claim naming a language nothing in this process
     serves: unknown, never falsified, with the package that adds the
     named languages (mathema-language) in the note and the gap in meta."""
+    reason = getattr(error, "reason", None)  # :draft
+    if reason is not None:
+        return Probe(cj.name, statement, "skipped", route=None,
+                     note=f"{note}; {reason}".lstrip("; "),
+                     meta={"mathema.probe_gap": "language-unresolved"})
     return Probe(cj.name, statement, "unknown", route=None,
                  note=f"{note}; needs mathema-language: {error}".lstrip("; "),
                  meta={"mathema.probe_gap": "language-unresolved"})
