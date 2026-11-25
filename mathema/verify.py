@@ -1455,9 +1455,45 @@ def _language_definition_moved(fn, merged_entry: dict,
     return None
 
 
+def _collection_moved(merged_entry: dict, verified_entry: dict) -> "str | None":
+    """Intent:
+        Why a record no longer stands on the named collections its rows
+        were decided over, as the sentence verify reports, or None when
+        it does: each row's recorded collection
+        (`_collection.COLLECTION_META`) listed again now and compared
+        member by member (`_collection.collection_moved`). A row whose
+        claim is no longer in the entry is left to the claims trigger.
+    """
+    from . import _collection
+    from .spec import entry_claims
+    recorded: dict = {}
+    for c in (verified_entry or {}).get("claims") or []:
+        stamp = (c.get("meta") or {}).get(_collection.COLLECTION_META)
+        if isinstance(stamp, dict) and stamp.get("path"):
+            recorded[c.get("name") or ""] = stamp
+    if not recorded:
+        return None
+    try:
+        current = {cj.name for cj in entry_claims(merged_entry or {})}
+    except Exception:
+        current = set(recorded)
+    for name, stamp in sorted(recorded.items()):
+        if name not in current:
+            continue
+        try:
+            kind, members = _collection.resolve_collection(stamp["path"])
+            now = _collection.collection_record(stamp["path"], kind, members)
+        except Exception:
+            now = None
+        said = _collection.collection_moved(stamp, now)
+        if said is not None:
+            return said
+    return None
+
+
 def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
                     provenance, library_version, premises, dependency,
-                    language_definition=None) -> list[str]:
+                    language_definition=None, collection=None) -> list[str]:
     """The triggers that make a function invalidated, changed since its
     record, in `transitions.OWN_TRIGGERS` order with `dependency` last:
     each one that fired."""
@@ -1466,6 +1502,7 @@ def _fired_triggers(*, form, claims, defaults, pseudo_infinity, definitions,
              "library-version": library_version is not None and library_version is not False,
              "definition-rows": definitions, "premises": premises,
              "language-definition": language_definition is not None,
+             "collection": collection is not None,  # :draft
              "dependency": dependency}
     return [name for name, on in fired.items() if on]
 
@@ -2479,6 +2516,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                              if key in library else None)
             body_moved = _provenance_moved(facts_now, verified_entry)
             language_moved = _language_definition_moved(fn, merged_entry, verified_entry)
+            collection_moved = _collection_moved(merged_entry, verified_entry)
             from .spec import recorded_claims_fingerprint
             recorded_now = recorded_claims_fingerprint(verified_entry, fn)
             # the record holds the claims as written, made under an
@@ -2497,6 +2535,7 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                         and recorded_fp == current_fp and not defaults_moved
                         and version_moved is None and body_moved is None
                         and language_moved is None
+                        and collection_moved is None
                         and not pinf_moved and not definitions_moved
                         and not stale_rows.get(key)
                         and (premise_now == (recorded_premises or {})
@@ -2639,6 +2678,9 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                    else language_moved if language_moved
                    and same_form(facts_now.form, recorded_form)
                    and recorded_fp == current_fp
+                   else collection_moved if collection_moved
+                   and same_form(facts_now.form, recorded_form)
+                   and recorded_fp == current_fp
                    else "forced (--all)" if all and is_fresh
                    else "targeted re-verify" if only and is_fresh
                    else "no baseline record" if not recorded_form
@@ -2665,7 +2707,8 @@ def _verify_sweep(root: str = ".", *, all: bool = False,
                     premises=premise_now != (recorded_premises or {})
                     if premise_now or recorded_premises else False,
                     dependency=dependency_changed,
-                    language_definition=language_moved)
+                    language_definition=language_moved,
+                    collection=collection_moved)
                 rec.meta["mathema.invalidated_by"] = triggers
                 if triggers:
                     invalidated_keys.add(key)

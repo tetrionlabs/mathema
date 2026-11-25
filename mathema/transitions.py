@@ -47,7 +47,7 @@ _RANK = {"proven": 3, "holds": 2, "unknown": 1, "skipped": 1, "falsified": 0}
 #: what changing in the function itself makes it invalidated
 OWN_TRIGGERS = ("form", "provenance", "defaults", "claims", "pseudo-infinity",
                 "library-version", "definition-rows", "premises",
-                "language-definition")
+                "language-definition", "collection")  # :draft
 
 #: what the gate does with an unacknowledged transition of each kind,
 #: in strict and in lenient mode, unless the project's policy says

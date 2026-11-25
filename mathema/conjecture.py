@@ -5665,14 +5665,19 @@ def check_conjectures(fn, conjectures: list[Conjecture],
         mine = {n for n, v in funcs.items() if v != n and _is_under_test(v, fn)}
         if mine:
             c.under_test = c.under_test | mine
-    stated = [c for c in built if getattr(c, "relation", None) == "policy"]
+    from . import _collection
+    # a claim over a named collection is decided by enumerating it
+    over_collections = [c for c in built  # :draft
+                        if _collection.collection_binding(c) is not None]
+    built_rest = [c for c in built if c not in over_collections]
+    stated = [c for c in built_rest if getattr(c, "relation", None) == "policy"]
     # the function's gates read every policy row, so they come last
-    gates = [c for c in built if _policy_gate(c, fn, facts)]
-    scalar_empty = [c for c in built if _empty_on_a_scalar(c, fn, facts)]
+    gates = [c for c in built_rest if _policy_gate(c, fn, facts)]
+    scalar_empty = [c for c in built_rest if _empty_on_a_scalar(c, fn, facts)]
     from . import domain_relations
-    between = [c for c in built
+    between = [c for c in built_rest
                if getattr(c, "relation", None) == domain_relations.RELATION]
-    values = [c for c in built if getattr(c, "relation", None) != "policy"
+    values = [c for c in built_rest if getattr(c, "relation", None) != "policy"
               and c not in gates and c not in scalar_empty
               and c not in between]
     from ._empty_input import STATED
@@ -5685,7 +5690,9 @@ def check_conjectures(fn, conjectures: list[Conjecture],
                            trials_scale, facts, extensive, known_premises,
                            float_companions, pseudo_infinity)
         return _stamp_language_definitions(
-            out + [_adjudicate_domain_relation(c, fn) for c in between], built, fn)
+            out + [_adjudicate_domain_relation(c, fn) for c in between]
+            + [_collection.stamped(_collection.adjudicate(c, fn, facts, domain), c)
+               for c in over_collections], built, fn)
     finally:
         STATED.reset(stated_token)
 

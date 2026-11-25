@@ -1,0 +1,28 @@
+mathema._collection.roll_up:
+  claims:
+    - name: the_collection_verdict_is_the_weakest_members_at_the_first_such_member
+      statement: 'let stated = claims.collection_support.roll_up_stated, for verdicts in claims.collection_support.OUTCOMES, f(verdicts) == stated(verdicts)'
+mathema._collection.member_name:
+  claims:
+    - name: a_member_is_named_by_its_qualified_name_or_its_capped_text
+      statement: 'for case in claims.collection_support.NAMES, f(case[0]) == case[1]'
+    - name: a_dict_member_is_named_by_its_key_then_its_value
+      statement: 'for case in claims.collection_support.KEYED_NAMES, f(case[1], case[0]) == case[2]'
+mathema._collection.member_hash:
+  claims:
+    - name: the_same_value_hashes_the_same
+      statement: 'for pair in claims.collection_support.SAME, f(pair[0]) == f(pair[1])'
+    - name: different_values_hash_differently
+      statement: 'for pair in claims.collection_support.DIFFERENT, f(pair[0]) != f(pair[1])'
+mathema._collection.collection_moved:
+  claims:
+    - name: verify_names_what_moved_between_two_records
+      statement: 'for case in claims.collection_support.MOVES, f(case[0], case[1]) == case[2]'
+claims.collection_support.unmoved:
+  claims:
+    - name: a_collection_listed_twice_has_not_moved
+      statement: 'for value in claims.collection_support.UNMOVED, f(value) == True'
+claims.collection_support.listed_names:
+  claims:
+    - name: a_collection_lists_its_members_in_its_own_order
+      statement: 'for case in claims.collection_support.LISTINGS, f(case[0]) == case[1]'

@@ -679,6 +679,26 @@ class LanguageRef:
         return f"L[{self.text}]"
 
 
+
+@dataclass(frozen=True)
+class CollectionRef:  # :draft
+    """A named finite collection as a domain, `fn in pkg.mod.STAGES`:
+    the dotted path of a module-level tuple, list, frozenset or dict
+    whose members the binding ranges over (`mathema._collection`
+    resolves and lists them). It stands alone in its binding, with no
+    union, type clause or exclusion beside it, and it renders as the
+    path written, so the claim's text names the collection and never
+    its members."""
+    path: str
+
+    @property
+    def text(self) -> str:
+        """The dotted path, as written."""
+        return self.path
+
+    def __repr__(self) -> str:
+        return self.path
+
 def _whole(v) -> str:
     return str(int(v)) if float(v).is_integer() else str(v)
 
@@ -2309,6 +2329,8 @@ def render_domain(bound, *, show_missing: bool = True, ascii_mode: bool | None =
     Left unstated it follows the global `get_unicode_output()`
     preference. A `Z`/`N`-typed bound's whole endpoints render without
     a `.0`."""
+    if isinstance(bound, CollectionRef):  # :draft
+        return bound.path  # :draft
     if ascii_mode is None:
         ascii_mode = not get_unicode_output()
     dom = _as_domain(bound)
@@ -2510,6 +2532,8 @@ def domain_bound_to_json(b) -> str | dict:
         if b.clause:
             out["clause"] = True
         return out
+    if isinstance(b, CollectionRef):  # :draft
+        return {"collection": b.path}  # :draft
     if isinstance(b, LanguageRef):
         out = {"language": b.name,
                **{key: domain_bound_to_json(interval) for key, interval in b.refinements}}
@@ -2548,6 +2572,8 @@ def domain_bound_from_json(v: Any) -> Any:
         return v
     if isinstance(v, list):
         return Interval(_endpoint_from_json(v[0]), _endpoint_from_json(v[1]))
+    if "collection" in v:  # :draft
+        return CollectionRef(str(v["collection"]))  # :draft
     if "language" in v:
         return LanguageRef(
             str(v["language"]),
@@ -2853,6 +2879,16 @@ def _parse_binding(part: str):
     rest = text[m.end():].strip()
     if not rest and type_explicit is None:
         return f"{part!r}: {name!r} has no domain after the membership operator"
+    if _DOTTED_OBJECT.match(rest):  # :draft
+        # a dotted path alone is a named finite collection  # :draft
+        if type_explicit is not None or excluded_text is not None or tail_words:  # :draft
+            return (f"{part!r}: a named collection ({rest}) stands alone "  # :draft
+                    f"in its binding, with no type, exclusion or missing "  # :draft
+                    f"value beside it, for {name!r}")  # :draft
+        if "." in name or "[" in name:  # :draft
+            return (f"{part!r}: a named collection ({rest}) binds a name, "  # :draft
+                    f"not a path, for {name!r}")  # :draft
+        return name, CollectionRef(rest)  # :draft
     # where the binding sits decides what `None` and `null` are: at an
     # element (`o.lines[*]`, a space's slots) a hole, at a parameter or a
     # field (`x`, `o.note`) an absence
