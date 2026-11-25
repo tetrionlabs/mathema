@@ -296,6 +296,12 @@ class _Reader:
                 raise _Declined("the exception is built from more than one argument")
             for arg in node.exc.args:
                 self._total(arg, param)
+        from ._raise_reading import constructor_refusal
+        refusal = constructor_refusal(
+            bound, len(node.exc.args) if isinstance(node.exc, ast.Call) else 0,
+            [k.arg for k in node.exc.keywords] if isinstance(node.exc, ast.Call) else [])
+        if refusal is not None:
+            raise _Declined(refusal)
         return cast(type, bound)
 
     def _total(self, node: ast.AST, param: str) -> None:

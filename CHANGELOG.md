@@ -8,6 +8,16 @@ Notable changes to mathema are recorded here from its first public release onwar
 - Every record is checked again once. mathema's reasoning version (`mathema._rules.REASONING_VERSION`) is 2 in this release; the table in `mathema/_rules.py` names each rule that changed.
 - The number 0.6.6.2 called the rules number is called the reasoning version; `mathema._rules.RULES` still reads as an alias.
 
+### Fixes
+- A `raises(f(x), E)` claim is proven only when nothing Python runs on the way to the `raise` can raise something else first: every statement, branch test, default of a lambda built there, argument, cause and the exception's own constructor. Bounds on numbers round outward, so a value next to the largest float is not read as fitting.
+- A `raises(...)` claim over a finite set that lists a missing value (`{-1, nan}`, `{-1, None}`) is not proven by derive; the set is swept point by point, the missing values included.
+- Derive does not prove a `raises(...)` claim at a call that passes a variable of the claim anywhere but as itself in its own place (`f(-x)`, `f(x + 10)`, `f(y, x)`), or a literal where the claim's domain binds that parameter to other values (`for x in [-5, -1]`, `f(1)`); such a claim is decided by running it. A call of literals alone keeps the domain inferred from them.
+- Derive reads nothing of a generator, coroutine or async generator function, and reads a decorated function only when the name is bound to the function itself or to a wrapper whose call is read (`functools.lru_cache`, `functools.cache`, `staticmethod`, mathema's own guards, an instance whose `__call__` hands its arguments to the wrapped function with the default attribute lookup). Any other wrapper is named in the reason.
+- A missing-value policy is proven from a guard only when the path to the guard's raise is read, the guard's test is a real missing-value test, and calling the function runs the body the guard is in. A policy that the function was seen to meet only by calling it at a missing value is reported as holds, not proven, since a sampled call is not a proof.
+- `"{²}".format(x)` in a raise message no longer stops `check_conjectures`.
+- A claim whose call takes a remainder by zero (`f(x, 1 % 0)`) gets a row that names the argument; it no longer stops `check_conjectures`.
+- A claim whose call holds an integer of more digits than Python writes out (`f(x, 2 ** 100000)`) gets a row, with its statement as written; it no longer stops `check_conjectures`.
+
 ## 0.6.6.2
 
 ### Highlights

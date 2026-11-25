@@ -18,6 +18,7 @@ import contextlib
 import contextvars
 import inspect
 import dataclasses
+import types
 from dataclasses import dataclass, field
 
 import sympy
@@ -1355,7 +1356,7 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
 
     Returns `(kind, value, failure)`: on success, `kind` is `"value"`
     (`value` the sympy expr or tuple of exprs) or `"raises"` (`value` the
-    exception class name); on failure, `kind` is None and `failure` is
+    `raise` statement reached); on failure, `kind` is None and `failure` is
     `{"line", "statement", "message", "category"}`, `category` straight
     from the NotSymbolic that caused it (or a fixed "unsupported-
     statement"/"missing-return" for this function's own structural
@@ -1398,7 +1399,7 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
                                     "message": str(e), "category": e.category}
             return "value", result, None
         elif allow_raise and isinstance(stmt, ast.Raise):
-            return "raises", _exc_name(stmt, set(env)), None
+            return "raises", stmt, None
         else:
             kind = type(stmt).__name__
             allowed = "a single-name assignment or a final return" + \
@@ -1410,6 +1411,627 @@ def _walk_lift_body(body: list, env: dict, ctx: "_LiftCtx | None" = None,
     return None, None, {"line": body[-1].lineno if body else None, "statement": None,
                         "message": "function body has no return statement",
                         "category": "missing-return"}
+
+
+def call_suspends(fn) -> "str | None":
+    """Intent:
+        What calling `fn` returns in place of running its body, read
+        from its code flags: "a generator", "a coroutine" or "an async
+        generator" (each an object the body runs in only when it is
+        iterated or awaited); None for a function whose call runs its
+        body.
+    """
+    code = getattr(fn, "__code__", None)
+    flags = getattr(code, "co_flags", 0)
+    if not isinstance(flags, int):
+        return None
+    if flags & inspect.CO_ASYNC_GENERATOR:
+        return "an async generator"  # :draft
+    if flags & (inspect.CO_COROUTINE | inspect.CO_ITERABLE_COROUTINE):
+        return "a coroutine"
+    if flags & inspect.CO_GENERATOR:
+        return "a generator"
+    return None
+
+
+_CALL_KEYWORDS: "contextvars.ContextVar[frozenset | None]" = contextvars.ContextVar(
+    "mathema_call_keywords", default=None)
+
+
+#: how many positional arguments the call being read passes, None when unknown
+_CALL_POSITIONAL: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
+    "mathema_call_positional", default=None)
+
+
+@contextlib.contextmanager
+def call_keywords(call_src: "str | None"):  # :draft
+    """Intent:
+        While the block runs, the wrapper readings know which keywords the
+        call `call_src` passes (`f(x, y=y)` passes `y`) and how many
+        positional arguments, so a wrapper that keeps a keyword of its own
+        is read for a call that does not pass it, and one that needs a
+        first positional argument for a call that passes one. Nothing is
+        known for None, for text that is not one call, and for a call that
+        unpacks a mapping (`f(**k)`); the positional count is not known
+        for a call with a starred argument.
+    """
+    known = None
+    if call_src is not None:
+        try:
+            call = ast.parse(call_src, mode="eval").body
+        except SyntaxError:
+            call = None
+        if isinstance(call, ast.Call) and all(k.arg is not None for k in call.keywords):
+            known = frozenset(k.arg for k in call.keywords)
+    positional = None
+    if known is not None and not any(isinstance(a, ast.Starred) for a in call.args):
+        positional = len(call.args)
+    token, count = _CALL_KEYWORDS.set(known), _CALL_POSITIONAL.set(positional)
+    try:
+        yield
+    finally:
+        _CALL_KEYWORDS.reset(token)
+        _CALL_POSITIONAL.reset(count)
+
+
+def _wrapper_is_read(fn) -> bool:  # :draft
+    """Intent:
+        Whether `fn` is a wrapper whose call is read as calling the function it
+        wraps and returning or raising what it does: the `functools.lru_cache`
+        and `functools.cache` wrapper, a `staticmethod`, an instance whose
+        `__call__` hands its arguments to the wrapped function unchanged
+        (`hands_over_to_wrapped`), and a wrapper defined in mathema itself (its
+        call adapters and its domain and dimension guards, which core reads on
+        their own).
+    """
+    import functools
+    import os
+    import types
+    if type(fn) is getattr(functools, "_lru_cache_wrapper", None) \
+            or type(fn) is staticmethod:
+        return True
+    package = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+    if type(fn) is not types.FunctionType:
+        from .._instance_callable import hands_over_to_wrapped
+        return str(getattr(type(fn), "__module__", "")).split(".", 1)[0] == "mathema" \
+            or hands_over_to_wrapped(fn)
+    return os.path.abspath(fn.__code__.co_filename).startswith(package) \
+        or _passes_through(fn) or _dispatches_to_wrapped(fn)  # :draft
+
+
+def only_catches(fn):  # :draft
+    """Intent:
+        The function `fn` wraps, when `fn` is a wrapper that returns that
+        function's own value wherever the function returns; None for
+        anything else. The wrapper's definition is, after its docstring,
+        one `try` statement: its body is the single statement `return
+        g(*args, **kwargs)`, it has one or more `except` clauses, each of
+        them the single statement `return <literal>`, and no `else` or
+        `finally`. It takes nothing but `*args` and `**kwargs`, and `g` is
+        a variable of an enclosing function holding the plain Python
+        function `fn` links as `__wrapped__`.
+
+    Notes:
+        Where the wrapped function raises, the wrapper returns a clause's
+        literal or lets the exception through, so nothing is read of a
+        call that raises. The definition is read from the source of
+        `fn`'s own code object, whose names must match it.
+    """
+    import textwrap
+    if type(fn) is not types.FunctionType or fn.__closure__ is None:
+        return None
+    wrapped = vars(fn).get("__wrapped__")
+    if type(wrapped) is not types.FunctionType or "__wrapped__" in vars(wrapped) \
+            or call_suspends(fn) is not None or call_suspends(wrapped) is not None \
+            or fn.__defaults__ or fn.__kwdefaults__:
+        return None
+    code = fn.__code__
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(code)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return None
+    fdef = tree.body[0] if tree.body else None
+    if not isinstance(fdef, ast.FunctionDef) or fdef.name != code.co_name:
+        return None
+    args = fdef.args
+    if args.posonlyargs or args.args or args.kwonlyargs or args.defaults \
+            or args.vararg is None or args.kwarg is None:
+        return None
+    body = strip_docstring(fdef.body)
+    if len(body) != 1 or type(body[0]) is not ast.Try:
+        return None
+    attempt = body[0]
+    if attempt.orelse or attempt.finalbody or not attempt.handlers \
+            or len(attempt.body) != 1 or not isinstance(attempt.body[0], ast.Return):
+        return None
+    call = attempt.body[0].value
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and len(call.args) == 1 and isinstance(call.args[0], ast.Starred)
+            and isinstance(call.args[0].value, ast.Name)
+            and call.args[0].value.id == args.vararg.arg
+            and len(call.keywords) == 1 and call.keywords[0].arg is None
+            and isinstance(call.keywords[0].value, ast.Name)
+            and call.keywords[0].value.id == args.kwarg.arg):
+        return None
+    caught = []
+    for handler in attempt.handlers:
+        if len(handler.body) != 1 or not isinstance(handler.body[0], ast.Return) \
+                or not isinstance(handler.body[0].value, ast.Constant):
+            return None
+        if handler.name is not None and handler.name not in caught:
+            caught.append(handler.name)
+    held = call.func.id
+    if code.co_varnames != (args.vararg.arg, args.kwarg.arg, *caught) \
+            or held not in code.co_freevars or held in (args.vararg.arg, args.kwarg.arg):
+        return None
+    try:
+        if _cell(fn, held) is not wrapped:
+            return None
+    except (ValueError, IndexError):
+        return None
+    return wrapped
+
+
+def _dispatches_to_wrapped(fn) -> bool:  # :draft
+    """Intent:
+        Whether `fn` is the wrapper `functools.singledispatch` builds, with
+        nothing registered but the function it wraps, called with at least
+        one positional argument: it looks the first argument's class up in
+        a registry whose only entry is `object`, finds the wrapped
+        function for every class, and calls it on the same arguments.
+
+    Notes:
+        The wrapper is recognised by the code object `singledispatch`
+        defines for it, whose only names are `TypeError` (raised for a
+        call with no positional argument) and `__class__`. The registry
+        and the cache of earlier lookups are read from the closure of its
+        `dispatch`; a cache entry for anything else leaves it unread. The
+        call's positional count comes from `call_keywords`.
+    """
+    import functools
+
+    def nested(name):
+        found = [c for c in functools.singledispatch.__code__.co_consts
+                 if isinstance(c, types.CodeType) and c.co_name == name]
+        return found[0] if len(found) == 1 else None
+    code = fn.__code__
+    if code is not nested("wrapper") or code.co_freevars != ("dispatch", "funcname") \
+            or set(code.co_names) != {"TypeError", "__class__"} \
+            or not _CALL_POSITIONAL.get():
+        return False
+    wrapped = vars(fn).get("__wrapped__")
+    try:
+        dispatch = _cell(fn, "dispatch")
+        if type(dispatch) is not types.FunctionType or dispatch.__code__ is not nested("dispatch"):
+            return False
+        registry, cache = _cell(dispatch, "registry"), _cell(dispatch, "dispatch_cache")
+        return wrapped is not None and type(registry) is dict and list(registry) == [object] \
+            and registry[object] is wrapped and all(v is wrapped for v in list(cache.values()))
+    except (ValueError, AttributeError, TypeError, IndexError):
+        return False
+
+
+def _passes_through(fn) -> bool:  # :draft
+    """Intent:
+        Whether the Python function `fn` is a wrapper whose definition is,
+        after its docstring, the single statement `return g(*args,
+        **kwargs)`, or the lambda `lambda *args, **kwargs: g(*args,
+        **kwargs)`, taking nothing but `*args` and `**kwargs` and handing
+        both on unchanged, where `g` is a variable of an enclosing function
+        that holds the function `fn` links as `__wrapped__`: the call runs
+        that function on the same arguments and returns or raises what it
+        does. The definition is read from the source of `fn`'s own code
+        object, whose names must match it.
+
+    Notes:
+        Two more spellings hand on the same arguments. `**{**kwargs}` is a
+        new dict of the same keywords. `*args[::-1]` is the same positional
+        arguments when there is at most one, so it is read only where the
+        wrapped function is a plain Python function taking at most one
+        positional argument: a call with two or more is refused by that
+        function with a TypeError in either order.
+
+        A wrapper that also takes keyword-only parameters, each with a
+        default (`def w(*args, _log=print, **kwargs)`), keeps a keyword of
+        that name for itself and hands on every other argument. It is read
+        only for a call known to pass none of those keywords
+        (`call_keywords`).
+    """
+    import textwrap
+    import types
+    code = fn.__code__
+    if code.co_flags & (inspect.CO_GENERATOR | inspect.CO_COROUTINE
+                        | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE):
+        return False
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(code)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return False
+    if code.co_name == "<lambda>":
+        lambdas = [n for n in ast.walk(tree) if isinstance(n, ast.Lambda)]
+        if len(lambdas) != 1 or lambdas[0].lineno != 1:
+            return False
+        args, call = lambdas[0].args, lambdas[0].body
+    else:
+        fdef = tree.body[0] if tree.body else None
+        if not isinstance(fdef, ast.FunctionDef) or fdef.name != code.co_name:
+            return False
+        body = strip_docstring(fdef.body)
+        if len(body) != 1 or not isinstance(body[0], ast.Return):
+            return False
+        args, call = fdef.args, body[0].value
+    kept = tuple(a.arg for a in args.kwonlyargs)
+    if kept:
+        passed = _CALL_KEYWORDS.get()
+        if passed is None or passed & set(kept) \
+                or any(default is None for default in args.kw_defaults) \
+                or set(fn.__kwdefaults__ or ()) != set(kept):
+            return False
+    elif fn.__kwdefaults__:
+        return False
+    if args.posonlyargs or args.args or args.vararg is None \
+            or args.kwarg is None or args.defaults or fn.__defaults__:
+        return False
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and len(call.args) == 1 and isinstance(call.args[0], ast.Starred)
+            and len(call.keywords) == 1 and call.keywords[0].arg is None):
+        return False
+    positional, keywords = call.args[0].value, call.keywords[0].value
+    wrapped = getattr(fn, "__wrapped__", None)
+    reversed_ = isinstance(positional, ast.Subscript) \
+        and isinstance(positional.slice, ast.Slice) \
+        and positional.slice.lower is None and positional.slice.upper is None \
+        and isinstance(positional.slice.step, ast.UnaryOp) \
+        and isinstance(positional.slice.step.op, ast.USub) \
+        and isinstance(positional.slice.step.operand, ast.Constant) \
+        and type(positional.slice.step.operand.value) is int \
+        and positional.slice.step.operand.value == 1
+    if reversed_:
+        if type(wrapped) is not types.FunctionType or "__wrapped__" in vars(wrapped) \
+                or wrapped.__code__.co_argcount > 1 \
+                or wrapped.__code__.co_flags & inspect.CO_VARARGS:
+            return False
+        positional = positional.value
+    if isinstance(keywords, ast.Dict) and keywords.keys == [None] \
+            and len(keywords.values) == 1:
+        keywords = keywords.values[0]
+    if not (isinstance(positional, ast.Name) and positional.id == args.vararg.arg
+            and isinstance(keywords, ast.Name) and keywords.id == args.kwarg.arg):
+        return False
+    held = call.func.id
+    if code.co_varnames != (*kept, args.vararg.arg, args.kwarg.arg) \
+            or held not in code.co_freevars or fn.__closure__ is None:
+        return False
+    try:
+        cell = fn.__closure__[code.co_freevars.index(held)].cell_contents
+    except ValueError:
+        return False
+    return wrapped is not None and cell is wrapped
+
+
+def _guard_code(factory) -> "types.CodeType | None":
+    """Intent:
+        The code object of the `wrapper` function that the decorator a
+        mathema guard factory returns defines (`enforce_domain` and its
+        siblings each define `decorator`, which defines `wrapper`). Every
+        wrapper such a guard builds runs this one code object.
+    """
+    def nested(code, name):
+        found = [c for c in code.co_consts
+                 if isinstance(c, types.CodeType) and c.co_name == name]
+        return found[0] if len(found) == 1 else None
+    decorator = nested(factory.__code__, "decorator")
+    return None if decorator is None else nested(decorator, "wrapper")
+
+
+def _cell(function, name):
+    """Intent:
+        What the variable `name` of an enclosing function holds for
+        `function`.
+
+    Raises:
+        ValueError: `function` closes over no variable of that name, or
+            the variable is not set.
+    """
+    return function.__closure__[function.__code__.co_freevars.index(name)].cell_contents
+
+
+@dataclass(frozen=True)
+class _GuardReading:
+    """Intent:
+        The arguments a mathema guard wrapper reads before it calls the
+        function it wraps: `covered`, the parameters whose argument it
+        judges (None when it may judge any of them); `judged_by_domain`,
+        the ones among them an `enforce_domain` guard judges against its
+        domain and nothing else; and `violation`, that guard's own
+        judgement `violation(name, value)`, None for a value it lets
+        through.
+    """
+    covered: "frozenset | None"
+    judged_by_domain: frozenset = frozenset()
+    violation: object = None
+
+
+def _guard_reading(fn) -> "_GuardReading | None":  # :draft
+    """Intent:
+        What the wrapper `fn` reads of its arguments, when it is one a
+        mathema guard built; None for any other object. Each guard is
+        recognised by the code object its wrapper runs (`_guard_code`) and
+        read from that wrapper's own closure.
+
+        `enforce_domain` binds the arguments to the wrapped function's
+        signature and judges the ones its domain names; with missing-value
+        policies it also reads the parameter each `raises` policy names,
+        and every parameter when such a policy names none or carries a
+        premise. `enforce_dimensions` judges the parameters its plan gives
+        a shape, and every parameter when a declared premise is enforced.
+        `enforce_structure` judges the parameters a structure is declared
+        on. `enforce_range` reads no argument. Each hands the same
+        arguments on.
+    """
+    from .. import authoring
+    from ..policy import Policy
+    if type(fn) is not types.FunctionType or fn.__closure__ is None:
+        return None
+    code = fn.__code__
+    try:
+        if code is _guard_code(authoring.enforce_domain):
+            check, policies = _cell(fn, "_check"), _cell(fn, "policies")
+            if not policies and vars(fn).get("__mathema_domain_check__") is not check:
+                return None
+            violation = _cell(check, "_violation")
+            merged = _cell(violation, "merged_domain")
+            if type(merged) is not dict or not all(type(k) is str for k in merged) \
+                    or type(policies) is not list:
+                return None
+            by_policy: set = set()
+            for policy in policies:
+                if type(policy) is not Policy:
+                    return _GuardReading(None)
+                if policy.behaviour != "raises":
+                    continue
+                if policy.premise or not policy.parameter:
+                    return _GuardReading(None)
+                by_policy.add(policy.parameter)
+            return _GuardReading(frozenset(merged) | by_policy,
+                                 frozenset(merged) - by_policy, violation)
+        if code is _guard_code(authoring.enforce_dimensions):
+            entry = _cell(fn, "entry")
+            if vars(fn).get("__mathema_dimension_check__") != (entry, _cell(fn, "leave")):
+                return None
+            plan, premises = _cell(entry, "plan"), _cell(entry, "premises")
+            if premises or type(plan.params) is not dict \
+                    or not set(plan.elements) <= set(plan.params):
+                return _GuardReading(None)
+            return _GuardReading(frozenset(plan.params))
+        if code is _guard_code(authoring.enforce_structure):
+            declared = _cell(fn, "declared")
+            if type(declared) is not dict:
+                return _GuardReading(None)
+            return _GuardReading(frozenset(declared))
+        if code is _guard_code(authoring.enforce_range):
+            return _GuardReading(frozenset())
+    except (ValueError, AttributeError, TypeError, IndexError):
+        return None
+    return None
+
+
+def _guard_admits(violation, param: str, bound, resolution=None) -> bool:  # :draft
+    """Intent:
+        Whether an `enforce_domain` guard lets through every value the
+        finite set `bound` gives the parameter: the guard's own judgement
+        (`violation`) is None for each member, a missing value the set
+        lists being judged at every value the parameter's `resolution`
+        (a `MissingDefaults`, `NO_ANNOTATION` when not given) realises it
+        as, the values the claim's own points give it. False for a
+        domain that is not a finite set, and for a listed missing value
+        none of whose values can be built here.
+    """
+    from ..domain import (ABSENT, NO_ANNOTATION, Domain, _as_domain, _is_enumerated,
+                          _Sentinel, realise_sentinel)
+    resolution = resolution if resolution is not None else NO_ANNOTATION
+    try:
+        dom = _as_domain(bound)
+        if not _is_enumerated(dom):
+            return False
+        members = [v for piece in dom.pieces for v in piece]
+        if isinstance(dom, Domain) and dom.absent:
+            members.append(ABSENT)
+        for member in members:
+            values = [member]
+            if isinstance(member, _Sentinel):
+                values = realise_sentinel(member, resolution.members,
+                                          resolution.absence)
+                if not values:
+                    return False
+            if any(violation(param, value) is not None for value in values):
+                return False
+    except Exception:
+        return False
+    return True
+
+
+def parameters_no_wrapper_reads(fn, params, domain: "dict | None" = None,
+                                structures_admit: bool = False,
+                                missing: "dict | None" = None) -> frozenset:  # :draft
+    """Intent:
+        The parameters among `params` whose argument reaches the function's
+        body untouched by anything between the call of `fn` and that body:
+        all of them when `fn` is a plain Python function, or a method bound
+        to an instance of one. Under wrappers that link the function as
+        `__wrapped__`, a parameter stays only when every wrapper on the way
+        is one whose own definition is read as leaving it alone: a wrapper
+        that hands its arguments on unchanged (`_passes_through`, a
+        `staticmethod`, an instance whose `__call__` hands over), the
+        `functools.lru_cache` wrapper, and a mathema guard for the
+        parameters it does not judge (`_guard_reading`). Any other wrapper
+        may read every argument, and none stays.
+
+        With `domain`, the sets a claim binds parameters to, a parameter an
+        `enforce_domain` guard judges against its domain also stays when
+        the guard lets through every member of the parameter's finite set
+        (`_guard_admits`): the guard reads each value and hands it on.
+        `missing` maps a parameter to the resolution its listed missing
+        values are realised with (`NO_ANNOTATION` for one not in it).
+        `structures_admit` says the same of every `enforce_structure`
+        guard: each is already shown to let through the value the call
+        passes, so the parameters it judges stay.
+
+    Notes:
+        `lru_cache` hashes each argument. The missing values a domain lists
+        are realised as `None`, a float nan and the scalar markers of the
+        array libraries, each of which hashes.
+    """
+    import functools
+    from .. import authoring
+    from .._instance_callable import hands_over_to_wrapped
+    left = frozenset(params)
+    for _ in range(16):
+        if type(fn) is types.MethodType:
+            fn = fn.__func__
+            continue
+        try:
+            inner = vars(fn).get("__wrapped__") if type(fn) is types.FunctionType \
+                else getattr(fn, "__wrapped__", None)
+        except Exception:
+            return frozenset()
+        if inner is None:
+            return left if type(fn) is types.FunctionType else frozenset()
+        if type(fn) is types.FunctionType:
+            reading = _guard_reading(fn)
+            if reading is not None:
+                if reading.covered is None:
+                    return frozenset()
+                if structures_admit and fn.__code__ is _guard_code(authoring.enforce_structure):
+                    fn = inner
+                    continue
+                admitted = frozenset(
+                    p for p in reading.judged_by_domain & left
+                    if domain is not None and p in domain
+                    and _guard_admits(reading.violation, p, domain[p],
+                                      (missing or {}).get(p)))
+                left -= reading.covered - admitted
+            elif not _passes_through(fn):
+                return frozenset()
+        elif type(fn) is not getattr(functools, "_lru_cache_wrapper", None) \
+                and type(fn) is not staticmethod and not hands_over_to_wrapped(fn):
+            return frozenset()
+        fn = inner
+    return frozenset()
+
+
+def structure_guards(fn) -> list:  # :draft
+    """Intent:
+        The structures each `enforce_structure` guard among the wrappers
+        `fn` links as `__wrapped__` judges, one `{parameter: properties}`
+        per guard, outermost first, each read from the guard's own closure
+        (`_guard_code`).
+    """
+    from .. import authoring
+    out: list = []
+    for _ in range(16):
+        if type(fn) is types.MethodType:
+            fn = fn.__func__
+            continue
+        if type(fn) is types.FunctionType and fn.__closure__ is not None \
+                and fn.__code__ is _guard_code(authoring.enforce_structure):
+            try:
+                declared = _cell(fn, "declared")
+            except (ValueError, IndexError):
+                declared = None
+            out.append(declared if type(declared) is dict else None)
+        try:
+            fn = getattr(fn, "__wrapped__", None)
+        except Exception:
+            fn = None
+        if fn is None:
+            break
+    return out
+
+
+def hashes_its_arguments(fn) -> bool:  # :draft
+    """Intent:
+        Whether something between the call of `fn` and the function's body
+        hashes the arguments: a `functools.lru_cache` wrapper among the
+        wrappers `fn` links as `__wrapped__`, which raises TypeError for an
+        argument that does not hash (a list). True as well when the
+        wrappers cannot be followed to the function.
+    """
+    import functools
+    cache = getattr(functools, "_lru_cache_wrapper", None)
+    for _ in range(16):
+        if type(fn) is cache:
+            return True
+        try:
+            inner = fn.__func__ if type(fn) is types.MethodType \
+                else getattr(fn, "__wrapped__", None)
+        except Exception:
+            return True
+        if inner is None:
+            return False
+        fn = inner
+    return True
+
+
+def _wrapper_name(fn) -> str:
+    """Intent:
+        The wrapper's own name and place: its code's qualified name, its
+        module's name and first line for a Python function, its type's
+        qualified name and module otherwise.
+    """
+    import types
+    if type(fn) is types.FunctionType:
+        code = fn.__code__
+        name = getattr(code, "co_qualname", code.co_name)
+        module = fn.__globals__.get("__name__") if isinstance(fn.__globals__, dict) else None
+        where = f"module {module} line" if isinstance(module, str) else "line"
+        return f"the function `{name}` ({where} {code.co_firstlineno})"  # :draft
+    cls = type(fn)
+    return f"an instance of `{cls.__qualname__}` (module {cls.__module__})"  # :draft
+
+
+def wrapper_refusal(fn) -> "str | None":
+    """Intent:
+        Why derive reads no body for `fn` when it is a wrapper a
+        decorator bound in place of the function its `def` compiled (it
+        links that function as `__wrapped__`, as `functools.wraps`
+        does), naming the wrapper; None when `fn` is the function
+        itself, or every wrapper down to it is one whose call is read
+        (`_wrapper_is_read`).
+    """
+    seen = 0
+    while seen < 16:
+        try:
+            inner = getattr(fn, "__wrapped__", None)
+        except Exception:
+            inner = None
+        if inner is None:
+            return None
+        if not _wrapper_is_read(fn):
+            # :draft
+            return (f"the object called is {_wrapper_name(fn)}, which links the "
+                    f"function as `__wrapped__`, and what it does around the call is "
+                    f"not read")
+        fn = inner
+        seen += 1
+    return "the function is wrapped more than 16 times over"  # :draft
+
+
+def innermost(fn):
+    """Intent:
+        The function under every wrapper `fn` links as `__wrapped__`.
+    """
+    seen = 0
+    while seen < 16:
+        try:
+            inner = getattr(fn, "__wrapped__", None)
+        except Exception:
+            inner = None
+        if inner is None:
+            return fn
+        fn = inner
+        seen += 1
+    return fn
 
 
 def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
@@ -1448,6 +2070,8 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
     callee-inlining chain; an external caller never sets it (a fresh
     registry is built automatically)."""
     if facts.tree is None or facts.loops or facts.branch_count or facts.recursion:
+        return None
+    if call_suspends(innermost(fn)) is not None or wrapper_refusal(fn) is not None:
         return None
     if not facts.params or any(k in SEQUENCE_KINDS for k in facts.param_kinds.values()):
         return None
@@ -1488,71 +2112,4 @@ def lift(fn, facts, max_callee_depth: int = 3, domain: dict | None = None,
                   latex=sympy.latex(display), opaque=opaque)
 
 
-
-class UnreadRaise:
-    """A `raise` whose exception could not be read as one named class:
-    `reason` says which expression stopped the reading."""
-
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-
-
-def _cannot_fail(node: ast.AST, bound) -> bool:
-    """Whether evaluating an exception's argument cannot itself raise:
-    a literal, a name that is bound on this path, `repr` or `str` of
-    such a name, or an f-string of literals and such names with no
-    format specification."""
-    if isinstance(node, ast.Constant):
-        return True
-    if isinstance(node, ast.Name):
-        return bound is not None and node.id in bound
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-            and node.func.id in ("repr", "str") and len(node.args) == 1 \
-            and not node.keywords and (bound is None or node.func.id not in bound):
-        return isinstance(node.args[0], ast.Name) and _cannot_fail(node.args[0], bound)
-    if isinstance(node, ast.JoinedStr):
-        return all(isinstance(part, ast.Constant)
-                   or (isinstance(part, ast.FormattedValue) and part.format_spec is None
-                       and isinstance(part.value, ast.Name)
-                       and _cannot_fail(part.value, bound))
-                   for part in node.values)
-    return False
-
-
-def read_raise(stmt: ast.Raise, bound=None) -> "str | UnreadRaise":
-    """Intent:
-        The name of the exception class a `raise` statement raises, or
-        an `UnreadRaise` saying why it is not read as raising one named
-        class. The statement is read as `raise E` only when `E` is a
-        bare name, there is no `from` clause other than `from None`,
-        and every argument is one whose evaluation cannot itself raise
-        (`_cannot_fail`): building the exception then cannot raise
-        something else first. `bound` is the set of names known to be
-        bound where the statement runs (the parameters and the names
-        assigned before it); with None no name is taken as bound.
-
-    Notes:
-        Whether the name `E` is the class a claim means is not decided
-        here: the statement holds a name, and `try_prove_raises` checks
-        what the function binds it to.
-    """
-    exc = stmt.exc
-    if exc is None:
-        return UnreadRaise("a bare `raise` re-raises whatever is being handled")
-    if stmt.cause is not None and not (isinstance(stmt.cause, ast.Constant)
-                                       and stmt.cause.value is None):
-        return UnreadRaise(f"the cause `{ast.unparse(stmt.cause)}` is evaluated before "
-                           f"the raise")
-    called = exc.func if isinstance(exc, ast.Call) else exc
-    if not isinstance(called, ast.Name):
-        return UnreadRaise(f"`{ast.unparse(called)}` is not a bare exception name")
-    if isinstance(exc, ast.Call):
-        for arg in [*exc.args, *(k.value for k in exc.keywords)]:
-            if not _cannot_fail(arg, bound):
-                return UnreadRaise(f"the exception's argument `{ast.unparse(arg)}` is "
-                                   f"evaluated before the raise and may itself raise")
-    return called.id
-
-
-def _exc_name(stmt: ast.Raise, bound=None) -> "str | UnreadRaise":
-    return read_raise(stmt, bound)
+from .._raise_reading import ReadRaise, UnreadRaise, read_raise_path  # noqa: E402,F401
