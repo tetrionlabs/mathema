@@ -214,3 +214,11 @@ def test_a_function_not_shown_pure_is_run_at_every_member_and_never_proven():
     twin = _row(ex.remember, f"for n in {_PATH}.SMALL, remember(n) <= 1")
     assert twin.verdict == "falsified"
     assert twin.counterexample == "n = 3 (member 2)"
+
+
+def test_a_none_inside_a_listed_member_is_part_of_the_member():
+    row = _row(ex.count_of, f"for item in {_PATH}.LABELLED, count_of(item) >= 1")
+    assert row.verdict == "proven", (row.verdict, row.note)
+    twin = _row(ex.count_of, f"for item in {_PATH}.LABELLED, count_of(item) >= 2")
+    assert twin.verdict == "falsified"
+    assert twin.counterexample == "item = Labelled(count=1, label=None) (member 0)"

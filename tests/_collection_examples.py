@@ -118,3 +118,19 @@ def remember(n: int) -> int:
     """`n`, kept in `SEEN`."""
     SEEN.append(n)
     return n
+
+
+@dataclass(frozen=True)
+class Labelled:
+    """A count with an optional label."""
+    count: int
+    label: "str | None"
+
+
+#: records, one of them without a label
+LABELLED = (Labelled(1, None), Labelled(2, "two"))
+
+
+def count_of(item: Labelled) -> int:
+    """The record's count."""
+    return item.count

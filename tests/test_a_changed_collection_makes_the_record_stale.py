@@ -6,6 +6,7 @@ position, name and hash, and verify lists the collection again and
 names what moved, a member added, removed or changed, or the members
 reordered. The claim's own text names only the path, so the claim is
 the same claim throughout."""
+import shutil
 import sys
 import textwrap
 
@@ -44,6 +45,9 @@ _STAGES = "STAGES = (percent_to_fraction, fraction_to_growth_factor)"
 
 
 def _project(root, module=_MODULE):
+    # a rewrite of the same size within a second would otherwise be read
+    # from the bytecode cached for the text before it
+    shutil.rmtree(root / "__pycache__", ignore_errors=True)
     (root / "cstale.py").write_text(module)
     (root / "claims").mkdir(exist_ok=True)
     (root / "claims" / "cstale.claims.yaml").write_text(textwrap.dedent("""

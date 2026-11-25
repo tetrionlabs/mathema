@@ -503,7 +503,7 @@ def _each_as_point(cj, name, members, fn, facts, domain):
         return validated.note or "the claim could not be read at a point"
     bound_funcs = _bound_funcs_of(validated.cj)
     deps = _point_evaluator(validated.cj, calling(fn, facts), facts,
-                            validated.cj_domain, bound_funcs)
+                            validated.cj_domain, bound_funcs, listed=frozenset({name}))
     if deps is None:
         return ("the claim cannot be evaluated at a point, so its members "  # :draft
                 "cannot each be judged")
